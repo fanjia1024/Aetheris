@@ -1,0 +1,63 @@
+# 模型配置
+model:
+  # LLM 模型配置
+  llm:
+    providers:
+      openai:
+        api_key: "${OPENAI_API_KEY}"
+        base_url: "https://api.openai.com/v1"
+        models:
+          gpt_35_turbo:
+            name: "gpt-3.5-turbo"
+            context_window: 4096
+            temperature: 0.1
+          gpt_4:
+            name: "gpt-4"
+            context_window: 8192
+            temperature: 0.1
+      claude:
+        api_key: "${ANTHROPIC_API_KEY}"
+        base_url: "https://api.anthropic.com/v1"
+        models:
+          claude_3_opus:
+            name: "claude-3-opus-20240229"
+            context_window: 200000
+            temperature: 0.1
+  
+  # Embedding 模型配置
+  embedding:
+    providers:
+      openai:
+        api_key: "${OPENAI_API_KEY}"
+        base_url: "https://api.openai.com/v1"
+        models:
+          text_embedding_ada_002:
+            name: "text-embedding-ada-002"
+            dimension: 1536
+            input_limit: 8191
+      cohere:
+        api_key: "${COHERE_API_KEY}"
+        base_url: "https://api.cohere.ai/v1"
+        models:
+          embed_english_v3:
+            name: "embed-english-v3.0"
+            dimension: 1024
+            input_limit: 512
+  
+  # Vision 模型配置（可选）
+  vision:
+    providers:
+      openai:
+        api_key: "${OPENAI_API_KEY}"
+        base_url: "https://api.openai.com/v1"
+        models:
+          gpt_4_vision:
+            name: "gpt-4-vision-preview"
+            max_tokens: 4096
+            temperature: 0.1
+
+# 默认模型选择
+defaults:
+  llm: "openai.gpt_35_turbo"
+  embedding: "openai.text_embedding_ada_002"
+  vision: "openai.gpt_4_vision"

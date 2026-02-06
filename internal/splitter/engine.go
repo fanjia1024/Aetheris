@@ -1,0 +1,107 @@
+package splitter
+
+import (
+	"fmt"
+
+	"rag-platform/internal/pipeline/common"
+)
+
+// Engine 切片引擎
+type Engine struct {
+	name      string
+	splitters map[string]Splitter
+}
+
+// Splitter 切片器接口
+type Splitter interface {
+	Split(content string, options map[string]interface{}) ([]common.Chunk, error)
+	Name() string
+}
+
+// NewEngine 创建新的切片引擎
+func NewEngine() *Engine {
+	engine := &Engine{
+		name:      "splitter_engine",
+		splitters: make(map[string]Splitter),
+	}
+
+	// 注册内置切片器
+	engine.registerSplitters()
+
+	return engine
+}
+
+// Name 返回引擎名称
+func (e *Engine) Name() string {
+	return e.name
+}
+
+// registerSplitters 注册切片器
+func (e *Engine) registerSplitters() {
+	// 注册结构切片器
+	e.splitters["structural"] = NewStructuralSplitter()
+	
+	// 注册语义切片器
+	e.splitters["semantic"] = NewSemanticSplitter()
+	
+	// 注册 Token 切片器
+	e.splitters["token"] = NewTokenSplitter()
+}
+
+// AddSplitter 添加自定义切片器
+func (e *Engine) AddSplitter(name string, splitter Splitter) {
+	e.splitters[name] = splitter
+}
+
+// GetSplitter 获取切片器
+func (e *Engine) GetSplitter(name string) (Splitter, error) {
+	splitter, exists := e.splitters[name]
+	if !exists {
+		return nil, fmt.Errorf("切片器不存在: %s", name)
+	}
+	return splitter, nil
+}
+
+// Split 执行切片
+func (e *Engine) Split(content string, splitterName string, options map[string]interface{}) ([]common.Chunk, error) {
+	// 获取切片器
+	splitter, err := e.GetSplitter(splitterName)
+	if err != nil {
+		return nil, err
+	}
+
+	// 执行切片
+	chunks, err := splitter.Split(content, options)
+	if err != nil {
+		return nil, fmt.Errorf("执行切片失败: %w", err)
+	}
+
+	return chunks, nil
+}
+
+// SplitDocument 切片文档
+func (e *Engine) SplitDocument(doc *common.Document, splitterName string, options map[string]interface{}) (*common.Document, error) {
+	// 执行切片
+	chunks, err := e.Split(doc.Content, splitterName, options)
+	if err != nil {
+		return nil, err
+	}
+
+	// 更新文档
+	doc.Chunks = chunks
+	doc.Metadata["chunked"] = true
+	doc.Metadata["chunk_count"] = len(chunks)
+	doc.Metadata["splitter"] = splitterName
+	doc.Metadata["splitter_options"] = options
+
+	return doc, nil
+}
+
+// GetSplitters 获取所有切片器
+func (e *Engine) GetSplitters() []string {
+	splitterNames := make([]string, 0, len(e.splitters))
+	for name := range e.splitters {
+		splitterNames = append(splitterNames, name)
+	}
+	return splitterNames
+}

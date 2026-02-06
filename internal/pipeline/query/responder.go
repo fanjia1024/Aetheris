@@ -1,0 +1,100 @@
+package query
+
+import (
+	"fmt"
+	"time"
+
+	"rag-platform/internal/pipeline/common"
+)
+
+// Responder 响应器
+type Responder struct {
+	name string
+}
+
+// NewResponder 创建新的响应器
+func NewResponder() *Responder {
+	return &Responder{
+		name: "responder",
+	}
+}
+
+// Name 返回组件名称
+func (r *Responder) Name() string {
+	return r.name
+}
+
+// Execute 执行响应操作
+func (r *Responder) Execute(ctx *common.PipelineContext, input interface{}) (interface{}, error) {
+	// 验证输入
+	if err := r.Validate(input); err != nil {
+		return nil, common.NewPipelineError(r.name, "输入验证失败", err)
+	}
+
+	// 生成响应
+	generationResult, ok := input.(*common.GenerationResult)
+	if !ok {
+		return nil, common.NewPipelineError(r.name, "输入类型错误", fmt.Errorf("expected *common.GenerationResult, got %T", input))
+	}
+
+	// 处理响应
+	response, err := r.buildResponse(generationResult)
+	if err != nil {
+		return nil, common.NewPipelineError(r.name, "构建响应失败", err)
+	}
+
+	return response, nil
+}
+
+// Validate 验证输入
+func (r *Responder) Validate(input interface{}) error {
+	if input == nil {
+		return common.ErrInvalidInput
+	}
+
+	if _, ok := input.(*common.GenerationResult); !ok {
+		return fmt.Errorf("不支持的输入类型: %T", input)
+	}
+
+	return nil
+}
+
+// ProcessQuery 处理查询
+func (r *Responder) ProcessQuery(query *common.Query) (*common.Query, error) {
+	// 这里可以添加查询后处理逻辑
+	return query, nil
+}
+
+// Response 响应结构体
+type Response struct {
+	Answer      string            `json:"answer"`
+	References  []string          `json:"references"`
+	Metadata    map[string]interface{} `json:"metadata"`
+	ProcessTime time.Duration     `json:"process_time"`
+	Timestamp   time.Time         `json:"timestamp"`
+}
+
+// buildResponse 构建响应
+func (r *Responder) buildResponse(result *common.GenerationResult) (*Response, error) {
+	if result == nil {
+		return nil, fmt.Errorf("生成结果为空")
+	}
+
+	// 构建元数据
+	metadata := map[string]interface{}{
+		"reference_count": len(result.References),
+		"generated_at":    time.Now(),
+		"responder":       r.name,
+	}
+
+	// 创建响应
+	response := &Response{
+		Answer:      result.Answer,
+		References:  result.References,
+		Metadata:    metadata,
+		ProcessTime: result.ProcessTime,
+		Timestamp:   time.Now(),
+	}
+
+	return response, nil
+}

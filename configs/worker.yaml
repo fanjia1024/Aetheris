@@ -1,0 +1,58 @@
+# Worker 服务配置
+worker:
+  concurrency: 4
+  queue_size: 1000
+  retry_count: 3
+  retry_delay: 1s
+  timeout: 5m
+
+# 存储配置
+storage:
+  metadata:
+    type: "mysql"
+    dsn: "user:pass@tcp(localhost:3306)/rag_db?parseTime=true"
+    pool_size: 10
+  vector:
+    type: "milvus"
+    addr: "localhost:19530"
+    db: "rag_db"
+    collection: "documents"
+  object:
+    type: "s3"
+    endpoint: "s3.amazonaws.com"
+    bucket: "rag-platform"
+    region: "us-east-1"
+  cache:
+    type: "redis"
+    addr: "localhost:6379"
+    db: 0
+    password: ""
+
+# 模型配置
+model:
+  embedding:
+    provider: "openai"
+    model: "text-embedding-ada-002"
+    dimension: 1536
+  llm:
+    provider: "openai"
+    model: "gpt-3.5-turbo"
+    temperature: 0.1
+
+# 切片配置
+splitter:
+  chunk_size: 1000
+  chunk_overlap: 100
+  max_chunks: 1000
+
+# 日志配置
+log:
+  level: "info"
+  format: "json"
+  file: "worker.log"
+
+# 监控配置
+monitoring:
+  prometheus:
+    enable: true
+    port: 9093

@@ -1,0 +1,194 @@
+package eino
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/compose"
+)
+
+// WorkflowConfig 工作流配置
+type WorkflowConfig struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// NodeConfig 节点配置
+type NodeConfig struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+}
+
+// CreateWorkflow 创建工作流
+func CreateWorkflow(name, description string) *Workflow {
+	return &Workflow{
+		name:        name,
+		description: description,
+		graph:       compose.NewGraph[*Input, *Output](),
+	}
+}
+
+// Workflow 工作流
+type Workflow struct {
+	name        string
+	description string
+	graph       *compose.Graph[*Input, *Output]
+}
+
+// Input 输入
+type Input struct {
+	Query string `json:"query"`
+}
+
+// Output 输出
+type Output struct {
+	Result string `json:"result"`
+}
+
+// AddNode 添加节点
+func (w *Workflow) AddNode(name, nodeType string, config *NodeConfig) error {
+	switch nodeType {
+	case "validate":
+		// 添加验证节点
+		w.graph.AddLambdaNode(name, func(ctx context.Context, input *Input) (*Output, error) {
+			if input.Query == "" {
+				return nil, fmt.Errorf("查询不能为空")
+			}
+			return &Output{Result: input.Query}, nil
+		})
+	case "generate":
+		// 添加生成节点
+		// 注意：这里需要传入具体的 chatModel 实例
+		// 示例：w.graph.AddChatModelNode(name, chatModel)
+		return fmt.Errorf("generate 节点需要 chatModel 实例")
+	case "format":
+		// 添加格式化节点
+		w.graph.AddLambdaNode(name, func(ctx context.Context, input *Input) (*Output, error) {
+			return &Output{Result: fmt.Sprintf("格式化结果: %s", input.Query)}, nil
+		})
+	default:
+		return fmt.Errorf("不支持的节点类型: %s", nodeType)
+	}
+
+	return nil
+}
+
+// AddEdge 添加边
+func (w *Workflow) AddEdge(from, to string) error {
+	w.graph.AddEdge(from, to)
+	return nil
+}
+
+// Compile 编译工作流
+func (w *Workflow) Compile(ctx context.Context) (compose.Runnable[*Input, *Output], error) {
+	return w.graph.Compile(ctx)
+}
+
+// Execute 执行工作流
+func (w *Workflow) Execute(ctx context.Context, input *Input) (*Output, error) {
+	runnable, err := w.Compile(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("编译工作流失败: %w", err)
+	}
+
+	return runnable.Invoke(ctx, input)
+}
+
+// CreateIngestWorkflow 创建入库工作流
+func CreateIngestWorkflow(ctx context.Context) (*Workflow, error) {
+	workflow := CreateWorkflow("ingest_workflow", "文档入库工作流")
+
+	// 添加节点
+	if err := workflow.AddNode("validate", "validate", &NodeConfig{
+		Name:        "validate",
+		Type:        "validate",
+		Description: "验证输入",
+	}); err != nil {
+		return nil, err
+	}
+
+	if err := workflow.AddNode("format", "format", &NodeConfig{
+		Name:        "format",
+		Type:        "format",
+		Description: "格式化输出",
+	}); err != nil {
+		return nil, err
+	}
+
+	// 添加边
+	if err := workflow.AddEdge(compose.START, "validate"); err != nil {
+		return nil, err
+	}
+
+	if err := workflow.AddEdge("validate", "format"); err != nil {
+		return nil, err
+	}
+
+	if err := workflow.AddEdge("format", compose.END); err != nil {
+		return nil, err
+	}
+
+	return workflow, nil
+}
+
+// CreateQueryWorkflow 创建查询工作流
+func CreateQueryWorkflow(ctx context.Context) (*Workflow, error) {
+	workflow := CreateWorkflow("query_workflow", "查询工作流")
+
+	// 添加节点
+	if err := workflow.AddNode("validate", "validate", &NodeConfig{
+		Name:        "validate",
+		Type:        "validate",
+		Description: "验证输入",
+	}); err != nil {
+		return nil, err
+	}
+
+	if err := workflow.AddNode("format", "format", &NodeConfig{
+		Name:        "format",
+		Type:        "format",
+		Description: "格式化输出",
+	}); err != nil {
+		return nil, err
+	}
+
+	// 添加边
+	if err := workflow.AddEdge(compose.START, "validate"); err != nil {
+		return nil, err
+	}
+
+	if err := workflow.AddEdge("validate", "format"); err != nil {
+		return nil, err
+	}
+
+	if err := workflow.AddEdge("format", compose.END); err != nil {
+		return nil, err
+	}
+
+	return workflow, nil
+}
+
+// CreateToolFromWorkflow 从工作流创建工具
+func CreateToolFromWorkflow(workflow *Workflow, toolName, toolDescription string) (tool.BaseTool, error) {
+	// 编译工作流
+	runnable, err := workflow.Compile(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("编译工作流失败: %w", err)
+	}
+
+	// 创建工具
+	return tool.NewBaseTool(
+		toolName,
+		toolDescription,
+		func(ctx context.Context, input string) (string, error) {
+			// 执行工作流
+			output, err := runnable.Invoke(ctx, &Input{Query: input})
+			if err != nil {
+				return "", err
+			}
+			return output.Result, nil
+		},
+	), nil
+}

@@ -1,0 +1,33 @@
+# API 服务配置
+api:
+  port: 8080
+  host: "0.0.0.0"
+  timeout: 30s
+  cors:
+    enable: true
+    allow_origins: ["*"]
+  middleware:
+    auth: false
+    rate_limit: true
+    rate_limit_rps: 100
+
+# 服务发现
+service:
+  agent_service:
+    addr: "localhost:9090"
+    timeout: 10s
+  index_service:
+    addr: "localhost:9091"
+    timeout: 30s
+
+# 日志配置
+log:
+  level: "info"
+  format: "json"
+  file: ""
+
+# 监控配置
+monitoring:
+  prometheus:
+    enable: true
+    port: 9092
