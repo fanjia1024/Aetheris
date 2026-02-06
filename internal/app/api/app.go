@@ -13,7 +13,10 @@ import (
 	"rag-platform/internal/api/http"
 	"rag-platform/internal/api/http/middleware"
 	"rag-platform/internal/app"
+	"rag-platform/internal/pipeline/ingest"
+	"rag-platform/internal/pipeline/query"
 	"rag-platform/internal/runtime/eino"
+	"rag-platform/internal/storage/vector"
 )
 
 // App API 应用（装配 HTTP Router、Handler、Middleware；仅依赖 Engine + DocumentService）
@@ -29,6 +32,39 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	engine, err := eino.NewEngine(bootstrap.Config, bootstrap.Logger)
 	if err != nil {
 		return nil, fmt.Errorf("初始化 eino 引擎失败: %w", err)
+	}
+
+	// 装配并注册 query_pipeline（Retriever + Generator + queryEmbedder）
+	if bootstrap.Config != nil && bootstrap.VectorStore != nil {
+		llmClient, errLLM := app.NewLLMClientFromConfig(bootstrap.Config)
+		queryEmbedder, errEmb := app.NewQueryEmbedderFromConfig(bootstrap.Config)
+		if errLLM == nil && errEmb == nil && llmClient != nil && queryEmbedder != nil {
+			retriever := query.NewRetriever(bootstrap.VectorStore, "default", 10, 0.3)
+			generator := query.NewGenerator(llmClient, 4096, 0.1)
+			qwf := eino.NewQueryWorkflowExecutor(retriever, generator, queryEmbedder, bootstrap.Logger)
+			if err := engine.RegisterWorkflow("query_pipeline", qwf); err != nil {
+				bootstrap.Logger.Info("注册 query_pipeline 失败，将使用占位实现", "error", err)
+			}
+		}
+	}
+
+	// 装配并注册 ingest_pipeline（loader → parser → splitter → embedding → indexer）
+	if bootstrap.Config != nil && bootstrap.VectorStore != nil && bootstrap.MetadataStore != nil {
+		ingestEmbedder, errEmb := app.NewQueryEmbedderFromConfig(bootstrap.Config)
+		if errEmb == nil && ingestEmbedder != nil {
+			docEmbedding := ingest.NewDocumentEmbedding(ingestEmbedder, 4)
+			docIndexer := ingest.NewDocumentIndexer(bootstrap.VectorStore, bootstrap.MetadataStore, 4, 100)
+			if err := vector.EnsureIndex(context.Background(), bootstrap.VectorStore, "default", ingestEmbedder.Dimension(), "cosine"); err != nil {
+				bootstrap.Logger.Info("创建 default 向量索引失败（首次写入时可能再创建）", "error", err)
+			}
+			loader := ingest.NewDocumentLoader()
+			parser := ingest.NewDocumentParser()
+			splitter := ingest.NewDocumentSplitter(1000, 100, 1000)
+			iwf := eino.NewIngestWorkflowExecutor(loader, parser, splitter, docEmbedding, docIndexer, bootstrap.Logger)
+			if err := engine.RegisterWorkflow("ingest_pipeline", iwf); err != nil {
+				bootstrap.Logger.Info("注册 ingest_pipeline 失败，将使用占位实现", "error", err)
+			}
+		}
 	}
 
 	docService := app.NewDocumentService(bootstrap.MetadataStore)

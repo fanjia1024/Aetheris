@@ -3,6 +3,7 @@ package eino
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"rag-platform/pkg/config"
@@ -84,35 +85,34 @@ func (e *Engine) registerDefaultAgents() error {
 
 // createQARunner 创建 QA Agent Runner
 func (e *Engine) createQARunner(ctx context.Context) (*adk.Runner, error) {
-	// 创建工具
 	tools := []tool.BaseTool{
 		CreateRetrieverTool(),
 		CreateGeneratorTool(),
 	}
 
-	// 创建 ChatModelAgent
-	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+	cfg := &adk.ChatModelAgentConfig{
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
 				Tools: tools,
 			},
 		},
-	})
+	}
+	if chatModel, err := e.createChatModel(ctx); err == nil && chatModel != nil {
+		cfg.Model = chatModel
+	}
+
+	agent, err := adk.NewChatModelAgent(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	// 创建 Runner
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{
+	return adk.NewRunner(ctx, adk.RunnerConfig{
 		Agent: agent,
-	})
-
-	return runner, nil
+	}), nil
 }
 
 // createIngestRunner 创建 Ingest Agent Runner
 func (e *Engine) createIngestRunner(ctx context.Context) (*adk.Runner, error) {
-	// 创建工具
 	tools := []tool.BaseTool{
 		CreateDocumentLoaderTool(),
 		CreateDocumentParserTool(),
@@ -121,49 +121,64 @@ func (e *Engine) createIngestRunner(ctx context.Context) (*adk.Runner, error) {
 		CreateIndexBuilderTool(),
 	}
 
-	// 创建 ChatModelAgent
-	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+	cfg := &adk.ChatModelAgentConfig{
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
 				Tools: tools,
 			},
 		},
-	})
+	}
+	if chatModel, err := e.createChatModel(ctx); err == nil && chatModel != nil {
+		cfg.Model = chatModel
+	}
+
+	agent, err := adk.NewChatModelAgent(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	// 创建 Runner
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{
+	return adk.NewRunner(ctx, adk.RunnerConfig{
 		Agent: agent,
-	})
-
-	return runner, nil
+	}), nil
 }
 
-// createChatModel 创建 OpenAI 模型
-func (e *Engine) createChatModel(ctx context.Context) (*openai.Model, error) {
-	// 从配置中获取模型配置
-	modelConfig := e.config.Model
-	llmConfig := modelConfig.LLM
-
-	// 获取默认提供商配置
-	defaultProvider := "openai"
-	providerConfig, exists := llmConfig.Providers[defaultProvider]
-	if !exists {
-		return nil, fmt.Errorf("未找到默认提供商配置: %s", defaultProvider)
+// createChatModel 创建 OpenAI ChatModel（根据 config.Model.Defaults.LLM 解析 provider.model_key）
+func (e *Engine) createChatModel(ctx context.Context) (*openai.ChatModel, error) {
+	if e.config == nil || e.config.Model.Defaults.LLM == "" {
+		return nil, nil
+	}
+	provider, modelKey, err := parseDefaultKey(e.config.Model.Defaults.LLM)
+	if err != nil {
+		return nil, err
+	}
+	pc, ok := e.config.Model.LLM.Providers[provider]
+	if !ok {
+		return nil, fmt.Errorf("LLM provider %q 未配置", provider)
+	}
+	mi, ok := pc.Models[modelKey]
+	if !ok {
+		return nil, fmt.Errorf("LLM model %q 未在 provider %q 中配置", modelKey, provider)
+	}
+	if pc.APIKey == "" {
+		return nil, fmt.Errorf("LLM provider %q 的 api_key 未配置", provider)
 	}
 
-	// 创建 OpenAI 模型
-	model, err := openai.NewModel(ctx, &openai.ModelConfig{
-		Model:  providerConfig.Models["default"].Name,
-		APIKey: providerConfig.APIKey,
+	chatModel, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
+		Model:  mi.Name,
+		APIKey: pc.APIKey,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("创建 OpenAI 模型失败: %w", err)
+		return nil, fmt.Errorf("创建 OpenAI ChatModel 失败: %w", err)
 	}
+	return chatModel, nil
+}
 
-	return model, nil
+func parseDefaultKey(key string) (provider, modelKey string, err error) {
+	parts := strings.SplitN(key, ".", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("default key 格式应为 provider.model_key，如 openai.gpt_35_turbo，当前: %q", key)
+	}
+	return parts[0], parts[1], nil
 }
 
 // GetRunner 获取 Runner 实例
@@ -194,19 +209,15 @@ func (e *Engine) RegisterRunner(name string, runner *adk.Runner) error {
 }
 
 // Execute 执行任务
-func (e *Engine) Execute(ctx context.Context, agentID string, query string) (chan adk.Event, error) {
+func (e *Engine) Execute(ctx context.Context, agentID string, query string) (chan *adk.AgentEvent, error) {
 	runner, err := e.GetRunner(agentID)
 	if err != nil {
 		return nil, err
 	}
 
-	// 执行查询
 	iter := runner.Query(ctx, query)
+	eventCh := make(chan *adk.AgentEvent)
 
-	// 创建事件通道
-	eventCh := make(chan adk.Event)
-
-	// 启动 goroutine 处理事件
 	go func() {
 		defer close(eventCh)
 		for {

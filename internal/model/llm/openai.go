@@ -2,9 +2,10 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
+	"os"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -26,7 +27,7 @@ func NewOpenAIClient(model, apiKey string) (*OpenAIClient, error) {
 	}
 
 	baseURL := "https://api.openai.com/v1"
-	if envURL := getEnv("OPENAI_BASE_URL"); envURL != "" {
+	if envURL := os.Getenv("OPENAI_BASE_URL"); envURL != "" {
 		baseURL = envURL
 	}
 
@@ -88,7 +89,7 @@ func (c *OpenAIClient) GenerateWithContext(ctx context.Context, prompt string, o
 		} `json:"choices"`
 	}
 
-	if err := response.Unmarshal(&result); err != nil {
+	if err := json.Unmarshal(response.Body(), &result); err != nil {
 		return "", fmt.Errorf("解析 OpenAI 响应失败: %w", err)
 	}
 
@@ -151,7 +152,7 @@ func (c *OpenAIClient) ChatWithContext(ctx context.Context, messages []Message, 
 		} `json:"choices"`
 	}
 
-	if err := response.Unmarshal(&result); err != nil {
+	if err := json.Unmarshal(response.Body(), &result); err != nil {
 		return "", fmt.Errorf("解析 OpenAI 响应失败: %w", err)
 	}
 
@@ -180,9 +181,4 @@ func (c *OpenAIClient) SetModel(model string) {
 // SetAPIKey 设置 API Key
 func (c *OpenAIClient) SetAPIKey(apiKey string) {
 	c.apiKey = apiKey
-}
-
-// getEnv 获取环境变量
-func getEnv(key string) string {
-	return ""
 }

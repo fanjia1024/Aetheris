@@ -12,13 +12,13 @@ import (
 // Generator 生成器
 type Generator struct {
 	name           string
-	llmClient      *llm.Client
+	llmClient      llm.Client
 	maxContextSize int
 	temperature    float64
 }
 
 // NewGenerator 创建新的生成器
-func NewGenerator(llmClient *llm.Client, maxContextSize int, temperature float64) *Generator {
+func NewGenerator(llmClient llm.Client, maxContextSize int, temperature float64) *Generator {
 	if maxContextSize <= 0 {
 		maxContextSize = 4096
 	}
@@ -175,12 +175,12 @@ func (g *Generator) extractReferences(result *common.RetrievalResult) []string {
 }
 
 // SetLLMClient 设置 LLM 客户端
-func (g *Generator) SetLLMClient(client *llm.Client) {
+func (g *Generator) SetLLMClient(client llm.Client) {
 	g.llmClient = client
 }
 
 // GetLLMClient 获取 LLM 客户端
-func (g *Generator) GetLLMClient() *llm.Client {
+func (g *Generator) GetLLMClient() llm.Client {
 	return g.llmClient
 }
 

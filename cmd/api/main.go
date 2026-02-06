@@ -16,7 +16,7 @@ import (
 )
 
 func main() {
-	cfg, err := config.LoadAPIConfig()
+	cfg, err := config.LoadAPIConfigWithModel()
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}

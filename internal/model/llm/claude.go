@@ -2,17 +2,14 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/go-resty/resty/v2"
 )
-
-// getEnv 获取环境变量
-func getEnv(key string) string {
-	return ""
-}
 
 // ClaudeClient Claude 客户端
 type ClaudeClient struct {
@@ -30,7 +27,7 @@ func NewClaudeClient(model, apiKey string) (*ClaudeClient, error) {
 	}
 
 	baseURL := "https://api.anthropic.com/v1"
-	if envURL := getEnv("ANTHROPIC_BASE_URL"); envURL != "" {
+	if envURL := os.Getenv("ANTHROPIC_BASE_URL"); envURL != "" {
 		baseURL = envURL
 	}
 
@@ -90,7 +87,7 @@ func (c *ClaudeClient) GenerateWithContext(ctx context.Context, prompt string, o
 		} `json:"content"`
 	}
 
-	if err := response.Unmarshal(&result); err != nil {
+	if err := json.Unmarshal(response.Body(), &result); err != nil {
 		return "", fmt.Errorf("解析 Claude 响应失败: %w", err)
 	}
 
@@ -151,7 +148,7 @@ func (c *ClaudeClient) ChatWithContext(ctx context.Context, messages []Message, 
 		} `json:"content"`
 	}
 
-	if err := response.Unmarshal(&result); err != nil {
+	if err := json.Unmarshal(response.Body(), &result); err != nil {
 		return "", fmt.Errorf("解析 Claude 响应失败: %w", err)
 	}
 

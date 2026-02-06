@@ -34,19 +34,15 @@ func (cm *ContextManager) GetRunner(name string) (*adk.Runner, error) {
 }
 
 // ExecuteQuery 执行查询
-func (cm *ContextManager) ExecuteQuery(ctx context.Context, runnerName, query string) (chan adk.Event, error) {
-	runner, err := cm.GetRunner(runnerName)
+func (cm *ContextManager) ExecuteQuery(ctx context.Context, runnerName, query string) (chan *adk.AgentEvent, error) {
+	r, err := cm.GetRunner(runnerName)
 	if err != nil {
 		return nil, err
 	}
 
-	// 执行查询
-	iter := runner.Query(ctx, query)
+	iter := r.Query(ctx, query)
+	eventCh := make(chan *adk.AgentEvent)
 
-	// 创建事件通道
-	eventCh := make(chan adk.Event)
-
-	// 启动 goroutine 处理事件
 	go func() {
 		defer close(eventCh)
 		for {
@@ -63,12 +59,10 @@ func (cm *ContextManager) ExecuteQuery(ctx context.Context, runnerName, query st
 
 // ExecuteTool 执行工具
 func (cm *ContextManager) ExecuteTool(ctx context.Context, runnerName, toolName, input string) (string, error) {
-	runner, err := cm.GetRunner(runnerName)
+	_, err := cm.GetRunner(runnerName)
 	if err != nil {
 		return "", err
 	}
-
-	// 这里可以通过 Agent 执行工具
-	// 暂时返回模拟结果
+	// 这里可以通过 Agent 执行工具；暂时返回模拟结果
 	return fmt.Sprintf("工具 %s 执行结果: %s", toolName, input), nil
 }

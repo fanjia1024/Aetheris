@@ -2,8 +2,10 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -25,7 +27,7 @@ func NewGeminiClient(model, apiKey string) (*GeminiClient, error) {
 	}
 
 	baseURL := "https://generativelanguage.googleapis.com/v1"
-	if envURL := getEnv("GEMINI_BASE_URL"); envURL != "" {
+	if envURL := os.Getenv("GEMINI_BASE_URL"); envURL != "" {
 		baseURL = envURL
 	}
 
@@ -91,7 +93,7 @@ func (c *GeminiClient) GenerateWithContext(ctx context.Context, prompt string, o
 		} `json:"candidates"`
 	}
 
-	if err := response.Unmarshal(&result); err != nil {
+	if err := json.Unmarshal(response.Body(), &result); err != nil {
 		return "", fmt.Errorf("解析 Gemini 响应失败: %w", err)
 	}
 
@@ -160,7 +162,7 @@ func (c *GeminiClient) ChatWithContext(ctx context.Context, messages []Message, 
 		} `json:"candidates"`
 	}
 
-	if err := response.Unmarshal(&result); err != nil {
+	if err := json.Unmarshal(response.Body(), &result); err != nil {
 		return "", fmt.Errorf("解析 Gemini 响应失败: %w", err)
 	}
 

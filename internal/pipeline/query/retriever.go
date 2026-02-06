@@ -1,33 +1,40 @@
 package query
 
 import (
+	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"rag-platform/internal/pipeline/common"
 	"rag-platform/internal/storage/vector"
 )
 
-// Retriever 检索器
+// Retriever 检索器（使用 vector.Store.Search 适配，不依赖 Retrieve 接口）
 type Retriever struct {
 	name           string
-	vectorStore    *vector.Store
+	vectorStore    vector.Store
+	indexName      string
 	topK           int
 	scoreThreshold float64
 }
 
 // NewRetriever 创建新的检索器
-func NewRetriever(vectorStore *vector.Store, topK int, scoreThreshold float64) *Retriever {
+func NewRetriever(vectorStore vector.Store, indexName string, topK int, scoreThreshold float64) *Retriever {
 	if topK <= 0 {
 		topK = 10
 	}
 	if scoreThreshold <= 0 {
 		scoreThreshold = 0.3
 	}
+	if indexName == "" {
+		indexName = "default"
+	}
 
 	return &Retriever{
 		name:           "retriever",
 		vectorStore:    vectorStore,
+		indexName:      indexName,
 		topK:           topK,
 		scoreThreshold: scoreThreshold,
 	}
@@ -84,72 +91,97 @@ func (r *Retriever) ProcessQuery(query *common.Query) (*common.RetrievalResult, 
 		return nil, common.NewPipelineError(r.name, "查询未向量化", fmt.Errorf("query has no embedding"))
 	}
 
-	// 执行检索
-	startTime := time.Now()
 	results, err := r.retrieve(query)
 	if err != nil {
 		return nil, common.NewPipelineError(r.name, "执行检索失败", err)
 	}
-
-	// 计算处理时间
-	processTime := time.Since(startTime)
-
 	return results, nil
 }
 
-// retrieve 执行检索
+// retrieve 执行检索（使用 Store.Search 适配）
 func (r *Retriever) retrieve(query *common.Query) (*common.RetrievalResult, error) {
-	// 构建检索请求
-	retrievalReq := vector.RetrievalRequest{
-		Query:          query.Text,
-		Embedding:      query.Embedding,
-		TopK:           r.topK,
-		ScoreThreshold: r.scoreThreshold,
-		Filters:        query.Metadata,
+	ctx := context.Background()
+	opts := &vector.SearchOptions{
+		TopK:      r.topK,
+		Threshold: r.scoreThreshold,
+	}
+	if query.Metadata != nil {
+		opts.Filter = make(map[string]string)
+		for k, v := range query.Metadata {
+			if s, ok := v.(string); ok {
+				opts.Filter[k] = s
+			}
+		}
 	}
 
-	// 从向量存储检索
-	vectorResults, err := r.vectorStore.Retrieve(retrievalReq)
+	searchResults, err := r.vectorStore.Search(ctx, r.indexName, query.Embedding, opts)
 	if err != nil {
 		return nil, fmt.Errorf("从向量存储检索失败: %w", err)
 	}
 
-	// 转换为检索结果
-	chunks := make([]common.Chunk, len(vectorResults.Matches))
-	scores := make([]float64, len(vectorResults.Matches))
+	startTime := time.Now()
+	chunks := make([]common.Chunk, len(searchResults))
+	scores := make([]float64, len(searchResults))
 
-	for i, match := range vectorResults.Matches {
-		chunks[i] = common.Chunk{
-			ID:          match.ID,
-			Content:     match.Content,
-			Metadata:    match.Metadata,
-			Embedding:   match.Embedding,
-			DocumentID:  match.DocumentID,
-			Index:       match.Index,
-			TokenCount:  match.TokenCount,
+	for i, sr := range searchResults {
+		meta := make(map[string]interface{})
+		if sr.Metadata != nil {
+			for k, v := range sr.Metadata {
+				meta[k] = v
+			}
 		}
-		scores[i] = match.Score
+		content := ""
+		if sr.Metadata != nil {
+			content = sr.Metadata["content"]
+		}
+		docID := ""
+		if sr.Metadata != nil {
+			docID = sr.Metadata["document_id"]
+		}
+		idx := 0
+		if sr.Metadata != nil && sr.Metadata["index"] != "" {
+			idx, _ = strconv.Atoi(sr.Metadata["index"])
+		}
+		tokenCount := 0
+		if sr.Metadata != nil && sr.Metadata["token_count"] != "" {
+			tokenCount, _ = strconv.Atoi(sr.Metadata["token_count"])
+		}
+
+		chunks[i] = common.Chunk{
+			ID:         sr.ID,
+			Content:    content,
+			Metadata:   meta,
+			Embedding:  sr.Values,
+			DocumentID: docID,
+			Index:      idx,
+			TokenCount: tokenCount,
+		}
+		scores[i] = sr.Score
 	}
 
-	// 创建检索结果
-	result := &common.RetrievalResult{
+	return &common.RetrievalResult{
 		Chunks:      chunks,
 		Scores:      scores,
 		TotalCount:  len(chunks),
-		ProcessTime: vectorResults.ProcessTime,
-	}
-
-	return result, nil
+		ProcessTime: time.Since(startTime),
+	}, nil
 }
 
 // SetVectorStore 设置向量存储
-func (r *Retriever) SetVectorStore(store *vector.Store) {
+func (r *Retriever) SetVectorStore(store vector.Store) {
 	r.vectorStore = store
 }
 
 // GetVectorStore 获取向量存储
-func (r *Retriever) GetVectorStore() *vector.Store {
+func (r *Retriever) GetVectorStore() vector.Store {
 	return r.vectorStore
+}
+
+// SetIndexName 设置检索使用的索引名
+func (r *Retriever) SetIndexName(name string) {
+	if name != "" {
+		r.indexName = name
+	}
 }
 
 // SetTopK 设置返回结果数量

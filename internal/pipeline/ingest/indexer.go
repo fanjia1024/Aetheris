@@ -3,6 +3,7 @@ package ingest
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"rag-platform/internal/pipeline/common"
@@ -182,9 +183,12 @@ func (i *DocumentIndexer) indexBatch(chunks []common.Chunk, documentID string) e
 	}
 	indexName := "default"
 	vecs := make([]*vector.Vector, 0, len(chunks))
-	for _, chunk := range chunks {
+	for idx, chunk := range chunks {
 		meta := make(map[string]string)
 		meta["document_id"] = documentID
+		meta["content"] = chunk.Content
+		meta["index"] = strconv.Itoa(idx)
+		meta["token_count"] = strconv.Itoa(chunk.TokenCount)
 		vecs = append(vecs, &vector.Vector{
 			ID:       chunk.ID,
 			Values:   chunk.Embedding,

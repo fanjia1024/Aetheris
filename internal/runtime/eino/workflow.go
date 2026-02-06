@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/compose"
 )
 
@@ -51,23 +52,18 @@ type Output struct {
 func (w *Workflow) AddNode(name, nodeType string, config *NodeConfig) error {
 	switch nodeType {
 	case "validate":
-		// 添加验证节点
-		w.graph.AddLambdaNode(name, func(ctx context.Context, input *Input) (*Output, error) {
+		w.graph.AddLambdaNode(name, compose.InvokableLambda(func(ctx context.Context, input *Input) (*Output, error) {
 			if input.Query == "" {
 				return nil, fmt.Errorf("查询不能为空")
 			}
 			return &Output{Result: input.Query}, nil
-		})
+		}))
 	case "generate":
-		// 添加生成节点
-		// 注意：这里需要传入具体的 chatModel 实例
-		// 示例：w.graph.AddChatModelNode(name, chatModel)
 		return fmt.Errorf("generate 节点需要 chatModel 实例")
 	case "format":
-		// 添加格式化节点
-		w.graph.AddLambdaNode(name, func(ctx context.Context, input *Input) (*Output, error) {
+		w.graph.AddLambdaNode(name, compose.InvokableLambda(func(ctx context.Context, input *Input) (*Output, error) {
 			return &Output{Result: fmt.Sprintf("格式化结果: %s", input.Query)}, nil
-		})
+		}))
 	default:
 		return fmt.Errorf("不支持的节点类型: %s", nodeType)
 	}
@@ -172,23 +168,16 @@ func CreateQueryWorkflow(ctx context.Context) (*Workflow, error) {
 
 // CreateToolFromWorkflow 从工作流创建工具
 func CreateToolFromWorkflow(workflow *Workflow, toolName, toolDescription string) (tool.BaseTool, error) {
-	// 编译工作流
 	runnable, err := workflow.Compile(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("编译工作流失败: %w", err)
 	}
 
-	// 创建工具
-	return tool.NewBaseTool(
-		toolName,
-		toolDescription,
-		func(ctx context.Context, input string) (string, error) {
-			// 执行工作流
-			output, err := runnable.Invoke(ctx, &Input{Query: input})
-			if err != nil {
-				return "", err
-			}
-			return output.Result, nil
-		},
-	), nil
+	return utils.InferTool(toolName, toolDescription, func(ctx context.Context, input string) (string, error) {
+		output, err := runnable.Invoke(ctx, &Input{Query: input})
+		if err != nil {
+			return "", err
+		}
+		return output.Result, nil
+	})
 }

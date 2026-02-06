@@ -16,8 +16,8 @@ type App struct {
 	config        *config.Config
 	logger        *log.Logger
 	engine        *eino.Engine
-	metadataStore *metadata.Store
-	vectorStore   *vector.Store
+	metadataStore metadata.Store
+	vectorStore   vector.Store
 	shutdown      chan struct{}
 }
 

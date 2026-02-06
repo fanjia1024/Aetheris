@@ -212,9 +212,22 @@ func replaceEnvVars(config *Config) error {
 	return nil
 }
 
-// LoadAPIConfig 加载 API 配置
+// LoadAPIConfig 加载 API 配置（仅 configs/api.yaml）
 func LoadAPIConfig() (*Config, error) {
 	return LoadConfig("configs/api.yaml")
+}
+
+// LoadAPIConfigWithModel 加载 API 配置并合并 model 配置，便于 API 使用 LLM/Embedding；storage 仍来自 api.yaml（缺省为 memory）
+func LoadAPIConfigWithModel() (*Config, error) {
+	cfg, err := LoadConfig("configs/api.yaml")
+	if err != nil {
+		return nil, err
+	}
+	modelCfg, err := LoadConfig("configs/model.yaml")
+	if err == nil {
+		cfg.Model = modelCfg.Model
+	}
+	return cfg, nil
 }
 
 // LoadWorkerConfig 加载 Worker 配置

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/components/tool/utils"
 )
 
 // ToolConfig 工具配置
@@ -14,93 +15,49 @@ type ToolConfig struct {
 	Parameters  map[string]string `json:"parameters"`
 }
 
-// CreateTool 创建工具实例
-func CreateTool(name, description string, executeFunc tool.ExecuteFunc) tool.BaseTool {
-	return tool.NewBaseTool(name, description, executeFunc)
+func createPlaceholderTool(name, desc string) tool.BaseTool {
+	t, err := utils.InferTool(name, desc, func(ctx context.Context, input string) (string, error) {
+		return fmt.Sprintf("%s 结果: %s", name, input), nil
+	})
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
-// CreateRetrieverTool 创建检索工具
+// CreateRetrieverTool 创建检索工具（占位）
 func CreateRetrieverTool() tool.BaseTool {
-	return CreateTool(
-		"retriever",
-		"检索相关文档",
-		func(ctx context.Context, input string) (string, error) {
-			// 实现检索逻辑
-			return fmt.Sprintf("检索结果: %s", input), nil
-		},
-	)
+	return createPlaceholderTool("retriever", "检索相关文档")
 }
 
-// CreateGeneratorTool 创建生成工具
+// CreateGeneratorTool 创建生成工具（占位）
 func CreateGeneratorTool() tool.BaseTool {
-	return CreateTool(
-		"generator",
-		"生成回答",
-		func(ctx context.Context, input string) (string, error) {
-			// 实现生成逻辑
-			return fmt.Sprintf("生成结果: %s", input), nil
-		},
-	)
+	return createPlaceholderTool("generator", "生成回答")
 }
 
-// CreateDocumentLoaderTool 创建文档加载工具
+// CreateDocumentLoaderTool 创建文档加载工具（占位）
 func CreateDocumentLoaderTool() tool.BaseTool {
-	return CreateTool(
-		"document_loader",
-		"加载文档",
-		func(ctx context.Context, input string) (string, error) {
-			// 实现文档加载逻辑
-			return fmt.Sprintf("文档加载结果: %s", input), nil
-		},
-	)
+	return createPlaceholderTool("document_loader", "加载文档")
 }
 
-// CreateDocumentParserTool 创建文档解析工具
+// CreateDocumentParserTool 创建文档解析工具（占位）
 func CreateDocumentParserTool() tool.BaseTool {
-	return CreateTool(
-		"document_parser",
-		"解析文档",
-		func(ctx context.Context, input string) (string, error) {
-			// 实现文档解析逻辑
-			return fmt.Sprintf("文档解析结果: %s", input), nil
-		},
-	)
+	return createPlaceholderTool("document_parser", "解析文档")
 }
 
-// CreateSplitterTool 创建文档切片工具
+// CreateSplitterTool 创建文档切片工具（占位）
 func CreateSplitterTool() tool.BaseTool {
-	return CreateTool(
-		"splitter",
-		"文档切片",
-		func(ctx context.Context, input string) (string, error) {
-			// 实现文档切片逻辑
-			return fmt.Sprintf("文档切片结果: %s", input), nil
-		},
-	)
+	return createPlaceholderTool("splitter", "文档切片")
 }
 
-// CreateEmbeddingTool 创建文本向量化工具
+// CreateEmbeddingTool 创建文本向量化工具（占位）
 func CreateEmbeddingTool() tool.BaseTool {
-	return CreateTool(
-		"embedding",
-		"文本向量化",
-		func(ctx context.Context, input string) (string, error) {
-			// 实现文本向量化逻辑
-			return fmt.Sprintf("文本向量化结果: %s", input), nil
-		},
-	)
+	return createPlaceholderTool("embedding", "文本向量化")
 }
 
-// CreateIndexBuilderTool 创建索引构建工具
+// CreateIndexBuilderTool 创建索引构建工具（占位）
 func CreateIndexBuilderTool() tool.BaseTool {
-	return CreateTool(
-		"index_builder",
-		"构建索引",
-		func(ctx context.Context, input string) (string, error) {
-			// 实现索引构建逻辑
-			return fmt.Sprintf("索引构建结果: %s", input), nil
-		},
-	)
+	return createPlaceholderTool("index_builder", "构建索引")
 }
 
 // GetDefaultTools 获取默认工具列表
