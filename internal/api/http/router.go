@@ -1,82 +1,61 @@
 package http
 
 import (
-	"github.com/gin-gonic/gin"
+	"github.com/cloudwego/hertz/pkg/app/server"
 	"rag-platform/internal/api/http/middleware"
 )
 
-// Router HTTP 路由器
+// Router HTTP 路由器（Hertz）
 type Router struct {
-	engine      *gin.Engine
-	handler     *Handler
-	middleware  *middleware.Middleware
+	handler    *Handler
+	middleware *middleware.Middleware
 }
 
 // NewRouter 创建新的 HTTP 路由器
-func NewRouter(handler *Handler, middleware *middleware.Middleware) *Router {
-	// 设置 Gin 模式
-	gin.SetMode(gin.ReleaseMode)
-
-	// 创建引擎
-	engine := gin.New()
-
-	// 使用中间件
-	engine.Use(gin.Logger())
-	engine.Use(gin.Recovery())
-
+func NewRouter(handler *Handler, mw *middleware.Middleware) *Router {
 	return &Router{
-		engine:     engine,
 		handler:    handler,
-		middleware: middleware,
+		middleware: mw,
 	}
 }
 
-// SetupRoutes 设置路由
-func (r *Router) SetupRoutes() {
-	// API 路由组
-	api := r.engine.Group("/api")
+// Build 创建 Hertz 引擎并注册路由与中间件，供 app 层 Run(addr) 使用
+func (r *Router) Build(addr string) *server.Hertz {
+	h := server.Default(server.WithHostPorts(addr))
 
-	// 健康检查
+	// 全局中间件：访问日志、CORS
+	h.Use(r.middleware.AccessLog())
+	h.Use(r.middleware.CORS())
+
+	api := h.Group("/api")
 	api.GET("/health", r.handler.HealthCheck)
 
-	// 文档管理
 	documents := api.Group("/documents")
 	{
-		documents.POST("/upload", r.middleware.CORS(), r.handler.UploadDocument)
-		documents.GET("/", r.middleware.CORS(), r.handler.ListDocuments)
-		documents.GET("/:id", r.middleware.CORS(), r.handler.GetDocument)
-		documents.DELETE("/:id", r.middleware.CORS(), r.handler.DeleteDocument)
+		documents.POST("/upload", r.middleware.Auth(), r.handler.UploadDocument)
+		documents.GET("/", r.middleware.Auth(), r.handler.ListDocuments)
+		documents.GET("/:id", r.middleware.Auth(), r.handler.GetDocument)
+		documents.DELETE("/:id", r.middleware.Auth(), r.handler.DeleteDocument)
 	}
 
-	// 知识库管理
 	knowledge := api.Group("/knowledge")
 	{
-		knowledge.GET("/collections", r.middleware.CORS(), r.handler.ListCollections)
-		knowledge.POST("/collections", r.middleware.CORS(), r.handler.CreateCollection)
-		knowledge.DELETE("/collections/:id", r.middleware.CORS(), r.handler.DeleteCollection)
+		knowledge.GET("/collections", r.middleware.Auth(), r.handler.ListCollections)
+		knowledge.POST("/collections", r.middleware.Auth(), r.handler.CreateCollection)
+		knowledge.DELETE("/collections/:id", r.middleware.Auth(), r.handler.DeleteCollection)
 	}
 
-	// 查询 API
 	query := api.Group("/query")
 	{
-		query.POST("/", r.middleware.CORS(), r.handler.Query)
-		query.POST("/batch", r.middleware.CORS(), r.handler.BatchQuery)
+		query.POST("/", r.middleware.Auth(), r.handler.Query)
+		query.POST("/batch", r.middleware.Auth(), r.handler.BatchQuery)
 	}
 
-	// 系统管理
 	system := api.Group("/system")
 	{
-		system.GET("/status", r.middleware.CORS(), r.handler.SystemStatus)
-		system.GET("/metrics", r.middleware.CORS(), r.handler.SystemMetrics)
+		system.GET("/status", r.middleware.Auth(), r.handler.SystemStatus)
+		system.GET("/metrics", r.middleware.Auth(), r.handler.SystemMetrics)
 	}
-}
 
-// Engine 获取 Gin 引擎
-func (r *Router) Engine() *gin.Engine {
-	return r.engine
-}
-
-// Run 启动 HTTP 服务
-func (r *Router) Run(addr string) error {
-	return r.engine.Run(addr)
+	return h
 }

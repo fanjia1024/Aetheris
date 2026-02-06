@@ -1,0 +1,7 @@
+# 占位 docker-compose（设计 struct.md 5）
+# 后续可添加 api、worker、redis 等服务
+version: "3.8"
+services:
+  placeholder:
+    image: alpine:3.18
+    command: ["echo", "replace with real services"]

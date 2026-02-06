@@ -181,27 +181,30 @@ func replaceEnvVars(config *Config) error {
 	// 替换模型 API Key
 	for provider, providerConfig := range config.Model.LLM.Providers {
 		if strings.HasPrefix(providerConfig.APIKey, "$") {
-			envVar := strings.TrimPrefix(strings.TrimSuffix(providerConfig.APIKey, "}"), "${"))
+			envVar := strings.TrimPrefix(strings.TrimSuffix(providerConfig.APIKey, "}"), "${")
 			if val := os.Getenv(envVar); val != "" {
-				config.Model.LLM.Providers[provider].APIKey = val
+				providerConfig.APIKey = val
+				config.Model.LLM.Providers[provider] = providerConfig
 			}
 		}
 	}
 
 	for provider, providerConfig := range config.Model.Embedding.Providers {
 		if strings.HasPrefix(providerConfig.APIKey, "$") {
-			envVar := strings.TrimPrefix(strings.TrimSuffix(providerConfig.APIKey, "}"), "${"))
+			envVar := strings.TrimPrefix(strings.TrimSuffix(providerConfig.APIKey, "}"), "${")
 			if val := os.Getenv(envVar); val != "" {
-				config.Model.Embedding.Providers[provider].APIKey = val
+				providerConfig.APIKey = val
+				config.Model.Embedding.Providers[provider] = providerConfig
 			}
 		}
 	}
 
 	for provider, providerConfig := range config.Model.Vision.Providers {
 		if strings.HasPrefix(providerConfig.APIKey, "$") {
-			envVar := strings.TrimPrefix(strings.TrimSuffix(providerConfig.APIKey, "}"), "${"))
+			envVar := strings.TrimPrefix(strings.TrimSuffix(providerConfig.APIKey, "}"), "${")
 			if val := os.Getenv(envVar); val != "" {
-				config.Model.Vision.Providers[provider].APIKey = val
+				providerConfig.APIKey = val
+				config.Model.Vision.Providers[provider] = providerConfig
 			}
 		}
 	}

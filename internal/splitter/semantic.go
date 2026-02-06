@@ -83,7 +83,7 @@ func (s *SemanticSplitter) mergeBySemantics(sentences []string, chunkSize, chunk
 	var currentChunk strings.Builder
 	var chunkIndex int
 
-	for i, sentence := range sentences {
+	for _, sentence := range sentences {
 		// 检查添加当前句子后是否超过 chunkSize
 		if currentChunk.Len()+len(sentence)+1 > chunkSize {
 			// 保存当前 chunk

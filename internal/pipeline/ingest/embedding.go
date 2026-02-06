@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -116,16 +117,15 @@ func (e *DocumentEmbedding) embedChunks(doc *common.Document) error {
 			defer wg.Done()
 			for idx := range chunkChan {
 				chunk := &chunks[idx]
-				
-				// 向量化
-				embedding, err := e.embedder.Embed(chunk.Content)
+				// 向量化：Embed(ctx, []string) ([][]float64, error)
+				vecs, err := e.embedder.Embed(context.Background(), []string{chunk.Content})
 				if err != nil {
 					errChan <- fmt.Errorf("向量化切片 %d 失败: %w", idx, err)
 					return
 				}
-				
-				// 更新切片
-				chunk.Embedding = embedding
+				if len(vecs) > 0 {
+					chunk.Embedding = vecs[0]
+				}
 				chunk.Metadata["embedded"] = true
 			}
 			}()
@@ -156,13 +156,13 @@ func (e *DocumentEmbedding) embedDocument(doc *common.Document) error {
 	}
 
 	// 向量化文档内容
-	embedding, err := e.embedder.Embed(doc.Content)
+	vecs, err := e.embedder.Embed(context.Background(), []string{doc.Content})
 	if err != nil {
 		return fmt.Errorf("向量化文档失败: %w", err)
 	}
-
-	// 更新文档
-	doc.Embedding = embedding
+	if len(vecs) > 0 {
+		doc.Embedding = vecs[0]
+	}
 	doc.Metadata["document_embedded"] = true
 
 	return nil

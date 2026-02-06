@@ -29,18 +29,18 @@ func NewMemoryStore() *MemoryStore {
 }
 
 // Create 创建向量索引
-func (s *MemoryStore) Create(ctx context.Context, index *Index) error {
+func (s *MemoryStore) Create(ctx context.Context, idx *Index) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, exists := s.indexes[index.Name]; exists {
-		return fmt.Errorf("index with name %s already exists", index.Name)
+	if _, exists := s.indexes[idx.Name]; exists {
+		return fmt.Errorf("index with name %s already exists", idx.Name)
 	}
 
-	s.indexes[index.Name] = &index{
-		index:      index,
+	s.indexes[idx.Name] = &index{
+		index:      idx,
 		vectors:    make(map[string]*Vector),
-		dimension:  index.Dimension,
+		dimension:  idx.Dimension,
 	}
 
 	return nil

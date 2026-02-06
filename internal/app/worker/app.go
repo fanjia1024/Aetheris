@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"rag-platform/internal/pipeline/ingest"
 	"rag-platform/internal/runtime/eino"
 	"rag-platform/internal/storage/metadata"
 	"rag-platform/internal/storage/vector"
@@ -12,21 +11,26 @@ import (
 	"rag-platform/pkg/log"
 )
 
-// App Worker 应用
+// App Worker 应用（Pipeline 由 eino 调度，不持有主动运行的 Pipeline）
 type App struct {
-	config         *config.Config
-	logger         *log.Logger
-	engine         *eino.Engine
-	metadataStore  *metadata.Store
-	vectorStore    *vector.Store
-	ingestPipeline *IngestPipeline
-	shutdown       chan struct{}
+	config        *config.Config
+	logger        *log.Logger
+	engine        *eino.Engine
+	metadataStore *metadata.Store
+	vectorStore   *vector.Store
+	shutdown      chan struct{}
 }
 
 // NewApp 创建新的 Worker 应用
 func NewApp(cfg *config.Config) (*App, error) {
 	// 初始化日志
-	logger, err := log.NewLogger(cfg.Log)
+	logCfg := &log.Config{}
+	if cfg != nil {
+		logCfg.Level = cfg.Log.Level
+		logCfg.Format = cfg.Log.Format
+		logCfg.File = cfg.Log.File
+	}
+	logger, err := log.NewLogger(logCfg)
 	if err != nil {
 		return nil, fmt.Errorf("初始化日志失败: %w", err)
 	}
@@ -42,39 +46,27 @@ func NewApp(cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("初始化向量存储失败: %w", err)
 	}
 
-	// 初始化 eino 引擎
+	// 初始化 eino 引擎（ingest 任务通过 ExecuteWorkflow(ctx, "ingest_pipeline", payload) 执行）
 	engine, err := eino.NewEngine(cfg, logger)
 	if err != nil {
 		return nil, fmt.Errorf("初始化 eino 引擎失败: %w", err)
 	}
 
-	// 初始化 Ingest Pipeline
-	ingestPipeline, err := NewIngestPipeline(engine, metadataStore, vectorStore, logger)
-	if err != nil {
-		return nil, fmt.Errorf("初始化 Ingest Pipeline 失败: %w", err)
-	}
-
 	return &App{
-		config:         cfg,
-		logger:         logger,
-		engine:         engine,
-		metadataStore:  metadataStore,
-		vectorStore:    vectorStore,
-		ingestPipeline: ingestPipeline,
-		shutdown:       make(chan struct{}),
+		config:        cfg,
+		logger:        logger,
+		engine:        engine,
+		metadataStore: metadataStore,
+		vectorStore:   vectorStore,
+		shutdown:      make(chan struct{}),
 	}, nil
 }
 
-// Start 启动应用
+// Start 启动应用（Pipeline 由 eino 调度，不主动 Start；仅启动任务队列消费者）
 func (a *App) Start() error {
 	a.logger.Info("启动 worker 应用")
 
-	// 启动 Ingest Pipeline
-	if err := a.ingestPipeline.Start(); err != nil {
-		return fmt.Errorf("启动 Ingest Pipeline 失败: %w", err)
-	}
-
-	// 启动工作队列
+	// 启动工作队列消费者：收到入库任务时调用 engine.ExecuteWorkflow(ctx, "ingest_pipeline", payload)
 	if err := a.startWorkerQueue(); err != nil {
 		return fmt.Errorf("启动工作队列失败: %w", err)
 	}
@@ -89,11 +81,6 @@ func (a *App) Shutdown(ctx context.Context) error {
 
 	// 关闭工作队列
 	close(a.shutdown)
-
-	// 关闭 Ingest Pipeline
-	if err := a.ingestPipeline.Stop(); err != nil {
-		a.logger.Error("关闭 Ingest Pipeline 失败", "error", err)
-	}
 
 	// 关闭存储
 	if err := a.metadataStore.Close(); err != nil {
@@ -113,61 +100,10 @@ func (a *App) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// startWorkerQueue 启动工作队列
+// startWorkerQueue 启动工作队列消费者；每个入库任务应调用 a.engine.ExecuteWorkflow(ctx, "ingest_pipeline", taskPayload)
 func (a *App) startWorkerQueue() error {
-	// 这里可以实现工作队列逻辑
-	// 暂时返回成功
+	// 任务驱动、eino 执行：从队列取到任务后调用 engine.ExecuteWorkflow(..., "ingest_pipeline", payload)
+	// 暂无实际队列实现时仅返回成功
 	return nil
 }
 
-// IngestPipeline Ingest Pipeline 包装器
-type IngestPipeline struct {
-	engine        *eino.Engine
-	metadataStore *metadata.Store
-	vectorStore   *vector.Store
-	loader        *ingest.DocumentLoader
-	parser        *ingest.DocumentParser
-	splitter      *ingest.DocumentSplitter
-	embedding     *ingest.DocumentEmbedding
-	indexer       *ingest.DocumentIndexer
-	logger        *log.Logger
-}
-
-// NewIngestPipeline 创建新的 Ingest Pipeline
-func NewIngestPipeline(engine *eino.Engine, metadataStore *metadata.Store, vectorStore *vector.Store, logger *log.Logger) (*IngestPipeline, error) {
-	// 初始化 Pipeline 组件
-	loader := ingest.NewDocumentLoader()
-	parser := ingest.NewDocumentParser()
-	splitter := ingest.NewDocumentSplitter(1000, 100, 1000)
-	// TODO: 初始化 embedding 和 indexer
-
-	return &IngestPipeline{
-		engine:        engine,
-		metadataStore: metadataStore,
-		vectorStore:   vectorStore,
-		loader:        loader,
-		parser:        parser,
-		splitter:      splitter,
-		// embedding:     embedding,
-		// indexer:       indexer,
-		logger:        logger,
-	}, nil
-}
-
-// Start 启动 Ingest Pipeline
-func (p *IngestPipeline) Start() error {
-	p.logger.Info("启动 Ingest Pipeline")
-	return nil
-}
-
-// Stop 停止 Ingest Pipeline
-func (p *IngestPipeline) Stop() error {
-	p.logger.Info("停止 Ingest Pipeline")
-	return nil
-}
-
-// ProcessDocument 处理文档
-func (p *IngestPipeline) ProcessDocument(document interface{}) error {
-	// 这里可以实现文档处理逻辑
-	return nil
-}

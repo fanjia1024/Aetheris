@@ -16,19 +16,22 @@ import (
 
 // Engine eino 引擎实例
 type Engine struct {
-	runners map[string]*adk.Runner
-	config  *config.Config
-	logger  *log.Logger
-	mu      sync.RWMutex
+	runners   map[string]*adk.Runner
+	workflows  map[string]WorkflowExecutor
+	config     *config.Config
+	logger     *log.Logger
+	mu         sync.RWMutex
+	workflowsMu sync.RWMutex
 }
 
 // NewEngine 创建新的 eino 引擎实例
 func NewEngine(cfg *config.Config, logger *log.Logger) (*Engine, error) {
 	// 创建引擎实例
 	engine := &Engine{
-		runners: make(map[string]*adk.Runner),
-		config:  cfg,
-		logger:  logger,
+		runners:   make(map[string]*adk.Runner),
+		workflows:  make(map[string]WorkflowExecutor),
+		config:     cfg,
+		logger:     logger,
 	}
 
 	// 启动引擎
@@ -46,6 +49,9 @@ func (e *Engine) start() error {
 	if err := e.registerDefaultAgents(); err != nil {
 		return err
 	}
+
+	// 注册默认 Workflow（由 eino 统一调度）
+	e.registerDefaultWorkflows()
 
 	return nil
 }
@@ -232,4 +238,51 @@ func (e *Engine) GetAgents() []string {
 	}
 
 	return agentNames
+}
+
+// registerDefaultWorkflows 注册默认工作流（ingest_pipeline / query_pipeline）
+func (e *Engine) registerDefaultWorkflows() {
+	e.workflowsMu.Lock()
+	defer e.workflowsMu.Unlock()
+
+	e.workflows["ingest_pipeline"] = &ingestWorkflowExecutor{logger: e.logger}
+	e.workflows["query_pipeline"] = &queryWorkflowExecutor{logger: e.logger}
+	e.logger.Info("默认 Workflow 注册成功", "workflows", []string{"ingest_pipeline", "query_pipeline"})
+}
+
+// RegisterWorkflow 注册工作流（可由 app 层注入真实实现，覆盖默认占位）
+func (e *Engine) RegisterWorkflow(name string, wf WorkflowExecutor) error {
+	e.workflowsMu.Lock()
+	defer e.workflowsMu.Unlock()
+
+	if name == "" {
+		return fmt.Errorf("workflow name 不能为空")
+	}
+	e.workflows[name] = wf
+	e.logger.Info("Workflow 注册成功", "name", name)
+	return nil
+}
+
+// ExecuteWorkflow 执行已注册的工作流
+func (e *Engine) ExecuteWorkflow(ctx context.Context, name string, params map[string]interface{}) (interface{}, error) {
+	e.workflowsMu.RLock()
+	wf, exists := e.workflows[name]
+	e.workflowsMu.RUnlock()
+
+	if !exists || wf == nil {
+		return nil, fmt.Errorf("workflow 不存在: %s", name)
+	}
+	return wf.Execute(ctx, params)
+}
+
+// GetWorkflows 返回已注册的工作流名称列表
+func (e *Engine) GetWorkflows() []string {
+	e.workflowsMu.RLock()
+	defer e.workflowsMu.RUnlock()
+
+	names := make([]string, 0, len(e.workflows))
+	for n := range e.workflows {
+		names = append(names, n)
+	}
+	return names
 }

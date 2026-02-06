@@ -1,25 +1,26 @@
 package ingest
 
 import (
+	"context"
 	"fmt"
-	"sync"
+	"time"
 
 	"rag-platform/internal/pipeline/common"
-	"rag-platform/internal/storage/vector"
 	"rag-platform/internal/storage/metadata"
+	"rag-platform/internal/storage/vector"
 )
 
 // DocumentIndexer 文档索引器
 type DocumentIndexer struct {
 	name           string
-	vectorStore    *vector.Store
-	metadataStore  *metadata.Store
+	vectorStore    vector.Store
+	metadataStore  metadata.Store
 	concurrency    int
 	batchSize      int
 }
 
 // NewDocumentIndexer 创建新的文档索引器
-func NewDocumentIndexer(vectorStore *vector.Store, metadataStore *metadata.Store, concurrency, batchSize int) *DocumentIndexer {
+func NewDocumentIndexer(vectorStore vector.Store, metadataStore metadata.Store, concurrency, batchSize int) *DocumentIndexer {
 	if concurrency <= 0 {
 		concurrency = 4
 	}
@@ -55,7 +56,7 @@ func (i *DocumentIndexer) Execute(ctx *common.PipelineContext, input interface{}
 	}
 
 	// 处理文档
-	indexedDoc, err := i.ProcessDocument(doc)
+	indexedDoc, err := i.ProcessDocument(ctx, doc)
 	if err != nil {
 		return nil, common.NewPipelineError(i.name, "索引文档失败", err)
 	}
@@ -85,7 +86,7 @@ func (i *DocumentIndexer) Validate(input interface{}) error {
 }
 
 // ProcessDocument 处理文档
-func (i *DocumentIndexer) ProcessDocument(doc *common.Document) (*common.Document, error) {
+func (i *DocumentIndexer) ProcessDocument(ctx *common.PipelineContext, doc *common.Document) (*common.Document, error) {
 	// 检查是否有向量化的切片
 	if len(doc.Chunks) == 0 {
 		return nil, common.NewPipelineError(i.name, "文档没有切片", fmt.Errorf("document has no chunks"))
@@ -99,7 +100,7 @@ func (i *DocumentIndexer) ProcessDocument(doc *common.Document) (*common.Documen
 	}
 
 	// 存储文档元数据
-	if err := i.storeDocumentMetadata(doc); err != nil {
+	if err := i.storeDocumentMetadata(ctx.Context, doc); err != nil {
 		return nil, common.NewPipelineError(i.name, "存储文档元数据失败", err)
 	}
 
@@ -111,27 +112,43 @@ func (i *DocumentIndexer) ProcessDocument(doc *common.Document) (*common.Documen
 	// 更新文档元数据
 	doc.Metadata["indexed"] = true
 	doc.Metadata["indexer"] = i.name
-	doc.Metadata["vector_store"] = i.vectorStore.Type()
+	doc.Metadata["vector_store"] = "memory"
 
 	return doc, nil
 }
 
 // storeDocumentMetadata 存储文档元数据
-func (i *DocumentIndexer) storeDocumentMetadata(doc *common.Document) error {
-	// 创建文档记录
+func (i *DocumentIndexer) storeDocumentMetadata(ctx context.Context, doc *common.Document) error {
+	meta := make(map[string]string)
+	for k, v := range doc.Metadata {
+		if s, ok := v.(string); ok {
+			meta[k] = s
+		}
+	}
+	var createdAt, updatedAt int64
+	if !doc.CreatedAt.IsZero() {
+		createdAt = doc.CreatedAt.Unix()
+	}
+	if !doc.UpdatedAt.IsZero() {
+		updatedAt = doc.UpdatedAt.Unix()
+	} else {
+		updatedAt = time.Now().Unix()
+	}
 	documentRecord := &metadata.Document{
 		ID:        doc.ID,
-		Content:   doc.Content,
-		Metadata:  doc.Metadata,
-		CreatedAt: doc.CreatedAt,
-		UpdatedAt: doc.UpdatedAt,
+		Name:      doc.ID,
+		Type:      "document",
+		Size:      0,
+		Path:      "",
+		Status:    "indexed",
+		Chunks:    len(doc.Chunks),
+		Metadata:  meta,
+		CreatedAt: createdAt,
+		UpdatedAt: updatedAt,
 	}
-
-	// 存储到元数据存储
-	if err := i.metadataStore.CreateDocument(documentRecord); err != nil {
+	if err := i.metadataStore.Create(ctx, documentRecord); err != nil {
 		return fmt.Errorf("创建文档记录失败: %w", err)
 	}
-
 	return nil
 }
 
@@ -158,85 +175,45 @@ func (i *DocumentIndexer) indexChunks(doc *common.Document) error {
 	return nil
 }
 
-// indexBatch 索引批次
+// indexBatch 索引批次（使用 vector.Store.Add）
 func (i *DocumentIndexer) indexBatch(chunks []common.Chunk, documentID string) error {
-	// 准备向量数据
-	vectorData := make([]vector.VectorData, len(chunks))
-	metadataRecords := make([]*metadata.Chunk, len(chunks))
-
-	for idx, chunk := range chunks {
-		// 准备向量数据
-		vectorData[idx] = vector.VectorData{
-			ID:        chunk.ID,
-			Vector:    chunk.Embedding,
-			Metadata:  chunk.Metadata,
-			DocumentID: documentID,
-		}
-
-		// 准备元数据记录
-		metadataRecords[idx] = &metadata.Chunk{
-			ID:        chunk.ID,
-			Content:   chunk.Content,
-			Metadata:  chunk.Metadata,
-			DocumentID: documentID,
-			Index:     chunk.Index,
-			TokenCount: chunk.TokenCount,
-			CreatedAt: chunk.CreatedAt,
-		}
+	if len(chunks) == 0 {
+		return nil
 	}
-
-	// 并行处理
-	var wg sync.WaitGroup
-	var vectorErr, metadataErr error
-
-	// 索引向量
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if err := i.vectorStore.IndexVectors(vectorData); err != nil {
-			vectorErr = err
-		}
-	}()
-
-	// 存储元数据
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if err := i.metadataStore.CreateChunks(metadataRecords); err != nil {
-			metadataErr = err
-		}
-	}()
-
-	// 等待完成
-	wg.Wait()
-
-	// 检查错误
-	if vectorErr != nil {
-		return fmt.Errorf("索引向量失败: %w", vectorErr)
+	indexName := "default"
+	vecs := make([]*vector.Vector, 0, len(chunks))
+	for _, chunk := range chunks {
+		meta := make(map[string]string)
+		meta["document_id"] = documentID
+		vecs = append(vecs, &vector.Vector{
+			ID:       chunk.ID,
+			Values:   chunk.Embedding,
+			Metadata: meta,
+		})
 	}
-	if metadataErr != nil {
-		return fmt.Errorf("存储切片元数据失败: %w", metadataErr)
+	ctx := context.Background()
+	if err := i.vectorStore.Add(ctx, indexName, vecs); err != nil {
+		return fmt.Errorf("索引向量失败: %w", err)
 	}
-
 	return nil
 }
 
 // SetVectorStore 设置向量存储
-func (i *DocumentIndexer) SetVectorStore(store *vector.Store) {
+func (i *DocumentIndexer) SetVectorStore(store vector.Store) {
 	i.vectorStore = store
 }
 
 // GetVectorStore 获取向量存储
-func (i *DocumentIndexer) GetVectorStore() *vector.Store {
+func (i *DocumentIndexer) GetVectorStore() vector.Store {
 	return i.vectorStore
 }
 
 // SetMetadataStore 设置元数据存储
-func (i *DocumentIndexer) SetMetadataStore(store *metadata.Store) {
+func (i *DocumentIndexer) SetMetadataStore(store metadata.Store) {
 	i.metadataStore = store
 }
 
 // GetMetadataStore 获取元数据存储
-func (i *DocumentIndexer) GetMetadataStore() *metadata.Store {
+func (i *DocumentIndexer) GetMetadataStore() metadata.Store {
 	return i.metadataStore
 }

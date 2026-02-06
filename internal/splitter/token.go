@@ -51,7 +51,7 @@ func (s *TokenSplitter) splitByTokens(content string, maxTokens, chunkOverlap in
 	var currentTokens []string
 	var chunkIndex int
 
-	for i, token := range tokens {
+	for _, token := range tokens {
 		// 检查添加当前 Token 后是否超过最大 Token 数
 		if len(currentTokens)+1 > maxTokens {
 			// 保存当前 chunk

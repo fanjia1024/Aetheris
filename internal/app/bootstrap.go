@@ -1,0 +1,55 @@
+package app
+
+import (
+	"fmt"
+
+	"rag-platform/internal/storage/metadata"
+	"rag-platform/internal/storage/vector"
+	"rag-platform/pkg/config"
+	"rag-platform/pkg/log"
+)
+
+// Bootstrap 统一初始化：供 api 与 worker 复用，避免在 cmd 内写业务与 pipeline
+type Bootstrap struct {
+	Config        *config.Config
+	Logger        *log.Logger
+	MetadataStore metadata.Store
+	VectorStore   vector.Store
+}
+
+// NewBootstrap 根据配置创建 Bootstrap（DB/Cache/Models/Storage）
+func NewBootstrap(cfg *config.Config) (*Bootstrap, error) {
+	logCfg := &log.Config{}
+	if cfg != nil {
+		logCfg.Level = cfg.Log.Level
+		logCfg.Format = cfg.Log.Format
+		logCfg.File = cfg.Log.File
+	}
+	logger, err := log.NewLogger(logCfg)
+	if err != nil {
+		return nil, fmt.Errorf("初始化日志失败: %w", err)
+	}
+
+	var metaStore metadata.Store
+	if cfg != nil {
+		metaStore, err = metadata.NewStore(cfg.Storage.Metadata)
+		if err != nil {
+			return nil, fmt.Errorf("初始化元数据存储失败: %w", err)
+		}
+	}
+
+	var vecStore vector.Store
+	if cfg != nil {
+		vecStore, err = vector.NewStore(cfg.Storage.Vector)
+		if err != nil {
+			return nil, fmt.Errorf("初始化向量存储失败: %w", err)
+		}
+	}
+
+	return &Bootstrap{
+		Config:        cfg,
+		Logger:        logger,
+		MetadataStore: metaStore,
+		VectorStore:   vecStore,
+	}, nil
+}

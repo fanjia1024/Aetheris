@@ -6,19 +6,21 @@ import (
 
 	"github.com/google/uuid"
 	"rag-platform/internal/pipeline/common"
+	"rag-platform/internal/splitter"
 )
 
-// DocumentSplitter 文档切片器
+// DocumentSplitter 文档切片器；可委托 internal/splitter.Engine 统一切片（设计：所有切片逻辑收敛为 Splitter Engine）
 type DocumentSplitter struct {
-	name        string
-	chunkSize   int
+	name         string
+	chunkSize    int
 	chunkOverlap int
-	maxChunks   int
+	maxChunks    int
+	engine       *splitter.Engine
+	splitterName string
 }
 
-// NewDocumentSplitter 创建新的文档切片器
+// NewDocumentSplitter 创建新的文档切片器（默认自实现；可再 SetEngine 委托 Splitter Engine）
 func NewDocumentSplitter(chunkSize, chunkOverlap, maxChunks int) *DocumentSplitter {
-	// 设置默认值
 	if chunkSize <= 0 {
 		chunkSize = 1000
 	}
@@ -28,12 +30,20 @@ func NewDocumentSplitter(chunkSize, chunkOverlap, maxChunks int) *DocumentSplitt
 	if maxChunks <= 0 {
 		maxChunks = 1000
 	}
-
 	return &DocumentSplitter{
-		name:        "splitter",
-		chunkSize:   chunkSize,
+		name:         "splitter",
+		chunkSize:    chunkSize,
 		chunkOverlap: chunkOverlap,
-		maxChunks:   maxChunks,
+		maxChunks:    maxChunks,
+		splitterName: "structural",
+	}
+}
+
+// SetEngine 设置 Splitter Engine，此后切片委托给 Engine（统一抽象）
+func (s *DocumentSplitter) SetEngine(engine *splitter.Engine, splitterName string) {
+	s.engine = engine
+	if splitterName != "" {
+		s.splitterName = splitterName
 	}
 }
 
@@ -96,24 +106,38 @@ func (s *DocumentSplitter) ProcessDocument(doc *common.Document) (*common.Docume
 	return doc, nil
 }
 
-// splitDocument 切片文档
+// splitDocument 切片文档（优先委托 Splitter Engine，否则使用自实现）
 func (s *DocumentSplitter) splitDocument(doc *common.Document) ([]common.Chunk, error) {
 	content := doc.Content
 	if content == "" {
 		return []common.Chunk{}, nil
 	}
 
-	// 按段落分割
+	if s.engine != nil {
+		options := map[string]interface{}{
+			"chunk_size":    s.chunkSize,
+			"chunk_overlap": s.chunkOverlap,
+			"max_chunks":    s.maxChunks,
+		}
+		chunks, err := s.engine.Split(content, s.splitterName, options)
+		if err != nil {
+			return nil, err
+		}
+		for i := range chunks {
+			chunks[i].DocumentID = doc.ID
+		}
+		if len(chunks) > s.maxChunks {
+			chunks = chunks[:s.maxChunks]
+		}
+		return chunks, nil
+	}
+
+	// 自实现：按段落分割并合并切片
 	paragraphs := s.splitByParagraph(content)
-
-	// 合并并切片
 	chunks := s.mergeAndSplit(paragraphs, doc.ID)
-
-	// 限制最大切片数
 	if len(chunks) > s.maxChunks {
 		chunks = chunks[:s.maxChunks]
 	}
-
 	return chunks, nil
 }
 
