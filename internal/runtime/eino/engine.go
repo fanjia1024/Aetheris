@@ -23,6 +23,15 @@ type Engine struct {
 	logger     *log.Logger
 	mu         sync.RWMutex
 	workflowsMu sync.RWMutex
+
+	// 可选组件（由 app 注入后工具链对接真实实现）
+	Retriever         Retriever
+	Generator         Generator
+	DocumentLoader    DocumentLoader
+	DocumentParser    DocumentParser
+	DocumentSplitter  DocumentSplitter
+	DocumentEmbedding DocumentEmbedding
+	DocumentIndexer   DocumentIndexer
 }
 
 // NewEngine 创建新的 eino 引擎实例
@@ -44,50 +53,61 @@ func NewEngine(cfg *config.Config, logger *log.Logger) (*Engine, error) {
 	return engine, nil
 }
 
-// start 启动 eino 引擎
+// start 启动 eino 引擎（仅注册默认 Workflow；Runner 懒创建）
 func (e *Engine) start() error {
-	// 注册默认 Agent
-	if err := e.registerDefaultAgents(); err != nil {
-		return err
-	}
-
-	// 注册默认 Workflow（由 eino 统一调度）
 	e.registerDefaultWorkflows()
-
 	return nil
 }
 
-// registerDefaultAgents 注册默认 Agent
-func (e *Engine) registerDefaultAgents() error {
-	ctx := context.Background()
-
-	// 注册 QA Agent
-	qaRunner, err := e.createQARunner(ctx)
-	if err != nil {
-		return fmt.Errorf("创建 QA Agent 失败: %w", err)
-	}
-
-	// 注册 Ingest Agent
-	ingestRunner, err := e.createIngestRunner(ctx)
-	if err != nil {
-		return fmt.Errorf("创建 Ingest Agent 失败: %w", err)
-	}
-
-	// 注册 Runner 到引擎
+// SetQueryComponents 设置查询侧组件（Retriever / Generator），供 qa_agent 工具使用
+func (e *Engine) SetQueryComponents(retriever Retriever, generator Generator) {
 	e.mu.Lock()
-	e.runners["qa_agent"] = qaRunner
-	e.runners["ingest_agent"] = ingestRunner
-	e.mu.Unlock()
-
-	e.logger.Info("默认 Agent 注册成功", "agents", []string{"qa_agent", "ingest_agent"})
-	return nil
+	defer e.mu.Unlock()
+	e.Retriever = retriever
+	e.Generator = generator
 }
 
-// createQARunner 创建 QA Agent Runner
+// SetIngestComponents 设置入库侧组件，供 ingest_agent 工具使用
+func (e *Engine) SetIngestComponents(loader DocumentLoader, parser DocumentParser, splitter DocumentSplitter, embedding DocumentEmbedding, indexer DocumentIndexer) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.DocumentLoader = loader
+	e.DocumentParser = parser
+	e.DocumentSplitter = splitter
+	e.DocumentEmbedding = embedding
+	e.DocumentIndexer = indexer
+}
+
+// ensureRunner 懒创建并注册 Runner
+func (e *Engine) ensureRunner(agentID string) (*adk.Runner, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if r, ok := e.runners[agentID]; ok {
+		return r, nil
+	}
+	ctx := context.Background()
+	var runner *adk.Runner
+	var err error
+	switch agentID {
+	case "qa_agent":
+		runner, err = e.createQARunner(ctx)
+	case "ingest_agent":
+		runner, err = e.createIngestRunner(ctx)
+	default:
+		return nil, fmt.Errorf("Runner %s 不存在", agentID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	e.runners[agentID] = runner
+	return runner, nil
+}
+
+// createQARunner 创建 QA Agent Runner（使用已注入的 Retriever/Generator）
 func (e *Engine) createQARunner(ctx context.Context) (*adk.Runner, error) {
 	tools := []tool.BaseTool{
-		CreateRetrieverTool(),
-		CreateGeneratorTool(),
+		CreateRetrieverTool(e),
+		CreateGeneratorTool(e),
 	}
 
 	cfg := &adk.ChatModelAgentConfig{
@@ -111,14 +131,14 @@ func (e *Engine) createQARunner(ctx context.Context) (*adk.Runner, error) {
 	}), nil
 }
 
-// createIngestRunner 创建 Ingest Agent Runner
+// createIngestRunner 创建 Ingest Agent Runner（使用已注入的 ingest 组件）
 func (e *Engine) createIngestRunner(ctx context.Context) (*adk.Runner, error) {
 	tools := []tool.BaseTool{
-		CreateDocumentLoaderTool(),
-		CreateDocumentParserTool(),
-		CreateSplitterTool(),
-		CreateEmbeddingTool(),
-		CreateIndexBuilderTool(),
+		CreateDocumentLoaderTool(e),
+		CreateDocumentParserTool(e),
+		CreateSplitterTool(e),
+		CreateEmbeddingTool(e),
+		CreateIndexBuilderTool(e),
 	}
 
 	cfg := &adk.ChatModelAgentConfig{
@@ -181,17 +201,16 @@ func parseDefaultKey(key string) (provider, modelKey string, err error) {
 	return parts[0], parts[1], nil
 }
 
-// GetRunner 获取 Runner 实例
+// GetRunner 获取 Runner 实例（qa_agent / ingest_agent 懒创建）
 func (e *Engine) GetRunner(agentID string) (*adk.Runner, error) {
 	e.mu.RLock()
 	runner, exists := e.runners[agentID]
 	e.mu.RUnlock()
 
-	if !exists {
-		return nil, fmt.Errorf("Runner %s 不存在", agentID)
+	if exists {
+		return runner, nil
 	}
-
-	return runner, nil
+	return e.ensureRunner(agentID)
 }
 
 // RegisterRunner 注册自定义 Runner

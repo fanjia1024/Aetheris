@@ -99,6 +99,11 @@ func (g *Generator) ProcessQuery(query *common.Query) (*common.Query, error) {
 	return query, nil
 }
 
+// GenerateWithRetrieval 根据查询与检索结果生成回答（供 RAG 适配器调用）
+func (g *Generator) GenerateWithRetrieval(query *common.Query, result *common.RetrievalResult) (*common.GenerationResult, error) {
+	return g.generate(query, result)
+}
+
 // generate 生成回答
 func (g *Generator) generate(query *common.Query, result *common.RetrievalResult) (*common.GenerationResult, error) {
 	startTime := time.Now()

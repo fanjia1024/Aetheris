@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package rag.v1;
+
+option go_package = "rag-platform/internal/api/grpc/pb";
+
+// QueryService 查询服务（与 HTTP 能力对齐）
+service QueryService {
+  rpc Query(QueryRequest) returns (QueryResponse);
+  rpc BatchQuery(BatchQueryRequest) returns (BatchQueryResponse);
+}
+
+message QueryRequest {
+  string query = 1;
+  map<string, string> metadata = 2;
+  int32 top_k = 3;
+}
+
+message QueryResponse {
+  bool success = 1;
+  string answer = 2;
+  repeated string references = 3;
+  string error = 4;
+}
+
+message BatchQueryRequest {
+  repeated QueryRequest queries = 1;
+}
+
+message BatchQueryResponse {
+  repeated QueryResponse results = 1;
+}

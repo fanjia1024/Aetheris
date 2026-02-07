@@ -20,11 +20,18 @@ type Config struct {
 
 // APIConfig API 服务配置
 type APIConfig struct {
-	Port      int    `mapstructure:"port"`
-	Host      string `mapstructure:"host"`
-	Timeout   string `mapstructure:"timeout"`
-	CORS      CORSConfig `mapstructure:"cors"`
+	Port      int          `mapstructure:"port"`
+	Host      string       `mapstructure:"host"`
+	Timeout   string       `mapstructure:"timeout"`
+	CORS      CORSConfig   `mapstructure:"cors"`
 	Middleware MiddlewareConfig `mapstructure:"middleware"`
+	Grpc      GrpcConfig   `mapstructure:"grpc"`
+}
+
+// GrpcConfig gRPC 服务配置
+type GrpcConfig struct {
+	Enable bool `mapstructure:"enable"`
+	Port   int  `mapstructure:"port"`
 }
 
 // CORSConfig CORS 配置
@@ -35,9 +42,12 @@ type CORSConfig struct {
 
 // MiddlewareConfig 中间件配置
 type MiddlewareConfig struct {
-	Auth        bool `mapstructure:"auth"`
-	RateLimit   bool `mapstructure:"rate_limit"`
-	RateLimitRPS int  `mapstructure:"rate_limit_rps"`
+	Auth          bool   `mapstructure:"auth"`
+	RateLimit     bool   `mapstructure:"rate_limit"`
+	RateLimitRPS  int    `mapstructure:"rate_limit_rps"`
+	JWTKey        string `mapstructure:"jwt_key"`
+	JWTTimeout    string `mapstructure:"jwt_timeout"`    // 如 "1h"
+	JWTMaxRefresh string `mapstructure:"jwt_max_refresh"` // 如 "1h"
 }
 
 // WorkerConfig Worker 服务配置

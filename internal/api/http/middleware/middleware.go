@@ -8,6 +8,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
+	"github.com/hertz-contrib/jwt"
 )
 
 // Middleware 中间件管理器
@@ -37,12 +38,80 @@ func (m *Middleware) CORS() app.HandlerFunc {
 	}
 }
 
-// Auth 认证中间件
+// Auth 认证中间件（未启用 JWT 时跳过认证）
 func (m *Middleware) Auth() app.HandlerFunc {
 	return func(ctx context.Context, c *app.RequestContext) {
-		// 暂时跳过认证
 		c.Next(ctx)
 	}
+}
+
+// JWTAuth 持有 JWT 中间件，用于 Login 与保护路由
+type JWTAuth struct {
+	Middleware *jwt.HertzJWTMiddleware
+}
+
+// LoginHandler 返回登录接口 Handler
+func (j *JWTAuth) LoginHandler() app.HandlerFunc {
+	return j.Middleware.LoginHandler
+}
+
+// MiddlewareFunc 返回 JWT 校验中间件
+func (j *JWTAuth) MiddlewareFunc() app.HandlerFunc {
+	return j.Middleware.MiddlewareFunc()
+}
+
+// NewJWTAuth 创建 JWT 认证（key 签名密钥；Authenticator 示例：admin/admin、test/test 通过）
+func NewJWTAuth(key []byte, timeout, maxRefresh time.Duration) (*JWTAuth, error) {
+	identityKey := "id"
+	authMiddleware, err := jwt.New(&jwt.HertzJWTMiddleware{
+		Realm:       "rag-api",
+		Key:         key,
+		Timeout:     timeout,
+		MaxRefresh:  maxRefresh,
+		IdentityKey: identityKey,
+		PayloadFunc: func(data interface{}) jwt.MapClaims {
+			if u, ok := data.(*AuthUser); ok {
+				return jwt.MapClaims{identityKey: u.Username}
+			}
+			return jwt.MapClaims{}
+		},
+		IdentityHandler: func(ctx context.Context, c *app.RequestContext) interface{} {
+			claims := jwt.ExtractClaims(ctx, c)
+			return &AuthUser{Username: claims[identityKey].(string)}
+		},
+		Authenticator: func(ctx context.Context, c *app.RequestContext) (interface{}, error) {
+			var loginVals struct {
+				Username string `form:"username" json:"username"`
+				Password string `form:"password" json:"password"`
+			}
+			if err := c.Bind(&loginVals); err != nil {
+				return nil, jwt.ErrMissingLoginValues
+			}
+			if (loginVals.Username == "admin" && loginVals.Password == "admin") ||
+				(loginVals.Username == "test" && loginVals.Password == "test") {
+				return &AuthUser{Username: loginVals.Username}, nil
+			}
+			return nil, jwt.ErrFailedAuthentication
+		},
+		Authorizator: func(data interface{}, ctx context.Context, c *app.RequestContext) bool {
+			return data != nil
+		},
+		Unauthorized: func(ctx context.Context, c *app.RequestContext, code int, message string) {
+			c.JSON(code, map[string]interface{}{"code": code, "message": message})
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if errInit := authMiddleware.MiddlewareInit(); errInit != nil {
+		return nil, errInit
+	}
+	return &JWTAuth{Middleware: authMiddleware}, nil
+}
+
+// AuthUser 登录用户（示例）
+type AuthUser struct {
+	Username string
 }
 
 // RateLimit 速率限制中间件

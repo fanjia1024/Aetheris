@@ -4,9 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
+	"google.golang.org/grpc"
+
+	apigrpc "rag-platform/internal/api/grpc"
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 	hertzslog "github.com/hertz-contrib/logger/slog"
 	"github.com/hertz-contrib/obs-opentelemetry/provider"
@@ -18,6 +23,7 @@ import (
 	"rag-platform/internal/pipeline/ingest"
 	"rag-platform/internal/pipeline/query"
 	"rag-platform/internal/runtime/eino"
+	"rag-platform/internal/splitter"
 	"rag-platform/internal/storage/vector"
 )
 
@@ -30,9 +36,26 @@ type otelProviderShutdown interface {
 type App struct {
 	config       *app.Bootstrap
 	engine       *eino.Engine
+	docService   app.DocumentService
 	router       *http.Router
 	hertz        *server.Hertz
+	grpcServer   *grpcRun
 	otelProvider otelProviderShutdown
+}
+
+// grpcRun 持有 gRPC Server 与 Listener，用于 GracefulStop 时关闭
+type grpcRun struct {
+	srv *grpc.Server
+	lis net.Listener
+}
+
+func (g *grpcRun) GracefulStop() {
+	if g.lis != nil {
+		_ = g.lis.Close()
+	}
+	if g.srv != nil {
+		g.srv.GracefulStop()
+	}
 }
 
 // NewApp 创建 API 应用（由 cmd/api 调用）
@@ -53,6 +76,10 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 			if err := engine.RegisterWorkflow("query_pipeline", qwf); err != nil {
 				bootstrap.Logger.Info("注册 query_pipeline 失败，将使用占位实现", "error", err)
 			}
+			// 注入 eino 工具链用组件（qa_agent 检索/生成工具对接真实实现）
+			retrieverAdapter := NewRetrieverAdapter(queryEmbedder, bootstrap.VectorStore, 0.3)
+			ragGen := NewRAGGeneratorAdapter(retrieverAdapter, generator, queryEmbedder)
+			engine.SetQueryComponents(retrieverAdapter, ragGen)
 		}
 	}
 
@@ -67,11 +94,21 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 			}
 			loader := ingest.NewDocumentLoader()
 			parser := ingest.NewDocumentParser()
-			splitter := ingest.NewDocumentSplitter(1000, 100, 1000)
-			iwf := eino.NewIngestWorkflowExecutor(loader, parser, splitter, docEmbedding, docIndexer, bootstrap.Logger)
+			docSplitter := ingest.NewDocumentSplitter(1000, 100, 1000)
+			splitterEngine := splitter.NewEngine(ingestEmbedder)
+			docSplitter.SetEngine(splitterEngine, "structural")
+			iwf := eino.NewIngestWorkflowExecutor(loader, parser, docSplitter, docEmbedding, docIndexer, bootstrap.Logger)
 			if err := engine.RegisterWorkflow("ingest_pipeline", iwf); err != nil {
 				bootstrap.Logger.Info("注册 ingest_pipeline 失败，将使用占位实现", "error", err)
 			}
+			// 注入 eino 工具链用组件（ingest_agent 文档工具对接真实实现）
+			engine.SetIngestComponents(
+				NewLoaderAdapter(loader),
+				NewParserAdapter(parser),
+				NewSplitterAdapter(docSplitter),
+				NewEmbeddingAdapter(docEmbedding),
+				NewIndexerAdapter(docIndexer),
+			)
 		}
 	}
 
@@ -80,12 +117,35 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	mw := middleware.NewMiddleware()
 	router := http.NewRouter(handler, mw)
 
-	return &App{
-		config: bootstrap,
-		engine: engine,
-		router: router,
-		hertz:  nil,
-	}, nil
+	if bootstrap.Config != nil && bootstrap.Config.API.Middleware.Auth && bootstrap.Config.API.Middleware.JWTKey != "" {
+		timeout := parseDuration(bootstrap.Config.API.Middleware.JWTTimeout, time.Hour)
+		maxRefresh := parseDuration(bootstrap.Config.API.Middleware.JWTMaxRefresh, time.Hour)
+		jwtAuth, err := middleware.NewJWTAuth([]byte(bootstrap.Config.API.Middleware.JWTKey), timeout, maxRefresh)
+		if err != nil {
+			bootstrap.Logger.Warn("JWT 初始化失败，将跳过认证", "error", err)
+		} else {
+			router.SetJWT(jwtAuth)
+			bootstrap.Logger.Info("JWT 认证已启用")
+		}
+	}
+
+	appObj := &App{
+		config:     bootstrap,
+		engine:     engine,
+		docService: docService,
+		router:     router,
+		hertz:      nil,
+	}
+	if bootstrap.Config != nil && bootstrap.Config.API.Grpc.Enable && bootstrap.Config.API.Grpc.Port > 0 {
+		gs, err := startGRPC(engine, docService, bootstrap.Config.API.Grpc.Port)
+		if err != nil {
+			bootstrap.Logger.Warn("gRPC 服务启动失败", "error", err)
+		} else {
+			appObj.grpcServer = gs
+			bootstrap.Logger.Info("gRPC 服务已启动", "port", bootstrap.Config.API.Grpc.Port)
+		}
+	}
+	return appObj, nil
 }
 
 // Run 启动 HTTP 服务，addr 如 ":8080"
@@ -160,6 +220,9 @@ func (a *App) Shutdown(ctx context.Context) error {
 	if a.otelProvider != nil {
 		_ = a.otelProvider.Shutdown(ctx)
 	}
+	if a.grpcServer != nil {
+		a.grpcServer.GracefulStop()
+	}
 	if a.hertz != nil {
 		if err := a.hertz.Shutdown(ctx); err != nil {
 			return err
@@ -169,4 +232,30 @@ func (a *App) Shutdown(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// parseDuration 解析时长字符串，无效或空时返回 defaultVal
+func parseDuration(s string, defaultVal time.Duration) time.Duration {
+	if s == "" {
+		return defaultVal
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return defaultVal
+	}
+	return d
+}
+
+// startGRPC 创建并启动 gRPC 服务（在 goroutine 中 Serve），返回 grpcRun 以便 Shutdown 时 GracefulStop
+func startGRPC(engine *eino.Engine, docService app.DocumentService, port int) (*grpcRun, error) {
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return nil, err
+	}
+	srv := grpc.NewServer()
+	apigrpc.NewServer(engine, docService).Register(srv)
+	go func() {
+		_ = srv.Serve(lis)
+	}()
+	return &grpcRun{srv: srv, lis: lis}, nil
 }

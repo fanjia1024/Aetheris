@@ -42,9 +42,13 @@ func (e *ingestWorkflowExecutor) Execute(ctx context.Context, params map[string]
 		e.logger.Info("执行 ingest_pipeline")
 	}
 
-	file, _ := params["file"].(*multipart.FileHeader)
-	if file == nil {
-		return nil, fmt.Errorf("ingest_pipeline 需要 params[\"file\"] 为 *multipart.FileHeader")
+	var loaderInput interface{}
+	if content, ok := params["content"].([]byte); ok {
+		loaderInput = content
+	} else if file, ok := params["file"].(*multipart.FileHeader); ok {
+		loaderInput = file
+	} else {
+		return nil, fmt.Errorf("ingest_pipeline 需要 params[\"file\"] (*multipart.FileHeader) 或 params[\"content\"] ([]byte)")
 	}
 
 	pipeCtx := common.NewPipelineContext(ctx, fmt.Sprintf("ingest-%d", time.Now().UnixNano()))
@@ -59,7 +63,7 @@ func (e *ingestWorkflowExecutor) Execute(ctx context.Context, params map[string]
 	}
 
 	// loader
-	out, err := e.loader.Execute(pipeCtx, file)
+	out, err := e.loader.Execute(pipeCtx, loaderInput)
 	if err != nil {
 		return nil, fmt.Errorf("ingest loader: %w", err)
 	}

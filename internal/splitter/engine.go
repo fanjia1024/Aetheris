@@ -10,6 +10,7 @@ import (
 type Engine struct {
 	name      string
 	splitters map[string]Splitter
+	embedder  TextEmbedder
 }
 
 // Splitter 切片器接口
@@ -18,11 +19,12 @@ type Splitter interface {
 	Name() string
 }
 
-// NewEngine 创建新的切片引擎
-func NewEngine() *Engine {
+// NewEngine 创建新的切片引擎；embedder 可选，传入时 semantic 切片器将使用语义相似度断块
+func NewEngine(embedder TextEmbedder) *Engine {
 	engine := &Engine{
 		name:      "splitter_engine",
 		splitters: make(map[string]Splitter),
+		embedder:  embedder,
 	}
 
 	// 注册内置切片器
@@ -41,8 +43,8 @@ func (e *Engine) registerSplitters() {
 	// 注册结构切片器
 	e.splitters["structural"] = NewStructuralSplitter()
 	
-	// 注册语义切片器
-	e.splitters["semantic"] = NewSemanticSplitter()
+	// 注册语义切片器（注入 embedder 时启用真实语义相似度）
+	e.splitters["semantic"] = NewSemanticSplitter(e.embedder)
 	
 	// 注册 Token 切片器
 	e.splitters["token"] = NewTokenSplitter()

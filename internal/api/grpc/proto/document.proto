@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package rag.v1;
+
+option go_package = "rag-platform/internal/api/grpc/pb";
+
+// DocumentService 文档服务（与 HTTP 能力对齐）
+service DocumentService {
+  rpc ListDocuments(ListDocumentsRequest) returns (ListDocumentsResponse);
+  rpc GetDocument(GetDocumentRequest) returns (GetDocumentResponse);
+  rpc DeleteDocument(DeleteDocumentRequest) returns (DeleteDocumentResponse);
+  rpc UploadDocument(UploadDocumentRequest) returns (UploadDocumentResponse);
+}
+
+message ListDocumentsRequest {}
+
+message DocumentInfo {
+  string id = 1;
+  string name = 2;
+  string type = 3;
+  int64 size = 4;
+  string path = 5;
+  string status = 6;
+  int32 chunks = 7;
+  int32 vector_count = 8;
+  map<string, string> metadata = 9;
+  int64 created_at = 10;
+  int64 updated_at = 11;
+}
+
+message ListDocumentsResponse {
+  repeated DocumentInfo documents = 1;
+  int32 total = 2;
+}
+
+message GetDocumentRequest {
+  string id = 1;
+}
+
+message GetDocumentResponse {
+  DocumentInfo document = 1;
+}
+
+message DeleteDocumentRequest {
+  string id = 1;
+}
+
+message DeleteDocumentResponse {
+  bool success = 1;
+}
+
+message UploadDocumentRequest {
+  bytes content = 1;
+  string filename = 2;
+  string content_type = 3;
+}
+
+message UploadDocumentResponse {
+  bool success = 1;
+  string message = 2;
+  string document_id = 3;
+}

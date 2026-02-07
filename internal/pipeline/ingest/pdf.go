@@ -9,7 +9,12 @@ import (
 	"github.com/unidoc/unipdf/v3/model"
 )
 
-// extractPDFText 从 PDF 二进制数据中提取正文文本，按页拼接。
+// ExtractPDFText 从 PDF 二进制数据中提取正文文本，按页拼接（供 LongText 等复用）
+func ExtractPDFText(data []byte) (string, error) {
+	return extractPDFText(data)
+}
+
+// extractPDFText 内部实现，供本包 loader 调用
 func extractPDFText(data []byte) (string, error) {
 	if len(data) == 0 {
 		return "", nil

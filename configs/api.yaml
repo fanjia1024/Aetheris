@@ -10,6 +10,13 @@ api:
     auth: false
     rate_limit: true
     rate_limit_rps: 100
+    # JWT（auth 为 true 时生效）；jwt_key 建议用环境变量 "${JWT_SECRET}"
+    jwt_key: ""
+    jwt_timeout: "1h"
+    jwt_max_refresh: "1h"
+  grpc:
+    enable: false
+    port: 9090
 
 # 服务发现
 service:
