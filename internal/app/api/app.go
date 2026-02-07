@@ -19,7 +19,6 @@ import (
 
 	"rag-platform/internal/agent"
 	"rag-platform/internal/agent/executor"
-	"rag-platform/internal/agent/memory"
 	"rag-platform/internal/agent/planner"
 	"rag-platform/internal/api/http"
 	"rag-platform/internal/api/http/middleware"
@@ -27,11 +26,11 @@ import (
 	"rag-platform/internal/pipeline/ingest"
 	"rag-platform/internal/pipeline/query"
 	"rag-platform/internal/runtime/eino"
+	"rag-platform/internal/runtime/session"
 	"rag-platform/internal/model/llm"
 	"rag-platform/internal/splitter"
 	"rag-platform/internal/storage/vector"
-	"rag-platform/internal/tool/builtin"
-	"rag-platform/internal/tool/registry"
+	"rag-platform/internal/agent/tools"
 )
 
 // otelProviderShutdown 用于优雅关闭时关闭 OpenTelemetry provider
@@ -124,20 +123,18 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		}
 	}
 
-	// Agent Runtime：ToolRegistry + Builtin + Planner + Executor + Memory + Agent
-	toolReg := registry.New()
-	builtin.RegisterBuiltin(toolReg, engine, generatorForAgent)
+	// Agent Runtime：agent/tools.Registry（Session 感知）+ Builtin + Planner + Executor + Memory + Agent
+	toolsReg := tools.NewRegistry()
+	tools.RegisterBuiltin(toolsReg, engine, generatorForAgent)
 	plannerAgent := planner.NewLLMPlanner(llmClientForAgent)
-	execAgent := executor.NewRegistryExecutor(toolReg)
-	shortTerm := memory.NewShortTerm(50)
-	workingMem := memory.NewWorking()
-	agentRunner := agent.New(plannerAgent, execAgent, toolReg,
-		agent.WithShortTermMemory(shortTerm),
-		agent.WithWorkingMemory(workingMem),
-	)
+	execAgent := executor.NewSessionRegistryExecutor(toolsReg)
+	agentRunner := agent.New(plannerAgent, execAgent, toolsReg)
+	sessionStore := session.NewMemoryStore()
+	sessionManager := session.NewManager(sessionStore)
 	docService := app.NewDocumentService(bootstrap.MetadataStore)
 	handler := http.NewHandler(engine, docService)
 	handler.SetAgent(agentRunner)
+	handler.SetSessionManager(sessionManager)
 	mw := middleware.NewMiddleware()
 	router := http.NewRouter(handler, mw)
 

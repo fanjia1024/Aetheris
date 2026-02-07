@@ -14,18 +14,26 @@ import (
 	"rag-platform/internal/model/llm"
 	"rag-platform/internal/pipeline/common"
 	"rag-platform/internal/runtime/eino"
+	"rag-platform/internal/runtime/session"
 )
 
-// AgentRunner 可选的 Agent 入口（供 POST /api/agent/run 使用）
+// AgentRunner 可选的 Agent 入口（供 POST /api/agent/run 使用）；优先使用 RunWithSession
 type AgentRunner interface {
-	Run(ctx context.Context, sessionID string, userQuery string, history []llm.Message) (*agent.RunResult, error)
+	RunWithSession(ctx context.Context, sess *session.Session, userQuery string) (*agent.RunResult, error)
+}
+
+// SessionManager 用于 Agent 请求的 session 查找/创建/保存
+type SessionManager interface {
+	GetOrCreate(ctx context.Context, id string) (*session.Session, error)
+	Save(ctx context.Context, s *session.Session) error
 }
 
 // Handler HTTP 处理器（仅依赖 Engine + DocumentService，不直接调用 storage）
 type Handler struct {
-	engine     *eino.Engine
-	docService appcore.DocumentService
-	agent      AgentRunner
+	engine         *eino.Engine
+	docService     appcore.DocumentService
+	agent          AgentRunner
+	sessionManager SessionManager
 }
 
 // NewHandler 创建新的 HTTP 处理器
@@ -39,6 +47,11 @@ func NewHandler(engine *eino.Engine, docService appcore.DocumentService) *Handle
 // SetAgent 设置 Agent 入口（可选，用于 /api/agent/run）
 func (h *Handler) SetAgent(agent AgentRunner) {
 	h.agent = agent
+}
+
+// SetSessionManager 设置 Session 管理器（用于 /api/agent/run 的 session 生命周期）
+func (h *Handler) SetSessionManager(m SessionManager) {
+	h.sessionManager = m
 }
 
 // HealthCheck 健康检查
@@ -308,11 +321,17 @@ type AgentRunRequest struct {
 	History   []llm.Message `json:"history"`
 }
 
-// AgentRun Agent 入口：解析 query、可选 session_id，调用 Agent.Run，返回 JSON
+// AgentRun Agent 入口：找到或创建 session，在 session 上执行 Agent，保存后返回
 func (h *Handler) AgentRun(ctx context.Context, c *app.RequestContext) {
 	if h.agent == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{
 			"error": "Agent 未配置",
+		})
+		return
+	}
+	if h.sessionManager == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{
+			"error": "SessionManager 未配置",
 		})
 		return
 	}
@@ -323,15 +342,16 @@ func (h *Handler) AgentRun(ctx context.Context, c *app.RequestContext) {
 		})
 		return
 	}
-	sessionID := req.SessionID
-	if sessionID == "" {
-		sessionID = fmt.Sprintf("session-%d", time.Now().UnixNano())
+	sess, err := h.sessionManager.GetOrCreate(ctx, req.SessionID)
+	if err != nil {
+		hlog.CtxErrorf(ctx, "Session GetOrCreate 失败: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"error":   "获取或创建 Session 失败",
+			"details": err.Error(),
+		})
+		return
 	}
-	history := req.History
-	if history == nil {
-		history = []llm.Message{}
-	}
-	result, err := h.agent.Run(ctx, sessionID, req.Query, history)
+	result, err := h.agent.RunWithSession(ctx, sess, req.Query)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "Agent Run 失败: %v", err)
 		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
@@ -340,9 +360,12 @@ func (h *Handler) AgentRun(ctx context.Context, c *app.RequestContext) {
 		})
 		return
 	}
+	if err := h.sessionManager.Save(ctx, sess); err != nil {
+		hlog.CtxErrorf(ctx, "Session Save 失败: %v", err)
+	}
 	c.JSON(consts.StatusOK, map[string]interface{}{
 		"status":      "success",
-		"session_id":  sessionID,
+		"session_id":  sess.ID,
 		"answer":      result.Answer,
 		"steps":       result.Steps,
 		"duration_ms": result.Duration.Milliseconds(),
