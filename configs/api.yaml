@@ -31,3 +31,9 @@ monitoring:
   prometheus:
     enable: true
     port: 9092
+  # 链路追踪（OpenTelemetry），未配置 endpoint 时可使用环境变量 OTEL_EXPORTER_OTLP_ENDPOINT
+  tracing:
+    enable: false
+    service_name: "rag-api"
+    export_endpoint: ""   # 如 "localhost:4317"
+    insecure: true

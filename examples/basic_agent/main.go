@@ -45,9 +45,15 @@ func main() {
 		if !ok {
 			break
 		}
-		fmt.Printf("事件类型: %s\n", event.Type)
-		if event.Message != nil {
-			fmt.Printf("内容: %s\n", event.Message.Content)
+		if event.Err != nil {
+			fmt.Printf("错误: %v\n", event.Err)
+			continue
+		}
+		if event.Output != nil && event.Output.MessageOutput != nil {
+			msg := event.Output.MessageOutput.Message
+			if msg != nil && msg.Content != "" {
+				fmt.Printf("消息: %s\n", msg.Content)
+			}
 		}
 	}
 }

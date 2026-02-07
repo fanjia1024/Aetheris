@@ -24,17 +24,17 @@ func main() {
 	graph := compose.NewGraph[*Input, *Output]()
 
 	// 添加验证节点
-	graph.AddLambdaNode("validate", func(ctx context.Context, input *Input) (*Output, error) {
+	graph.AddLambdaNode("validate", compose.InvokableLambda(func(ctx context.Context, input *Input) (*Output, error) {
 		if input.Query == "" {
 			return nil, fmt.Errorf("查询不能为空")
 		}
 		return &Output{Result: input.Query}, nil
-	})
+	}))
 
-	// 添加格式化节点
-	graph.AddLambdaNode("format", func(ctx context.Context, input *Input) (*Output, error) {
-		return &Output{Result: fmt.Sprintf("格式化结果: %s", input.Query)}, nil
-	})
+	// 添加格式化节点（输入为上一节点 validate 的 *Output）
+	graph.AddLambdaNode("format", compose.InvokableLambda(func(ctx context.Context, input *Output) (*Output, error) {
+		return &Output{Result: fmt.Sprintf("格式化结果: %s", input.Result)}, nil
+	}))
 
 	// 添加边
 	graph.AddEdge(compose.START, "validate")

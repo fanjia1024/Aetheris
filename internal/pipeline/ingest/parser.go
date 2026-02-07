@@ -107,7 +107,8 @@ func (p *DocumentParser) registerParsers() {
 	p.parsers["text/markdown"] = &MarkdownParser{}
 	p.parsers["text/html"] = &HTMLParser{}
 	p.parsers["application/json"] = &JSONParser{}
-	
+	p.parsers["application/pdf"] = &PDFParser{}
+
 	// 注册默认解析器
 	p.parsers["default"] = &TextParser{}
 }
@@ -196,4 +197,17 @@ func (p *JSONParser) Parse(content string, metadata map[string]interface{}) (str
 // Supports 支持的内容类型
 func (p *JSONParser) Supports(contentType string) bool {
 	return contentType == "application/json"
+}
+
+// PDFParser PDF 解析器（正文已在 Loader 阶段提取，此处仅透传）
+type PDFParser struct{}
+
+// Parse 原样返回已提取的正文
+func (p *PDFParser) Parse(content string, metadata map[string]interface{}) (string, error) {
+	return content, nil
+}
+
+// Supports 支持的内容类型
+func (p *PDFParser) Supports(contentType string) bool {
+	return contentType == "application/pdf"
 }

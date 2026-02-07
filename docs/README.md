@@ -11,6 +11,8 @@
 ## 使用与 API
 
 - [使用说明（usage.md）](usage.md) — 启动方式、环境变量、典型流程、API 端点汇总、常见问题
+- [端到端测试（test-e2e.md）](test-e2e.md) — 上传 → 解析 → 切分 → 索引 → 检索的完整测试步骤（PDF / AGENTS.md）
+- [链路追踪（tracing.md）](tracing.md) — OpenTelemetry 配置、OTEL_EXPORTER_OTLP_ENDPOINT、本地 Jaeger 查看 trace
 
 ## 示例与部署
 

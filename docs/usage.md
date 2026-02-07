@@ -34,6 +34,7 @@ go run ./cmd/cli
 - **API Key**：在 `configs/model.yaml` 中可写为 `api_key: "${OPENAI_API_KEY}"`，运行时从环境变量替换。
 - **敏感项**：不要将真实 API Key 提交到仓库，使用环境变量或密钥管理。
 - **存储**：API 默认使用 memory 存储（重启后数据丢失）；生产可配置 MySQL/Milvus 等（需实现对应 Store）。
+- **链路追踪**：在 `configs/api.yaml` 的 `monitoring.tracing` 下可开启 OpenTelemetry；未配置 `export_endpoint` 时使用环境变量 `OTEL_EXPORTER_OTLP_ENDPOINT`。详见 [链路追踪（tracing.md）](tracing.md)。
 
 ## 典型流程
 
@@ -94,5 +95,6 @@ curl -X POST http://localhost:8080/api/query/batch \
 - **无 OPENAI_API_KEY**：未设置或未在配置中填写时，API 仍可启动，但不会注册带真实 LLM/Embedding 的 query 与 ingest 工作流，查询/上传会走占位或返回错误。
 - **memory 存储**：默认元数据与向量均为内存实现，进程重启后数据清空；需要持久化请配置并实现对应存储类型。
 - **配置未生效**：确认 API 使用 `LoadAPIConfigWithModel`（cmd/api 已使用），并检查 `configs/model.yaml` 中 `defaults.llm`、`defaults.embedding` 与对应 provider/model 键是否存在。
+- **链路追踪**：需在 `configs/api.yaml` 中设置 `monitoring.tracing.enable: true` 并配置 `export_endpoint`（或设置 `OTEL_EXPORTER_OTLP_ENDPOINT`），否则不会上报 trace；本地可用 Jaeger 等 OTLP 后端查看，见 [tracing.md](tracing.md)。
 
 架构与模块职责以 [design/](design/) 为准；部署步骤以各 [deployments/](../deployments/) 下 README 为准。

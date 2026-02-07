@@ -7,6 +7,7 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino-ext/components/model/openai"
 )
@@ -25,14 +26,14 @@ func main() {
 	}
 
 	// 创建工具
-	calculatorTool := tool.NewBaseTool(
-		"calculator",
-		"执行数学计算",
-		func(ctx context.Context, input string) (string, error) {
-			// 这里可以实现实际的计算逻辑
-			return fmt.Sprintf("计算结果: %s", input), nil
-		},
-	)
+	calculatorTool, err := utils.InferTool("calculator", "执行数学计算", func(ctx context.Context, input string) (string, error) {
+		// 这里可以实现实际的计算逻辑
+		return fmt.Sprintf("计算结果: %s", input), nil
+	})
+	if err != nil {
+		fmt.Printf("创建工具失败: %v\n", err)
+		return
+	}
 
 	// 创建 ChatModelAgent
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
@@ -62,9 +63,15 @@ func main() {
 		if !ok {
 			break
 		}
-		fmt.Printf("事件类型: %s\n", event.Type)
-		if event.Message != nil {
-			fmt.Printf("内容: %s\n", event.Message.Content)
+		if event.Err != nil {
+			fmt.Printf("错误: %v\n", event.Err)
+			continue
+		}
+		if event.Output != nil && event.Output.MessageOutput != nil {
+			msg := event.Output.MessageOutput.Message
+			if msg != nil && msg.Content != "" {
+				fmt.Printf("消息: %s\n", msg.Content)
+			}
 		}
 	}
 }

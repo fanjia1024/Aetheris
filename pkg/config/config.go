@@ -145,6 +145,15 @@ type LogConfig struct {
 // MonitoringConfig 监控配置
 type MonitoringConfig struct {
 	Prometheus PrometheusConfig `mapstructure:"prometheus"`
+	Tracing    TracingConfig    `mapstructure:"tracing"`
+}
+
+// TracingConfig 链路追踪配置（OpenTelemetry）
+type TracingConfig struct {
+	Enable         bool   `mapstructure:"enable"`
+	ServiceName    string `mapstructure:"service_name"`
+	ExportEndpoint string `mapstructure:"export_endpoint"`
+	Insecure       bool   `mapstructure:"insecure"`
 }
 
 // PrometheusConfig Prometheus 配置

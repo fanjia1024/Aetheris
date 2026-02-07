@@ -2,6 +2,7 @@ package http
 
 import (
 	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/cloudwego/hertz/pkg/common/config"
 	"rag-platform/internal/api/http/middleware"
 )
 
@@ -19,9 +20,10 @@ func NewRouter(handler *Handler, mw *middleware.Middleware) *Router {
 	}
 }
 
-// Build 创建 Hertz 引擎并注册路由与中间件，供 app 层 Run(addr) 使用
-func (r *Router) Build(addr string) *server.Hertz {
-	h := server.Default(server.WithHostPorts(addr))
+// Build 创建 Hertz 引擎并注册路由与中间件，供 app 层 Run(addr) 使用；opts 可传入 server.WithTracer 等
+func (r *Router) Build(addr string, opts ...config.Option) *server.Hertz {
+	allOpts := append([]config.Option{server.WithHostPorts(addr)}, opts...)
+	h := server.Default(allOpts...)
 
 	// 全局中间件：访问日志、CORS
 	h.Use(r.middleware.AccessLog())

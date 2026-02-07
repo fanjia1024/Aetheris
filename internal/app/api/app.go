@@ -9,6 +9,8 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 	hertzslog "github.com/hertz-contrib/logger/slog"
+	"github.com/hertz-contrib/obs-opentelemetry/provider"
+	hertztracing "github.com/hertz-contrib/obs-opentelemetry/tracing"
 
 	"rag-platform/internal/api/http"
 	"rag-platform/internal/api/http/middleware"
@@ -19,12 +21,18 @@ import (
 	"rag-platform/internal/storage/vector"
 )
 
+// otelProviderShutdown 用于优雅关闭时关闭 OpenTelemetry provider
+type otelProviderShutdown interface {
+	Shutdown(ctx context.Context) error
+}
+
 // App API 应用（装配 HTTP Router、Handler、Middleware；仅依赖 Engine + DocumentService）
 type App struct {
-	config *app.Bootstrap
-	engine *eino.Engine
-	router *http.Router
-	hertz  *server.Hertz
+	config       *app.Bootstrap
+	engine       *eino.Engine
+	router       *http.Router
+	hertz        *server.Hertz
+	otelProvider otelProviderShutdown
 }
 
 // NewApp 创建 API 应用（由 cmd/api 调用）
@@ -114,12 +122,44 @@ func (a *App) Run(addr string) error {
 	)
 	hlog.SetLogger(hertzLogger)
 
-	a.hertz = a.router.Build(addr)
+	// 可选：启用链路追踪（OpenTelemetry）
+	if a.config.Config != nil && a.config.Config.Monitoring.Tracing.Enable {
+		serviceName := a.config.Config.Monitoring.Tracing.ServiceName
+		if serviceName == "" {
+			serviceName = "rag-api"
+		}
+		exportEndpoint := a.config.Config.Monitoring.Tracing.ExportEndpoint
+		if exportEndpoint == "" {
+			exportEndpoint = os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+		}
+		if exportEndpoint != "" {
+			opts := []provider.Option{
+				provider.WithServiceName(serviceName),
+				provider.WithExportEndpoint(exportEndpoint),
+			}
+			if a.config.Config.Monitoring.Tracing.Insecure {
+				opts = append(opts, provider.WithInsecure())
+			}
+			p := provider.NewOpenTelemetryProvider(opts...)
+			a.otelProvider = p
+			tracerOpt, cfg := hertztracing.NewServerTracer()
+			a.hertz = a.router.Build(addr, tracerOpt)
+			a.hertz.Use(hertztracing.ServerMiddleware(cfg))
+			a.config.Logger.Info("链路追踪已启用", "service_name", serviceName, "endpoint", exportEndpoint)
+		} else {
+			a.hertz = a.router.Build(addr)
+		}
+	} else {
+		a.hertz = a.router.Build(addr)
+	}
 	return a.hertz.Run()
 }
 
 // Shutdown 优雅关闭（传入 ctx 以支持超时，如 cmd 层 WithTimeout）
 func (a *App) Shutdown(ctx context.Context) error {
+	if a.otelProvider != nil {
+		_ = a.otelProvider.Shutdown(ctx)
+	}
 	if a.hertz != nil {
 		if err := a.hertz.Shutdown(ctx); err != nil {
 			return err

@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/schema"
 	"github.com/cloudwego/eino-ext/components/model/openai"
 )
 
@@ -46,26 +47,38 @@ func main() {
 		if !ok {
 			break
 		}
-		
-		switch event.Type {
-		case adk.EventTypeMessage:
-			if event.Message != nil {
-				fmt.Printf("消息: %s\n", event.Message.Content)
+		if event.Err != nil {
+			fmt.Printf("错误: %v\n", event.Err)
+			continue
+		}
+		if event.Output != nil && event.Output.MessageOutput != nil {
+			mv := event.Output.MessageOutput
+			msg := mv.Message
+			role := mv.Role
+			toolName := mv.ToolName
+			if msg != nil {
+				switch role {
+				case schema.Assistant:
+					if msg.Content != "" {
+						fmt.Printf("消息: %s\n", msg.Content)
+					}
+					for _, tc := range msg.ToolCalls {
+						if tc.Function.Name != "" {
+							fmt.Printf("工具调用: %s\n", tc.Function.Name)
+						}
+					}
+				case schema.Tool:
+					if toolName != "" {
+						fmt.Printf("工具响应 [%s]: %s\n", toolName, msg.Content)
+					} else {
+						fmt.Printf("工具响应: %s\n", msg.Content)
+					}
+				default:
+					if msg.Content != "" {
+						fmt.Printf("消息: %s\n", msg.Content)
+					}
+				}
 			}
-		case adk.EventTypeToolCall:
-			if event.ToolCall != nil {
-				fmt.Printf("工具调用: %s\n", event.ToolCall.Name)
-			}
-		case adk.EventTypeToolResponse:
-			if event.ToolResponse != nil {
-				fmt.Printf("工具响应: %s\n", event.ToolResponse.Result)
-			}
-		case adk.EventTypeError:
-			if event.Error != nil {
-				fmt.Printf("错误: %s\n", event.Error.Message)
-			}
-		default:
-			fmt.Printf("未知事件类型: %s\n", event.Type)
 		}
 	}
 

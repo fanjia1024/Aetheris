@@ -102,25 +102,29 @@ func (l *DocumentLoader) ProcessDocument(doc *common.Document) (*common.Document
 
 // loadFromPath 从文件路径加载
 func (l *DocumentLoader) loadFromPath(ctx *common.PipelineContext, path string) (*common.Document, error) {
-	// 读取文件内容
 	content, err := ioutil.ReadFile(path)
 	if err != nil {
 		return nil, common.NewPipelineError(l.name, "读取文件失败", err)
 	}
 
-	// 获取文件元数据
 	fileInfo, err := os.Stat(path)
 	if err != nil {
 		return nil, common.NewPipelineError(l.name, "获取文件信息失败", err)
 	}
 
-	// 获取文件类型
 	contentType := l.getContentType(path)
+	docContent := string(content)
+	if contentType == "application/pdf" {
+		extracted, err := extractPDFText(content)
+		if err != nil {
+			return nil, common.NewPipelineError(l.name, "PDF 文本提取失败", err)
+		}
+		docContent = extracted
+	}
 
-	// 创建文档
 	doc := &common.Document{
-		ID:        uuid.New().String(),
-		Content:   string(content),
+		ID:      uuid.New().String(),
+		Content: docContent,
 		Metadata: map[string]interface{}{
 			"file_path":    path,
 			"file_name":    filepath.Base(path),
@@ -141,27 +145,37 @@ func (l *DocumentLoader) loadFromPath(ctx *common.PipelineContext, path string) 
 
 // loadFromFile 从上传文件加载
 func (l *DocumentLoader) loadFromFile(ctx *common.PipelineContext, fileHeader *multipart.FileHeader) (*common.Document, error) {
-	// 打开文件
 	file, err := fileHeader.Open()
 	if err != nil {
 		return nil, common.NewPipelineError(l.name, "打开文件失败", err)
 	}
 	defer file.Close()
 
-	// 读取文件内容
 	content, err := ioutil.ReadAll(file)
 	if err != nil {
 		return nil, common.NewPipelineError(l.name, "读取文件失败", err)
 	}
 
-	// 创建文档
+	contentType := fileHeader.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = l.getContentType(fileHeader.Filename)
+	}
+	docContent := string(content)
+	if contentType == "application/pdf" || strings.ToLower(filepath.Ext(fileHeader.Filename)) == ".pdf" {
+		extracted, err := extractPDFText(content)
+		if err != nil {
+			return nil, common.NewPipelineError(l.name, "PDF 文本提取失败", err)
+		}
+		docContent = extracted
+	}
+
 	doc := &common.Document{
-		ID:        uuid.New().String(),
-		Content:   string(content),
+		ID:      uuid.New().String(),
+		Content: docContent,
 		Metadata: map[string]interface{}{
 			"file_name":    fileHeader.Filename,
 			"file_size":    fileHeader.Size,
-			"content_type": fileHeader.Header.Get("Content-Type"),
+			"content_type": contentType,
 			"loader":       l.name,
 		},
 		CreatedAt: time.Now(),

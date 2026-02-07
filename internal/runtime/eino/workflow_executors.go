@@ -36,6 +36,7 @@ func NewIngestWorkflowExecutor(loader *ingest.DocumentLoader, parser *ingest.Doc
 }
 
 // Execute 实现 WorkflowExecutor
+// 请求 context 已带 HTTP 层 span，可在此处用 otel trace.SpanFromContext(ctx) 为 loader/parser/splitter/embedding/indexer 创建子 span 以细化链路。
 func (e *ingestWorkflowExecutor) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
 	if e.logger != nil {
 		e.logger.Info("执行 ingest_pipeline")
@@ -138,6 +139,7 @@ func NewQueryWorkflowExecutor(retriever *query.Retriever, generator *query.Gener
 }
 
 // Execute 实现 WorkflowExecutor：embed query（若需）→ retriever → generator
+// 请求 context 已带 HTTP 层 span，可在此处为 retrieve/generate 等步骤创建子 span 以细化链路。
 func (e *queryWorkflowExecutor) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
 	if e.logger != nil {
 		e.logger.Info("执行 query_pipeline")
