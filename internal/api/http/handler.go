@@ -9,15 +9,23 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
+	"rag-platform/internal/agent"
 	appcore "rag-platform/internal/app"
+	"rag-platform/internal/model/llm"
 	"rag-platform/internal/pipeline/common"
 	"rag-platform/internal/runtime/eino"
 )
+
+// AgentRunner 可选的 Agent 入口（供 POST /api/agent/run 使用）
+type AgentRunner interface {
+	Run(ctx context.Context, sessionID string, userQuery string, history []llm.Message) (*agent.RunResult, error)
+}
 
 // Handler HTTP 处理器（仅依赖 Engine + DocumentService，不直接调用 storage）
 type Handler struct {
 	engine     *eino.Engine
 	docService appcore.DocumentService
+	agent      AgentRunner
 }
 
 // NewHandler 创建新的 HTTP 处理器
@@ -26,6 +34,11 @@ func NewHandler(engine *eino.Engine, docService appcore.DocumentService) *Handle
 		engine:     engine,
 		docService: docService,
 	}
+}
+
+// SetAgent 设置 Agent 入口（可选，用于 /api/agent/run）
+func (h *Handler) SetAgent(agent AgentRunner) {
+	h.agent = agent
 }
 
 // HealthCheck 健康检查
@@ -286,4 +299,52 @@ func (h *Handler) SystemMetrics(ctx context.Context, c *app.RequestContext) {
 	}
 
 	c.JSON(consts.StatusOK, metrics)
+}
+
+// AgentRunRequest POST /api/agent/run 请求体
+type AgentRunRequest struct {
+	Query     string         `json:"query" binding:"required"`
+	SessionID string         `json:"session_id"`
+	History   []llm.Message `json:"history"`
+}
+
+// AgentRun Agent 入口：解析 query、可选 session_id，调用 Agent.Run，返回 JSON
+func (h *Handler) AgentRun(ctx context.Context, c *app.RequestContext) {
+	if h.agent == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{
+			"error": "Agent 未配置",
+		})
+		return
+	}
+	var req AgentRunRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(consts.StatusBadRequest, map[string]string{
+			"error": "请求参数错误",
+		})
+		return
+	}
+	sessionID := req.SessionID
+	if sessionID == "" {
+		sessionID = fmt.Sprintf("session-%d", time.Now().UnixNano())
+	}
+	history := req.History
+	if history == nil {
+		history = []llm.Message{}
+	}
+	result, err := h.agent.Run(ctx, sessionID, req.Query, history)
+	if err != nil {
+		hlog.CtxErrorf(ctx, "Agent Run 失败: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"error":   "Agent 执行失败",
+			"details": err.Error(),
+		})
+		return
+	}
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"status":      "success",
+		"session_id":  sessionID,
+		"answer":      result.Answer,
+		"steps":       result.Steps,
+		"duration_ms": result.Duration.Milliseconds(),
+	})
 }

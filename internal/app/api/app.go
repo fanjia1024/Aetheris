@@ -17,14 +17,21 @@ import (
 	"github.com/hertz-contrib/obs-opentelemetry/provider"
 	hertztracing "github.com/hertz-contrib/obs-opentelemetry/tracing"
 
+	"rag-platform/internal/agent"
+	"rag-platform/internal/agent/executor"
+	"rag-platform/internal/agent/memory"
+	"rag-platform/internal/agent/planner"
 	"rag-platform/internal/api/http"
 	"rag-platform/internal/api/http/middleware"
 	"rag-platform/internal/app"
 	"rag-platform/internal/pipeline/ingest"
 	"rag-platform/internal/pipeline/query"
 	"rag-platform/internal/runtime/eino"
+	"rag-platform/internal/model/llm"
 	"rag-platform/internal/splitter"
 	"rag-platform/internal/storage/vector"
+	"rag-platform/internal/tool/builtin"
+	"rag-platform/internal/tool/registry"
 )
 
 // otelProviderShutdown 用于优雅关闭时关闭 OpenTelemetry provider
@@ -65,6 +72,9 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		return nil, fmt.Errorf("初始化 eino 引擎失败: %w", err)
 	}
 
+	var llmClientForAgent llm.Client
+	var generatorForAgent eino.Generator
+
 	// 装配并注册 query_pipeline（Retriever + Generator + queryEmbedder）
 	if bootstrap.Config != nil && bootstrap.VectorStore != nil {
 		llmClient, errLLM := app.NewLLMClientFromConfig(bootstrap.Config)
@@ -80,6 +90,8 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 			retrieverAdapter := NewRetrieverAdapter(queryEmbedder, bootstrap.VectorStore, 0.3)
 			ragGen := NewRAGGeneratorAdapter(retrieverAdapter, generator, queryEmbedder)
 			engine.SetQueryComponents(retrieverAdapter, ragGen)
+			llmClientForAgent = llmClient
+			generatorForAgent = ragGen
 		}
 	}
 
@@ -112,8 +124,20 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		}
 	}
 
+	// Agent Runtime：ToolRegistry + Builtin + Planner + Executor + Memory + Agent
+	toolReg := registry.New()
+	builtin.RegisterBuiltin(toolReg, engine, generatorForAgent)
+	plannerAgent := planner.NewLLMPlanner(llmClientForAgent)
+	execAgent := executor.NewRegistryExecutor(toolReg)
+	shortTerm := memory.NewShortTerm(50)
+	workingMem := memory.NewWorking()
+	agentRunner := agent.New(plannerAgent, execAgent, toolReg,
+		agent.WithShortTermMemory(shortTerm),
+		agent.WithWorkingMemory(workingMem),
+	)
 	docService := app.NewDocumentService(bootstrap.MetadataStore)
 	handler := http.NewHandler(engine, docService)
+	handler.SetAgent(agentRunner)
 	mw := middleware.NewMiddleware()
 	router := http.NewRouter(handler, mw)
 

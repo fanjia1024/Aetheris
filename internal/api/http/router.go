@@ -65,6 +65,11 @@ func (r *Router) Build(addr string, opts ...config.Option) *server.Hertz {
 		query.POST("/batch", authHandler, r.handler.BatchQuery)
 	}
 
+	agentGroup := api.Group("/agent")
+	{
+		agentGroup.POST("/run", authHandler, r.handler.AgentRun)
+	}
+
 	system := api.Group("/system")
 	{
 		system.GET("/status", authHandler, r.handler.SystemStatus)
