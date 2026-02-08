@@ -32,6 +32,7 @@ go run ./cmd/cli
 ## 环境变量与配置
 
 - **API Key**：在 `configs/model.yaml` 中可写为 `api_key: "${OPENAI_API_KEY}"`，运行时从环境变量替换。
+- **Planner 类型（v1 Agent）**：`PLANNER_TYPE=rule` 时，新创建的 v1 Agent 使用**规则规划器**（无 LLM，返回固定 TaskGraph），便于稳定调试 Executor；不设置或设为其他值时使用 **LLM 规划器**。启动日志会提示当前使用的规划器。
 - **敏感项**：不要将真实 API Key 提交到仓库，使用环境变量或密钥管理。
 - **存储**：API 默认使用 memory 存储（重启后数据丢失）；生产可配置 MySQL/Milvus 等（需实现对应 Store）。
 - **链路追踪**：在 `configs/api.yaml` 的 `monitoring.tracing` 下可开启 OpenTelemetry；未配置 `export_endpoint` 时使用环境变量 `OTEL_EXPORTER_OTLP_ENDPOINT`。详见 [链路追踪（tracing.md）](tracing.md)。
@@ -53,7 +54,31 @@ curl -X POST http://localhost:8080/api/documents/upload \
 curl http://localhost:8080/api/documents/
 ```
 
-### 3. 发起查询
+### 3. 使用 v1 Agent（推荐）
+
+```bash
+# 创建 Agent
+curl -X POST http://localhost:8080/api/agents \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-agent"}'
+# 返回 {"id": "agent-xxx", "name": "my-agent"}
+
+# 向 Agent 发送消息（会触发规划与执行）
+curl -X POST http://localhost:8080/api/agents/<agent-id>/message \
+  -H "Content-Type: application/json" \
+  -d '{"message": "你的问题"}'
+# 返回 202 Accepted
+
+# 查看 Agent 状态
+curl http://localhost:8080/api/agents/<agent-id>/state
+
+# 列出所有 Agent
+curl http://localhost:8080/api/agents
+```
+
+执行路径：消息写入 Session → Scheduler 唤醒 → Planner 产出 TaskGraph → 编译为 eino DAG → 执行（LLM/Tool/Workflow 节点）。RAG 可通过 workflow 节点被规划器选用。
+
+### 4. 发起查询（已废弃，建议用 Agent 发消息）
 
 ```bash
 curl -X POST http://localhost:8080/api/query \
@@ -61,9 +86,9 @@ curl -X POST http://localhost:8080/api/query \
   -d '{"query": "你的问题", "top_k": 10}'
 ```
 
-将走 query_pipeline：问题向量化 → 检索 → LLM 生成回答。
+将走 query_pipeline：问题向量化 → 检索 → LLM 生成回答。**已标记 Deprecated**，推荐使用 `POST /api/agents/{id}/message`。
 
-### 4. 批量查询
+### 5. 批量查询
 
 ```bash
 curl -X POST http://localhost:8080/api/query/batch \
@@ -76,6 +101,14 @@ curl -X POST http://localhost:8080/api/query/batch \
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | /api/health | 健康检查 |
+| **v1 Agent** | | |
+| POST | /api/agents | 创建 Agent |
+| GET | /api/agents | 列出所有 Agent |
+| POST | /api/agents/:id/message | 向 Agent 发送消息（唤醒执行） |
+| GET | /api/agents/:id/state | Agent 状态（status、current_task、last_checkpoint） |
+| POST | /api/agents/:id/resume | 恢复执行 |
+| POST | /api/agents/:id/stop | 停止执行 |
+| **文档与知识库** | | |
 | POST | /api/documents/upload | 上传文档 |
 | GET | /api/documents/ | 文档列表 |
 | GET | /api/documents/:id | 文档详情 |
@@ -83,16 +116,22 @@ curl -X POST http://localhost:8080/api/query/batch \
 | GET | /api/knowledge/collections | 集合列表 |
 | POST | /api/knowledge/collections | 创建集合 |
 | DELETE | /api/knowledge/collections/:id | 删除集合 |
-| POST | /api/query | 单条查询 |
+| **查询（Deprecated）** | | |
+| POST | /api/query | 单条查询（推荐用 Agent message） |
 | POST | /api/query/batch | 批量查询 |
+| **Legacy Agent** | | |
+| POST | /api/agent/run | 按 session 执行 Agent（query + session_id） |
+| **系统** | | |
 | GET | /api/system/status | 系统状态（workflows、agents） |
 | GET | /api/system/metrics | 系统指标 |
 
-以上文档类、知识库类、查询类路由可能挂有鉴权中间件，见 `internal/api/http/router.go`。
+以上文档类、知识库类、Agent 类、查询类路由可能挂有鉴权中间件，见 `internal/api/http/router.go`。
 
 ## 常见问题
 
-- **无 OPENAI_API_KEY**：未设置或未在配置中填写时，API 仍可启动，但不会注册带真实 LLM/Embedding 的 query 与 ingest 工作流，查询/上传会走占位或返回错误。
+- **v1 Agent 与 /api/query 区别**：v1 Agent 以「Agent + Session + 规划 → TaskGraph → eino DAG」为唯一执行路径，RAG 作为可选工具；`/api/query` 仍直连 query_pipeline，已标记废弃，建议新用法走 Agent 发消息。
+- **PLANNER_TYPE=rule**：用于调试时关闭 LLM 规划，规则规划器返回固定单节点 llm TaskGraph，便于验证 Executor 与 DAG 链路。
+- **无 OPENAI_API_KEY**：未设置或未在配置中填写时，API 仍可启动，但不会注册带真实 LLM/Embedding 的 query 与 ingest 工作流，查询/上传会走占位或返回错误。使用 RulePlanner 时规划不依赖 LLM，但执行 llm 节点仍需要 LLM 配置。
 - **memory 存储**：默认元数据与向量均为内存实现，进程重启后数据清空；需要持久化请配置并实现对应存储类型。
 - **配置未生效**：确认 API 使用 `LoadAPIConfigWithModel`（cmd/api 已使用），并检查 `configs/model.yaml` 中 `defaults.llm`、`defaults.embedding` 与对应 provider/model 键是否存在。
 - **链路追踪**：需在 `configs/api.yaml` 中设置 `monitoring.tracing.enable: true` 并配置 `export_endpoint`（或设置 `OTEL_EXPORTER_OTLP_ENDPOINT`），否则不会上报 trace；本地可用 Jaeger 等 OTLP 后端查看，见 [tracing.md](tracing.md)。

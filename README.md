@@ -1,16 +1,16 @@
 # CoRag
 
-Go + eino 驱动的 RAG/Agent 平台：统一流程编排、Agent 调度与模型调用，支持复杂 RAG Pipeline 与 DAG Workflow。
+Go + eino 驱动的 **Agent Runtime** 与 RAG 平台：以 Agent 为第一公民，统一流程编排、规划与执行，支持 TaskGraph → eino DAG、工具调用与 RAG Pipeline 作为能力之一。
 
 ## 架构概览
 
-- **API 层**：HTTP/REST，提供文档上传、查询、知识库管理、系统状态等接口。
-- **编排核心（eino）**：Workflow/DAG 执行、Agent 调度、Context 传递；所有 Pipeline 仅由 eino 调度。
-- **领域 Pipeline（Go 原生）**：Ingest（loader → parser → splitter → embedding → indexer）、Query（retriever → generator）、以及可扩展的专项 Pipeline。
-- **模型抽象**：LLM、Embedding、Vision 多厂商抽象；支持运行时切换。
-- **存储**：元数据、向量、对象、缓存抽象；当前默认提供 memory 实现。
+- **API 层**：HTTP/REST，提供 **v1 Agent API**（创建/发消息/状态/恢复/停止）、文档上传、查询、知识库管理、系统状态等接口。
+- **Agent 中心**：用户请求经 Agent Manager → Session → Planner 产出 TaskGraph → **执行适配层** 编译为 eino DAG → 执行；RAG/Pipeline 作为 workflow 或工具节点可被规划器选用，不再作为唯一入口。
+- **编排核心（eino）**：仅作为 Agent 的**执行内核**被调用（DAG 调度、Context 传递）；不再直接面对「用户查询」请求。
+- **领域 Pipeline**：Ingest、Query 等由 eino 调度，可作为 TaskGraph 中的 workflow 节点被 Agent 调用。
+- **模型与存储**：LLM、Embedding、Vision 多厂商抽象；元数据、向量、对象、缓存抽象，当前默认提供 memory 实现。
 
-详见 [design/](design/) 下的架构与仓库结构说明。
+详见 [design/](design/) 与 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 前置依赖
 
@@ -37,8 +37,9 @@ go run ./cmd/api
 
 ## 主要功能
 
+- **v1 Agent（推荐）**：`POST /api/agents` 创建 Agent，`POST /api/agents/:id/message` 发送消息并触发规划与执行；支持状态查询、恢复、停止。规划器可通过环境变量 `PLANNER_TYPE=rule` 切换为无 LLM 的规则规划器便于调试。
 - **文档上传**：`POST /api/documents/upload` 触发 ingest_pipeline（解析 → 切片 → 向量化 → 写入向量与元数据）。
-- **查询**：`POST /api/query` 使用 query_pipeline（query 向量化 → 检索 → 生成回答）。
+- **查询**：`POST /api/query` 使用 query_pipeline（已标记 Deprecated，推荐通过 Agent 发消息交互）。
 - **知识库**：集合的列表/创建/删除（见 `/api/knowledge/collections`）。
 - **系统**：`/api/health`、`/api/system/status`、`/api/system/metrics`。
 

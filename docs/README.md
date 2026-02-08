@@ -2,6 +2,10 @@
 
 本目录为架构说明、使用指南与 API 文档的入口。
 
+## 版本与变更
+
+- [CHANGELOG.md](../CHANGELOG.md) — 版本历史与重要变更（v1 Agent API、TaskGraph 执行适配层、RulePlanner、Planner 选择等）
+
 ## 设计文档
 
 - [design/core.md](../design/core.md) — 总体架构、分层、Pipeline 与 eino 编排核心
