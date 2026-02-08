@@ -28,7 +28,7 @@ func (w *wrappedTool) Schema() map[string]any {
 	return m
 }
 
-func (w *wrappedTool) Execute(ctx context.Context, _ *session.Session, input map[string]any) (any, error) {
+func (w *wrappedTool) Execute(ctx context.Context, _ *session.Session, input map[string]any, state interface{}) (any, error) {
 	res, err := w.t.Execute(ctx, input)
 	if err != nil {
 		return nil, err

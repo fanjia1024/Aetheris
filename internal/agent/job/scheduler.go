@@ -1,0 +1,87 @@
+package job
+
+import (
+	"context"
+	"sync"
+	"time"
+)
+
+// RunJobFunc 执行单条 Job 的回调（由应用层注入，如 Runner.RunForJob）
+type RunJobFunc func(ctx context.Context, j *Job) error
+
+// SchedulerConfig 调度器配置：并发上限、重试与 backoff
+type SchedulerConfig struct {
+	MaxConcurrency int           // 最大并发执行数，<=0 表示 1
+	RetryMax       int           // 最大重试次数（不含首次）
+	Backoff        time.Duration // 重试前等待时间
+}
+
+// Scheduler 在 JobStore 之上提供排队、并发限制与重试；形态为 API→Job Queue→Scheduler→Worker→Executor
+type Scheduler struct {
+	store   JobStore
+	runJob  RunJobFunc
+	config  SchedulerConfig
+	stopCh  chan struct{}
+	wg      sync.WaitGroup
+	limiter chan struct{} // 信号量，限制并发
+}
+
+// NewScheduler 创建调度器；config 为并发与重试策略
+func NewScheduler(store JobStore, runJob RunJobFunc, config SchedulerConfig) *Scheduler {
+	max := config.MaxConcurrency
+	if max <= 0 {
+		max = 1
+	}
+	return &Scheduler{
+		store:   store,
+		runJob:  runJob,
+		config:  config,
+		stopCh:  make(chan struct{}),
+		limiter: make(chan struct{}, max),
+	}
+}
+
+// Start 启动调度循环：最多 MaxConcurrency 个 worker 拉取 Pending、执行、成功则 UpdateStatus(Completed)，失败则按 RetryMax/Backoff 重试或 UpdateStatus(Failed)
+func (s *Scheduler) Start(ctx context.Context) {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		for {
+			select {
+			case <-s.stopCh:
+				return
+			case <-ctx.Done():
+				return
+			case s.limiter <- struct{}{}:
+				// 占一个槽位后拉取
+				j, _ := s.store.ClaimNextPending(ctx)
+				if j == nil {
+					<-s.limiter
+					time.Sleep(200 * time.Millisecond)
+					continue
+				}
+				go func(job *Job) {
+					defer func() { <-s.limiter }()
+					runCtx := context.Background()
+					err := s.runJob(runCtx, job)
+					if err != nil {
+						if job.RetryCount < s.config.RetryMax {
+							time.Sleep(s.config.Backoff)
+							_ = s.store.Requeue(runCtx, job)
+						} else {
+							_ = s.store.UpdateStatus(runCtx, job.ID, StatusFailed)
+						}
+					} else {
+						_ = s.store.UpdateStatus(runCtx, job.ID, StatusCompleted)
+					}
+				}(j)
+			}
+		}
+	}()
+}
+
+// Stop 优雅退出：关闭 stopCh，等待当前循环结束（不等待已在执行的 job 完成）
+func (s *Scheduler) Stop() {
+	close(s.stopCh)
+	s.wg.Wait()
+}

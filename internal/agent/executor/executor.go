@@ -71,7 +71,7 @@ func (e *SessionRegistryExecutor) ExecuteStep(ctx context.Context, sess *session
 		input = make(map[string]any)
 	}
 	normalizeInput(input)
-	out, err := t.Execute(ctx, sess, input)
+	out, err := t.Execute(ctx, sess, input, nil)
 	if err != nil {
 		return tool.ToolResult{Err: err.Error()}, nil
 	}

@@ -2,19 +2,24 @@ package http
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
+	"github.com/google/uuid"
 
 	"rag-platform/internal/agent"
+	"rag-platform/internal/agent/job"
 	agentruntime "rag-platform/internal/agent/runtime"
 	appcore "rag-platform/internal/app"
 	"rag-platform/internal/model/llm"
 	"rag-platform/internal/pipeline/common"
 	"rag-platform/internal/runtime/eino"
+	"rag-platform/internal/runtime/jobstore"
 	"rag-platform/internal/runtime/session"
 )
 
@@ -42,9 +47,11 @@ type Handler struct {
 	sessionManager SessionManager
 
 	// v1 Agent Runtime
-	agentManager  *agentruntime.Manager
+	agentManager   *agentruntime.Manager
 	agentScheduler *agentruntime.Scheduler
-	agentCreator  AgentCreator
+	agentCreator   AgentCreator
+	jobStore       job.JobStore
+	jobEventStore  jobstore.JobStore
 }
 
 // NewHandler 创建新的 HTTP 处理器
@@ -70,6 +77,16 @@ func (h *Handler) SetAgentRuntime(manager *agentruntime.Manager, scheduler *agen
 	h.agentManager = manager
 	h.agentScheduler = scheduler
 	h.agentCreator = creator
+}
+
+// SetJobStore 设置 Job 存储；设置后 POST /api/agents/:id/message 将创建 Job 并由 JobRunner 拉取执行，不再通过 WakeAgent 直接触发
+func (h *Handler) SetJobStore(store job.JobStore) {
+	h.jobStore = store
+}
+
+// SetJobEventStore 设置任务事件存储；设置后 message 创建任务时会先追加 JobCreated 事件（与 SetJobStore 双写）
+func (h *Handler) SetJobEventStore(store jobstore.JobStore) {
+	h.jobEventStore = store
 }
 
 // HealthCheck 健康检查
@@ -433,9 +450,9 @@ type AgentMessageRequest struct {
 	Message string `json:"message" binding:"required"`
 }
 
-// AgentMessage 向 Agent 发送消息（写入 Session 并唤醒）
+// AgentMessage 向 Agent 发送消息：写入 Session；若已设置 JobStore 则创建 Job 由 JobRunner 拉取执行，否则通过 WakeAgent 触发（兼容旧行为）
 func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
-	if h.agentManager == nil || h.agentScheduler == nil {
+	if h.agentManager == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{
 			"error": "Agent Runtime 未配置",
 		})
@@ -457,9 +474,44 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	agent.Session.AddMessage("user", req.Message)
-	_ = h.agentScheduler.WakeAgent(ctx, id)
+	if h.jobStore != nil {
+		jobID := "job-" + uuid.New().String()
+		if h.jobEventStore != nil {
+			payload, _ := json.Marshal(map[string]string{"agent_id": id, "goal": req.Message})
+			_, errAppend := h.jobEventStore.Append(ctx, jobID, 0, jobstore.JobEvent{
+				JobID: jobID, Type: jobstore.JobCreated, Payload: payload,
+			})
+			if errAppend != nil {
+				hlog.CtxErrorf(ctx, "追加 JobCreated 事件失败: %v", errAppend)
+				if errors.Is(errAppend, jobstore.ErrVersionMismatch) {
+					c.JSON(consts.StatusInternalServerError, map[string]string{
+						"error": "创建任务失败（版本冲突）",
+					})
+					return
+				}
+			}
+		}
+		j := &job.Job{ID: jobID, AgentID: id, Goal: req.Message, Status: job.StatusPending}
+		jobIDOut, errCreate := h.jobStore.Create(ctx, j)
+		if errCreate != nil {
+			hlog.CtxErrorf(ctx, "创建 Job 失败: %v", errCreate)
+			c.JSON(consts.StatusInternalServerError, map[string]string{
+				"error": "创建任务失败",
+			})
+			return
+		}
+		c.JSON(consts.StatusAccepted, map[string]interface{}{
+			"status":   "accepted",
+			"agent_id": id,
+			"job_id":   jobIDOut,
+		})
+		return
+	}
+	if h.agentScheduler != nil {
+		_ = h.agentScheduler.WakeAgent(ctx, id)
+	}
 	c.JSON(consts.StatusAccepted, map[string]interface{}{
-		"status": "accepted",
+		"status":   "accepted",
 		"agent_id": id,
 	})
 }

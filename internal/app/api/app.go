@@ -18,7 +18,9 @@ import (
 	hertztracing "github.com/hertz-contrib/obs-opentelemetry/tracing"
 
 	"rag-platform/internal/agent"
+	agentexec "rag-platform/internal/agent/runtime/executor"
 	"rag-platform/internal/agent/executor"
+	"rag-platform/internal/agent/job"
 	"rag-platform/internal/agent/planner"
 	"rag-platform/internal/agent/runtime"
 	"rag-platform/internal/agent/tools"
@@ -29,6 +31,7 @@ import (
 	"rag-platform/internal/pipeline/ingest"
 	"rag-platform/internal/pipeline/query"
 	"rag-platform/internal/runtime/eino"
+	"rag-platform/internal/runtime/jobstore"
 	"rag-platform/internal/runtime/session"
 	"rag-platform/internal/splitter"
 	"rag-platform/internal/storage/vector"
@@ -48,6 +51,22 @@ type App struct {
 	hertz        *server.Hertz
 	grpcServer   *grpcRun
 	otelProvider otelProviderShutdown
+	jobScheduler *job.Scheduler
+}
+
+// jobStoreForRunnerAdapter 将 job.JobStore 适配为 agentexec.JobStoreForRunner（status int）
+type jobStoreForRunnerAdapter struct {
+	job.JobStore
+}
+
+var _ agentexec.JobStoreForRunner = (*jobStoreForRunnerAdapter)(nil)
+
+func (a *jobStoreForRunnerAdapter) UpdateCursor(ctx context.Context, jobID string, cursor string) error {
+	return a.JobStore.UpdateCursor(ctx, jobID, cursor)
+}
+
+func (a *jobStoreForRunnerAdapter) UpdateStatus(ctx context.Context, jobID string, status int) error {
+	return a.JobStore.UpdateStatus(ctx, jobID, job.JobStatus(status))
 }
 
 // grpcRun 持有 gRPC Server 与 Listener，用于 GracefulStop 时关闭
@@ -152,6 +171,27 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	agentScheduler := runtime.NewScheduler(agentRuntimeManager, RunFuncForScheduler(agentRuntimeManager, dagRunner))
 	agentCreator := NewAgentCreator(agentRuntimeManager, v1Planner, toolsReg)
 	handler.SetAgentRuntime(agentRuntimeManager, agentScheduler, agentCreator)
+	// v0.8 Job System：message -> create Job -> Scheduler（并发/重试）-> Worker -> Executor；Checkpoint 支持恢复
+	jobStore := job.NewJobStoreMem()
+	checkpointStore := runtime.NewCheckpointStoreMem()
+	dagRunner.SetCheckpointStores(checkpointStore, &jobStoreForRunnerAdapter{JobStore: jobStore})
+	runJob := func(ctx context.Context, j *job.Job) error {
+		agent, _ := agentRuntimeManager.Get(ctx, j.AgentID)
+		if agent == nil {
+			return fmt.Errorf("agent not found: %s", j.AgentID)
+		}
+		return dagRunner.RunForJob(ctx, agent, &agentexec.JobForRunner{
+			ID: j.ID, AgentID: j.AgentID, Goal: j.Goal, Cursor: j.Cursor,
+		})
+	}
+	jobScheduler := job.NewScheduler(jobStore, runJob, job.SchedulerConfig{
+		MaxConcurrency: 2,
+		RetryMax:       2,
+		Backoff:        time.Second,
+	})
+	handler.SetJobStore(jobStore)
+	jobEventStore := jobstore.NewMemoryStore()
+	handler.SetJobEventStore(jobEventStore)
 
 	mw := middleware.NewMiddleware()
 	router := http.NewRouter(handler, mw)
@@ -174,6 +214,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		docService: docService,
 		router:     router,
 		hertz:      nil,
+		jobScheduler: jobScheduler,
 	}
 	if bootstrap.Config != nil && bootstrap.Config.API.Grpc.Enable && bootstrap.Config.API.Grpc.Port > 0 {
 		gs, err := startGRPC(engine, docService, bootstrap.Config.API.Grpc.Port)
@@ -251,11 +292,17 @@ func (a *App) Run(addr string) error {
 	} else {
 		a.hertz = a.router.Build(addr)
 	}
+	if a.jobScheduler != nil {
+		go a.jobScheduler.Start(context.Background())
+	}
 	return a.hertz.Run()
 }
 
 // Shutdown 优雅关闭（传入 ctx 以支持超时，如 cmd 层 WithTimeout）
 func (a *App) Shutdown(ctx context.Context) error {
+	if a.jobScheduler != nil {
+		a.jobScheduler.Stop()
+	}
 	if a.otelProvider != nil {
 		_ = a.otelProvider.Shutdown(ctx)
 	}

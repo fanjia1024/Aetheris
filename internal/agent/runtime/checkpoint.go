@@ -14,9 +14,14 @@ type Checkpoint struct {
 
 	AgentID   string
 	SessionID string
+	JobID     string // 可选，关联 Job 便于恢复
 
 	TaskGraphState []byte // 序列化后的 TaskGraph（如 planner.TaskGraph.Marshal）
 	MemoryState    []byte // 可选：记忆快照
+	// CursorNode 最后执行完成的节点 ID；恢复时从下一节点继续
+	CursorNode string
+	// PayloadResults 当前 payload.Results 的 JSON；恢复时还原
+	PayloadResults []byte
 
 	CreatedAt time.Time
 }
@@ -34,6 +39,20 @@ func NewCheckpoint(agentID, sessionID string, taskGraphState, memoryState []byte
 		AgentID:        agentID,
 		SessionID:      sessionID,
 		TaskGraphState: taskGraphState,
+		MemoryState:    memoryState,
+		CreatedAt:      time.Now(),
+	}
+}
+
+// NewNodeCheckpoint 创建节点级检查点（恢复时从 CursorNode 下一节点继续）
+func NewNodeCheckpoint(agentID, sessionID, jobID, cursorNode string, taskGraphState, payloadResults, memoryState []byte) *Checkpoint {
+	return &Checkpoint{
+		AgentID:        agentID,
+		SessionID:      sessionID,
+		JobID:          jobID,
+		CursorNode:     cursorNode,
+		TaskGraphState: taskGraphState,
+		PayloadResults: payloadResults,
 		MemoryState:    memoryState,
 		CreatedAt:      time.Now(),
 	}
@@ -65,6 +84,10 @@ func (s *checkpointStoreMem) Save(ctx context.Context, cp *Checkpoint) (string, 
 		cpCopy.MemoryState = make([]byte, len(cp.MemoryState))
 		copy(cpCopy.MemoryState, cp.MemoryState)
 	}
+	if len(cp.PayloadResults) > 0 {
+		cpCopy.PayloadResults = make([]byte, len(cp.PayloadResults))
+		copy(cpCopy.PayloadResults, cp.PayloadResults)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.byID[id] = &cpCopy
@@ -88,6 +111,10 @@ func (s *checkpointStoreMem) Load(ctx context.Context, id string) (*Checkpoint, 
 		out.MemoryState = make([]byte, len(cp.MemoryState))
 		copy(out.MemoryState, cp.MemoryState)
 	}
+	if len(cp.PayloadResults) > 0 {
+		out.PayloadResults = make([]byte, len(cp.PayloadResults))
+		copy(out.PayloadResults, cp.PayloadResults)
+	}
 	return &out, nil
 }
 
@@ -105,6 +132,10 @@ func (s *checkpointStoreMem) ListByAgent(ctx context.Context, agentID string) ([
 			if len(cp.MemoryState) > 0 {
 				cpCopy.MemoryState = make([]byte, len(cp.MemoryState))
 				copy(cpCopy.MemoryState, cp.MemoryState)
+			}
+			if len(cp.PayloadResults) > 0 {
+				cpCopy.PayloadResults = make([]byte, len(cp.PayloadResults))
+				copy(cpCopy.PayloadResults, cp.PayloadResults)
 			}
 			list = append(list, &cpCopy)
 		}

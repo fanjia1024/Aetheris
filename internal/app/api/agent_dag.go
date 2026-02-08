@@ -30,37 +30,29 @@ type toolExecAdapter struct {
 	reg *tools.Registry
 }
 
-func (a *toolExecAdapter) Execute(ctx context.Context, toolName string, input map[string]any) (string, error) {
+func (a *toolExecAdapter) Execute(ctx context.Context, toolName string, input map[string]any, state interface{}) (agentexec.ToolResult, error) {
 	if a.reg == nil {
-		return "", fmt.Errorf("Tools 未配置")
+		return agentexec.ToolResult{}, fmt.Errorf("Tools 未配置")
 	}
 	agent := agentexec.AgentFromContext(ctx)
-	if agent == nil || agent.Session == nil {
-		t, ok := a.reg.Get(toolName)
-		if !ok {
-			return "", fmt.Errorf("未知工具: %s", toolName)
-		}
-		// 无 agent 时用空 session 占位（部分工具可能不依赖 session）
-		sess := runtimesession.New("")
-		out, err := t.Execute(ctx, sess, input)
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprint(out), nil
+	var sess *runtimesession.Session
+	if agent != nil && agent.Session != nil {
+		sess = agentSessionToRuntime(agent.Session)
+	} else {
+		sess = runtimesession.New("")
 	}
-	sess := agentSessionToRuntime(agent.Session)
 	t, ok := a.reg.Get(toolName)
 	if !ok {
-		return "", fmt.Errorf("未知工具: %s", toolName)
+		return agentexec.ToolResult{}, fmt.Errorf("未知工具: %s", toolName)
 	}
-	out, err := t.Execute(ctx, sess, input)
+	out, err := t.Execute(ctx, sess, input, state)
 	if err != nil {
-		return "", err
+		return agentexec.ToolResult{Err: err.Error()}, err
 	}
-	if s, ok := out.(string); ok {
-		return s, nil
+	if tr, ok := out.(tools.ToolResult); ok {
+		return agentexec.ToolResult{Done: tr.Done, State: tr.State, Output: tr.Output, Err: tr.Err}, nil
 	}
-	return fmt.Sprint(out), nil
+	return agentexec.ToolResult{Done: true, Output: fmt.Sprint(out)}, nil
 }
 
 // agentSessionToRuntime 将 agent/runtime.Session 转为 runtime/session.Session（拷贝 Messages）
