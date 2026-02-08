@@ -9,6 +9,11 @@ import (
 	"rag-platform/internal/agent/tools"
 )
 
+// planGoaler 仅需 PlanGoal，供 Agent 执行 DAG 使用；*planner.LLMPlanner 与 *planner.RulePlanner 均实现此接口
+type planGoaler interface {
+	PlanGoal(ctx context.Context, goal string, mem memory.Memory) (*planner.TaskGraph, error)
+}
+
 // memoryProviderAdapter 将 memory.Memory 适配为 runtime.MemoryProvider
 type memoryProviderAdapter struct {
 	m memory.Memory
@@ -34,9 +39,9 @@ func (a *memoryProviderAdapter) Store(ctx interface{}, item interface{}) error {
 	return a.m.Store(c, mi)
 }
 
-// plannerProviderAdapter 将 planner.Planner（PlanGoal）适配为 runtime.PlannerProvider
+// plannerProviderAdapter 将 planGoaler 适配为 runtime.PlannerProvider
 type plannerProviderAdapter struct {
-	p *planner.LLMPlanner
+	p planGoaler
 }
 
 func (a *plannerProviderAdapter) Plan(ctx interface{}, goal string, mem interface{}) (interface{}, error) {
@@ -72,12 +77,12 @@ func (a *toolsProviderAdapter) List() []interface{} {
 // agentCreatorImpl 实现 http.AgentCreator，用于 POST /api/agents
 type agentCreatorImpl struct {
 	manager *runtime.Manager
-	planner *planner.LLMPlanner
+	planner planGoaler
 	tools   *tools.Registry
 }
 
-// NewAgentCreator 创建 v1 Agent 的工厂（由 app 注入 Manager、Planner、Tools）
-func NewAgentCreator(manager *runtime.Manager, plannerAgent *planner.LLMPlanner, toolsReg *tools.Registry) *agentCreatorImpl {
+// NewAgentCreator 创建 v1 Agent 的工厂（由 app 注入 Manager、Planner、Tools；planner 可为 *planner.LLMPlanner 或 *planner.RulePlanner）
+func NewAgentCreator(manager *runtime.Manager, plannerAgent planGoaler, toolsReg *tools.Registry) *agentCreatorImpl {
 	return &agentCreatorImpl{manager: manager, planner: plannerAgent, tools: toolsReg}
 }
 

@@ -139,11 +139,18 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 
 	// v1 Agent Runtime：Manager + Scheduler + Creator（POST /api/agents 等）
 	agentRuntimeManager := runtime.NewManager()
-	// TaskGraph → eino DAG 执行：Compiler + Runner，Scheduler.RunFunc 驱动真正执行
+	// Planner 选择：PLANNER_TYPE=rule 时使用规则规划器（无 LLM，便于调试 Executor），否则使用 LLM
+	var v1Planner planGoaler
+	if os.Getenv("PLANNER_TYPE") == "rule" {
+		v1Planner = planner.NewRulePlanner()
+		bootstrap.Logger.Info("v1 Agent 使用规则规划器（RulePlanner）")
+	} else {
+		v1Planner = planner.NewLLMPlanner(llmClientForAgent)
+	}
 	dagCompiler := NewDAGCompiler(llmClientForAgent, toolsReg, engine)
 	dagRunner := NewDAGRunner(dagCompiler)
 	agentScheduler := runtime.NewScheduler(agentRuntimeManager, RunFuncForScheduler(agentRuntimeManager, dagRunner))
-	agentCreator := NewAgentCreator(agentRuntimeManager, plannerAgent, toolsReg)
+	agentCreator := NewAgentCreator(agentRuntimeManager, v1Planner, toolsReg)
 	handler.SetAgentRuntime(agentRuntimeManager, agentScheduler, agentCreator)
 
 	mw := middleware.NewMiddleware()
