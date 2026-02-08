@@ -1,0 +1,63 @@
+package executor
+
+import (
+	"context"
+
+	"rag-platform/internal/agent/runtime"
+)
+
+// agentContextKey 用于在 context 中传递 *runtime.Agent（ToolExec 等可从 ctx 取 agent）
+type agentContextKey struct{}
+
+var theAgentContextKey = agentContextKey{}
+
+// WithAgent 将 agent 放入 ctx，供 Runner.Invoke 时传入节点
+func WithAgent(ctx context.Context, agent *runtime.Agent) context.Context {
+	return context.WithValue(ctx, theAgentContextKey, agent)
+}
+
+// AgentFromContext 从 context 取出 *runtime.Agent
+func AgentFromContext(ctx context.Context) *runtime.Agent {
+	v := ctx.Value(theAgentContextKey)
+	if v == nil {
+		return nil
+	}
+	a, _ := v.(*runtime.Agent)
+	return a
+}
+
+// AgentDAGPayload DAG 统一载荷：整图节点入参/出参一致，便于多前驱时合并结果
+type AgentDAGPayload struct {
+	Goal      string
+	AgentID   string
+	SessionID string
+	// Results 各节点输出，key 为 TaskNode.ID
+	Results map[string]any
+}
+
+// NewAgentDAGPayload 构造初始 payload
+func NewAgentDAGPayload(goal, agentID, sessionID string) *AgentDAGPayload {
+	return &AgentDAGPayload{
+		Goal:      goal,
+		AgentID:   agentID,
+		SessionID: sessionID,
+		Results:   make(map[string]any),
+	}
+}
+
+// Clone 返回副本并确保 Results 可写（供节点写入本节点结果）
+func (p *AgentDAGPayload) Clone() *AgentDAGPayload {
+	if p == nil {
+		return NewAgentDAGPayload("", "", "")
+	}
+	results := make(map[string]any, len(p.Results))
+	for k, v := range p.Results {
+		results[k] = v
+	}
+	return &AgentDAGPayload{
+		Goal:      p.Goal,
+		AgentID:   p.AgentID,
+		SessionID: p.SessionID,
+		Results:   results,
+	}
+}

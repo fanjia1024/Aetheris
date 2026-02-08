@@ -59,6 +59,7 @@ func (r *Router) Build(addr string, opts ...config.Option) *server.Hertz {
 		knowledge.DELETE("/collections/:id", authHandler, r.handler.DeleteCollection)
 	}
 
+	// Deprecated: 请使用 POST /api/agents/{id}/message
 	query := api.Group("/query")
 	{
 		query.POST("/", authHandler, r.handler.Query)
@@ -68,6 +69,17 @@ func (r *Router) Build(addr string, opts ...config.Option) *server.Hertz {
 	agentGroup := api.Group("/agent")
 	{
 		agentGroup.POST("/run", authHandler, r.handler.AgentRun)
+	}
+
+	// v1 Agent 中心 API
+	agents := api.Group("/agents")
+	{
+		agents.POST("/", authHandler, r.handler.CreateAgent)
+		agents.GET("/", authHandler, r.handler.ListAgents)
+		agents.POST("/:id/message", authHandler, r.handler.AgentMessage)
+		agents.GET("/:id/state", authHandler, r.handler.AgentState)
+		agents.POST("/:id/resume", authHandler, r.handler.AgentResume)
+		agents.POST("/:id/stop", authHandler, r.handler.AgentStop)
 	}
 
 	system := api.Group("/system")

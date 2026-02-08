@@ -20,17 +20,18 @@ import (
 	"rag-platform/internal/agent"
 	"rag-platform/internal/agent/executor"
 	"rag-platform/internal/agent/planner"
+	"rag-platform/internal/agent/runtime"
+	"rag-platform/internal/agent/tools"
 	"rag-platform/internal/api/http"
 	"rag-platform/internal/api/http/middleware"
 	"rag-platform/internal/app"
+	"rag-platform/internal/model/llm"
 	"rag-platform/internal/pipeline/ingest"
 	"rag-platform/internal/pipeline/query"
 	"rag-platform/internal/runtime/eino"
 	"rag-platform/internal/runtime/session"
-	"rag-platform/internal/model/llm"
 	"rag-platform/internal/splitter"
 	"rag-platform/internal/storage/vector"
-	"rag-platform/internal/agent/tools"
 )
 
 // otelProviderShutdown 用于优雅关闭时关闭 OpenTelemetry provider
@@ -135,6 +136,16 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	handler := http.NewHandler(engine, docService)
 	handler.SetAgent(agentRunner)
 	handler.SetSessionManager(sessionManager)
+
+	// v1 Agent Runtime：Manager + Scheduler + Creator（POST /api/agents 等）
+	agentRuntimeManager := runtime.NewManager()
+	// TaskGraph → eino DAG 执行：Compiler + Runner，Scheduler.RunFunc 驱动真正执行
+	dagCompiler := NewDAGCompiler(llmClientForAgent, toolsReg, engine)
+	dagRunner := NewDAGRunner(dagCompiler)
+	agentScheduler := runtime.NewScheduler(agentRuntimeManager, RunFuncForScheduler(agentRuntimeManager, dagRunner))
+	agentCreator := NewAgentCreator(agentRuntimeManager, plannerAgent, toolsReg)
+	handler.SetAgentRuntime(agentRuntimeManager, agentScheduler, agentCreator)
+
 	mw := middleware.NewMiddleware()
 	router := http.NewRouter(handler, mw)
 

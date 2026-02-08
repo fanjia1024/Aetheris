@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"rag-platform/internal/agent/memory"
 	"rag-platform/internal/model/llm"
 	"rag-platform/internal/runtime/session"
 )
@@ -35,6 +36,8 @@ type Planner interface {
 	Plan(ctx context.Context, query string, toolsSchemaJSON []byte, history []llm.Message) (*PlanResult, error)
 	// Next 基于 Session 做单步决策：返回要执行的工具步骤或最终回答
 	Next(ctx context.Context, sess *session.Session, userQuery string, toolsSchemaJSON []byte) (*Step, error)
+	// PlanGoal 根据目标与记忆产出 TaskGraph（供 eino 执行内核驱动）
+	PlanGoal(ctx context.Context, goal string, mem memory.Memory) (*TaskGraph, error)
 }
 
 // LLMPlanner 基于 LLM 的最小实现：生成 JSON Plan
@@ -142,4 +145,43 @@ func (p *LLMPlanner) Next(ctx context.Context, sess *session.Session, userQuery 
 		return nil, fmt.Errorf("解析 Planner Next JSON 失败: %w", err)
 	}
 	return &step, nil
+}
+
+// PlanGoal 实现 Planner：根据 goal 与 mem 产出 TaskGraph（最小实现：单节点 llm）
+func (p *LLMPlanner) PlanGoal(ctx context.Context, goal string, mem memory.Memory) (*TaskGraph, error) {
+	if p.client == nil {
+		return &TaskGraph{
+			Nodes: []TaskNode{{ID: "n1", Type: NodeLLM, Config: map[string]any{"goal": goal}}},
+			Edges: nil,
+		}, nil
+	}
+	items, _ := mem.Recall(ctx, goal)
+	contextStr := ""
+	for _, it := range items {
+		contextStr += it.Content + "\n"
+	}
+	systemPrompt := `根据用户目标生成任务图（JSON）。格式：{"nodes":[{"id":"n1","type":"tool|workflow|llm","tool_name":"xxx 或 workflow 名"}],"edges":[{"from":"n1","to":"n2"}]}。若单步可完成，一个节点即可。`
+	messages := []llm.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: "目标：" + goal + "\n上下文：\n" + contextStr},
+	}
+	opts := llm.GenerateOptions{MaxTokens: 1024, Temperature: 0.2}
+	reply, err := p.client.ChatWithContext(ctx, messages, opts)
+	if err != nil {
+		return nil, fmt.Errorf("PlanGoal LLM 调用失败: %w", err)
+	}
+	reply = strings.TrimSpace(reply)
+	if idx := strings.Index(reply, "{"); idx >= 0 {
+		if end := strings.LastIndex(reply, "}"); end > idx {
+			reply = reply[idx : end+1]
+		}
+	}
+	var g TaskGraph
+	if err := json.Unmarshal([]byte(reply), &g); err != nil {
+		return &TaskGraph{
+			Nodes: []TaskNode{{ID: "n1", Type: NodeLLM, Config: map[string]any{"goal": goal}}},
+			Edges: nil,
+		}, nil
+	}
+	return &g, nil
 }

@@ -1,0 +1,137 @@
+package api
+
+import (
+	"context"
+	"fmt"
+
+	agentexec "rag-platform/internal/agent/runtime/executor"
+	"rag-platform/internal/agent/planner"
+	"rag-platform/internal/agent/runtime"
+	"rag-platform/internal/agent/tools"
+	"rag-platform/internal/model/llm"
+	"rag-platform/internal/runtime/eino"
+	runtimesession "rag-platform/internal/runtime/session"
+)
+
+// llmGenAdapter 将 llm.Client 适配为 executor.LLMGen
+type llmGenAdapter struct {
+	client llm.Client
+}
+
+func (a *llmGenAdapter) Generate(ctx context.Context, prompt string) (string, error) {
+	if a.client == nil {
+		return "", fmt.Errorf("LLM 未配置")
+	}
+	return a.client.GenerateWithContext(ctx, prompt, llm.GenerateOptions{MaxTokens: 4096, Temperature: 0.1})
+}
+
+// toolExecAdapter 从 ctx 取 agent，将 runtime.Session 转为 runtime/session.Session 后调 agent/tools
+type toolExecAdapter struct {
+	reg *tools.Registry
+}
+
+func (a *toolExecAdapter) Execute(ctx context.Context, toolName string, input map[string]any) (string, error) {
+	if a.reg == nil {
+		return "", fmt.Errorf("Tools 未配置")
+	}
+	agent := agentexec.AgentFromContext(ctx)
+	if agent == nil || agent.Session == nil {
+		t, ok := a.reg.Get(toolName)
+		if !ok {
+			return "", fmt.Errorf("未知工具: %s", toolName)
+		}
+		// 无 agent 时用空 session 占位（部分工具可能不依赖 session）
+		sess := runtimesession.New("")
+		out, err := t.Execute(ctx, sess, input)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprint(out), nil
+	}
+	sess := agentSessionToRuntime(agent.Session)
+	t, ok := a.reg.Get(toolName)
+	if !ok {
+		return "", fmt.Errorf("未知工具: %s", toolName)
+	}
+	out, err := t.Execute(ctx, sess, input)
+	if err != nil {
+		return "", err
+	}
+	if s, ok := out.(string); ok {
+		return s, nil
+	}
+	return fmt.Sprint(out), nil
+}
+
+// agentSessionToRuntime 将 agent/runtime.Session 转为 runtime/session.Session（拷贝 Messages）
+func agentSessionToRuntime(s *runtime.Session) *runtimesession.Session {
+	if s == nil {
+		return runtimesession.New("")
+	}
+	sess := runtimesession.New(s.ID)
+	sess.UpdatedAt = s.GetUpdatedAt()
+	msgs := s.CopyMessages()
+	for _, m := range msgs {
+		sess.AddMessage(m.Role, m.Content)
+	}
+	return sess
+}
+
+// workflowExecAdapter 调用 eino Engine.ExecuteWorkflow
+type workflowExecAdapter struct {
+	engine *eino.Engine
+}
+
+func (a *workflowExecAdapter) ExecuteWorkflow(ctx context.Context, name string, params map[string]any) (interface{}, error) {
+	if a.engine == nil {
+		return nil, fmt.Errorf("Workflow 引擎未配置")
+	}
+	pm := make(map[string]interface{}, len(params))
+	for k, v := range params {
+		pm[k] = v
+	}
+	return a.engine.ExecuteWorkflow(ctx, name, pm)
+}
+
+// NewDAGCompiler 创建 TaskGraph→eino DAG 的编译器（注册 llm/tool/workflow 适配器）
+func NewDAGCompiler(llmClient llm.Client, toolsReg *tools.Registry, engine *eino.Engine) *agentexec.Compiler {
+	adapters := map[string]agentexec.NodeAdapter{
+		planner.NodeLLM:      &agentexec.LLMNodeAdapter{LLM: &llmGenAdapter{client: llmClient}},
+		planner.NodeTool:    &agentexec.ToolNodeAdapter{Tools: &toolExecAdapter{reg: toolsReg}},
+		planner.NodeWorkflow: &agentexec.WorkflowNodeAdapter{Workflow: &workflowExecAdapter{engine: engine}},
+	}
+	return agentexec.NewCompiler(adapters)
+}
+
+// NewDAGRunner 创建 DAG 执行 Runner
+func NewDAGRunner(compiler *agentexec.Compiler) *agentexec.Runner {
+	return agentexec.NewRunner(compiler)
+}
+
+// RunFuncForScheduler 返回可供 Scheduler.SetRunFunc 使用的回调：从 Manager 取 Agent，取最后一条 user 消息为 goal，调用 Runner.Run
+func RunFuncForScheduler(manager *runtime.Manager, runner *agentexec.Runner) func(context.Context, string) {
+	return func(ctx context.Context, agentID string) {
+		agent, _ := manager.Get(ctx, agentID)
+		if agent == nil {
+			return
+		}
+		goal := lastUserMessage(agent.Session)
+		if goal == "" {
+			goal = "请根据当前上下文回复。"
+		}
+		_ = runner.Run(ctx, agent, goal)
+	}
+}
+
+func lastUserMessage(s *runtime.Session) string {
+	if s == nil {
+		return ""
+	}
+	msgs := s.CopyMessages()
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "user" {
+			return msgs[i].Content
+		}
+	}
+	return ""
+}
