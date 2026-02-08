@@ -5,7 +5,8 @@ Go + eino 驱动的 **Agent Runtime** 与 RAG 平台：以 Agent 为第一公民
 ## 架构概览
 
 - **API 层**：HTTP/REST，提供 **v1 Agent API**（创建/发消息/状态/恢复/停止）、文档上传、查询、知识库管理、系统状态等接口。
-- **Agent 中心**：用户请求经 Agent Manager → Session → Planner 产出 TaskGraph → **执行适配层** 编译为 eino DAG → 执行；RAG/Pipeline 作为 workflow 或工具节点可被规划器选用，不再作为唯一入口。
+- **Agent 中心**：用户请求经 Agent Manager → Session；发消息时创建 **Job**（双写 **事件流 JobStore** + 状态型 Job）→ **Scheduler**（并发/重试）拉取 Job → **Runner.RunForJob**（Steppable + 节点级 Checkpoint）→ Planner 产出 TaskGraph → 执行适配层逐节点执行；RAG/Pipeline 作为 workflow 或工具节点可被规划器选用。
+- **任务存储（JobStore）**：`internal/runtime/jobstore` 提供**事件流**语义：版本化 Append（乐观并发）、Claim/Heartbeat（租约）、Watch（订阅）。当前为内存实现；为崩溃恢复、多 Worker、审计/回放与未来分布式打基础。
 - **编排核心（eino）**：仅作为 Agent 的**执行内核**被调用（DAG 调度、Context 传递）；不再直接面对「用户查询」请求。
 - **领域 Pipeline**：Ingest、Query 等由 eino 调度，可作为 TaskGraph 中的 workflow 节点被 Agent 调用。
 - **模型与存储**：LLM、Embedding、Vision 多厂商抽象；元数据、向量、对象、缓存抽象，当前默认提供 memory 实现。
@@ -37,7 +38,7 @@ go run ./cmd/api
 
 ## 主要功能
 
-- **v1 Agent（推荐）**：`POST /api/agents` 创建 Agent，`POST /api/agents/:id/message` 发送消息并触发规划与执行；支持状态查询、恢复、停止。规划器可通过环境变量 `PLANNER_TYPE=rule` 切换为无 LLM 的规则规划器便于调试。
+- **v1 Agent（推荐）**：`POST /api/agents` 创建 Agent，`POST /api/agents/:id/message` 发送消息并创建 Job（返回 202 + `job_id`），由 Scheduler 拉取并执行（Steppable + 节点级 Checkpoint，支持恢复）；支持状态查询、恢复、停止。规划器可通过环境变量 `PLANNER_TYPE=rule` 切换为无 LLM 的规则规划器便于调试。
 - **文档上传**：`POST /api/documents/upload` 触发 ingest_pipeline（解析 → 切片 → 向量化 → 写入向量与元数据）。
 - **查询**：`POST /api/query` 使用 query_pipeline（已标记 Deprecated，推荐通过 Agent 发消息交互）。
 - **知识库**：集合的列表/创建/删除（见 `/api/knowledge/collections`）。

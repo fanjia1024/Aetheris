@@ -63,8 +63,6 @@ func (s *SemanticSplitter) Split(content string, options map[string]interface{})
 func (s *SemanticSplitter) splitBySentence(content string) []string {
 	// 按中文和英文句子结束符分割
 	sentenceEnders := []string{". ", "。", "! ", "！", "? ", "？", "\n"}
-	content = content
-
 	for _, ender := range sentenceEnders {
 		content = strings.ReplaceAll(content, ender, "\n")
 	}
