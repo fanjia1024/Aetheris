@@ -109,3 +109,13 @@ Aetheris is an attempt to provide the missing layer:
 
 > Kubernetes manages containers.
 > Aetheris manages agents.
+
+---
+
+## Contributing
+
+Contributions are welcome. Please see [CONTRIBUTING.md](CONTRIBUTING.md) for how to get started.
+
+## License
+
+Aetheris is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
