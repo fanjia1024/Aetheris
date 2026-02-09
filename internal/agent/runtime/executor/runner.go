@@ -114,6 +114,7 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 	var payload *AgentDAGPayload
 	startIndex := 0
 
+	// 与 job.JobStatus 对应，避免 executor 依赖 job 包：2=Completed, 3=Failed
 	const statusFailed = 3
 	if j.Cursor != "" {
 		cp, loadErr := r.checkpointStore.Load(ctx, j.Cursor)
@@ -173,7 +174,7 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 		payload = NewAgentDAGPayload(j.Goal, agent.ID, sessionID)
 	}
 
-	const statusCompleted = 2
+	const statusCompleted = 2 // 对应 job.StatusCompleted
 	graphBytes, _ := taskGraph.Marshal()
 	for i := startIndex; i < len(steps); i++ {
 		step := steps[i]

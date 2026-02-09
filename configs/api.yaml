@@ -18,6 +18,13 @@ api:
     enable: false
     port: 9090
 
+# v1 Agent 与 Job 调度（可选；未配置时使用默认：并发 2、重试 2、Backoff 1s）
+agent:
+  job_scheduler:
+    max_concurrency: 2   # 最大并发执行 Job 数
+    retry_max: 2       # 失败后最大重试次数（不含首次）
+    backoff: "1s"      # 重试前等待时间
+
 # 服务发现
 service:
   agent_service:

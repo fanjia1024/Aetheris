@@ -80,6 +80,9 @@ func (r *Router) Build(addr string, opts ...config.Option) *server.Hertz {
 		agents.GET("/:id/state", authHandler, r.handler.AgentState)
 		agents.POST("/:id/resume", authHandler, r.handler.AgentResume)
 		agents.POST("/:id/stop", authHandler, r.handler.AgentStop)
+		// Job 状态查询（202 后轮询）
+		agents.GET("/:id/jobs/:job_id", authHandler, r.handler.GetAgentJob)
+		agents.GET("/:id/jobs", authHandler, r.handler.ListAgentJobs)
 	}
 
 	system := api.Group("/system")

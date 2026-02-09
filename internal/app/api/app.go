@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -173,6 +174,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	handler.SetAgentRuntime(agentRuntimeManager, agentScheduler, agentCreator)
 	// v0.8 Job System：message -> create Job -> Scheduler（并发/重试）-> Worker -> Executor；Checkpoint 支持恢复
 	jobStore := job.NewJobStoreMem()
+	jobEventStore := jobstore.NewMemoryStore()
 	checkpointStore := runtime.NewCheckpointStoreMem()
 	dagRunner.SetCheckpointStores(checkpointStore, &jobStoreForRunnerAdapter{JobStore: jobStore})
 	runJob := func(ctx context.Context, j *job.Job) error {
@@ -180,17 +182,44 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		if agent == nil {
 			return fmt.Errorf("agent not found: %s", j.AgentID)
 		}
-		return dagRunner.RunForJob(ctx, agent, &agentexec.JobForRunner{
+		err := dagRunner.RunForJob(ctx, agent, &agentexec.JobForRunner{
 			ID: j.ID, AgentID: j.AgentID, Goal: j.Goal, Cursor: j.Cursor,
 		})
+		// 事件流补全：执行结束后追加 JobCompleted / JobFailed，便于审计与回放
+		if jobEventStore != nil {
+			_, ver, _ := jobEventStore.ListEvents(ctx, j.ID)
+			evType := jobstore.JobCompleted
+			if err != nil {
+				evType = jobstore.JobFailed
+			}
+			errStr := ""
+			if err != nil {
+				errStr = err.Error()
+			}
+			payload, _ := json.Marshal(map[string]interface{}{"goal": j.Goal, "error": errStr})
+			_, _ = jobEventStore.Append(ctx, j.ID, ver, jobstore.JobEvent{JobID: j.ID, Type: evType, Payload: payload})
+		}
+		return err
 	}
-	jobScheduler := job.NewScheduler(jobStore, runJob, job.SchedulerConfig{
+	schedulerConfig := job.SchedulerConfig{
 		MaxConcurrency: 2,
 		RetryMax:       2,
 		Backoff:        time.Second,
-	})
+	}
+	if bootstrap.Config != nil {
+		sc := bootstrap.Config.Agent.JobScheduler
+		if sc.MaxConcurrency > 0 {
+			schedulerConfig.MaxConcurrency = sc.MaxConcurrency
+		}
+		if sc.RetryMax >= 0 {
+			schedulerConfig.RetryMax = sc.RetryMax
+		}
+		if sc.Backoff != "" {
+			schedulerConfig.Backoff = parseDuration(sc.Backoff, time.Second)
+		}
+	}
+	jobScheduler := job.NewScheduler(jobStore, runJob, schedulerConfig)
 	handler.SetJobStore(jobStore)
-	jobEventStore := jobstore.NewMemoryStore()
 	handler.SetJobEventStore(jobEventStore)
 
 	mw := middleware.NewMiddleware()

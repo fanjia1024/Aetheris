@@ -67,7 +67,14 @@ curl -X POST http://localhost:8080/api/agents \
 curl -X POST http://localhost:8080/api/agents/<agent-id>/message \
   -H "Content-Type: application/json" \
   -d '{"message": "你的问题"}'
-# 返回 202 Accepted
+# 返回 202 Accepted，并带 job_id，例如：{"status":"accepted","agent_id":"...","job_id":"job-xxx"}
+
+# 轮询任务状态（根据 job_id 查询单条任务）
+curl http://localhost:8080/api/agents/<agent-id>/jobs/<job_id>
+# 返回任务详情：id、agent_id、goal、status（pending|running|completed|failed）、cursor、retry_count、created_at、updated_at
+
+# 列出该 Agent 的所有任务（可选查询参数：status、limit）
+curl "http://localhost:8080/api/agents/<agent-id>/jobs?limit=20&status=completed"
 
 # 查看 Agent 状态
 curl http://localhost:8080/api/agents/<agent-id>/state
@@ -76,7 +83,9 @@ curl http://localhost:8080/api/agents/<agent-id>/state
 curl http://localhost:8080/api/agents
 ```
 
-执行路径：消息写入 Session → Scheduler 唤醒 → Planner 产出 TaskGraph → 编译为 eino DAG → 执行（LLM/Tool/Workflow 节点）。RAG 可通过 workflow 节点被规划器选用。
+**v0.8 执行路径**：消息写入 Session → 创建 Job（双写事件流到 JobStore）→ Scheduler 拉取 Pending Job → Runner.RunForJob（Steppable + 节点级 Checkpoint）→ PlanGoal 产出 TaskGraph → 编译为 eino DAG → 逐节点执行 → 完成/失败时更新 Job 状态。RAG 可通过 workflow 节点被规划器选用。
+
+**Scheduler 行为**：调度器在 API 进程内运行，从 Job 队列拉取任务并执行。可配置项包括：`MaxConcurrency`（最大并发执行数）、`RetryMax`（失败后最大重试次数）、`Backoff`（重试前等待时间）。默认值见 `configs/api.yaml` 中的 `agent.job_scheduler`（若未配置则使用代码默认：并发 2、重试 2 次、Backoff 1s）。
 
 ### 4. 发起查询（已废弃，建议用 Agent 发消息）
 
@@ -104,8 +113,10 @@ curl -X POST http://localhost:8080/api/query/batch \
 | **v1 Agent** | | |
 | POST | /api/agents | 创建 Agent |
 | GET | /api/agents | 列出所有 Agent |
-| POST | /api/agents/:id/message | 向 Agent 发送消息（唤醒执行） |
+| POST | /api/agents/:id/message | 向 Agent 发送消息（创建 Job，返回 202 + job_id） |
 | GET | /api/agents/:id/state | Agent 状态（status、current_task、last_checkpoint） |
+| GET | /api/agents/:id/jobs | 列出该 Agent 的 Job 列表（可选 ?status=、?limit=） |
+| GET | /api/agents/:id/jobs/:job_id | 单条 Job 详情（轮询任务状态） |
 | POST | /api/agents/:id/resume | 恢复执行 |
 | POST | /api/agents/:id/stop | 停止执行 |
 | **文档与知识库** | | |

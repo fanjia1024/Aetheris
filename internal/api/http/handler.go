@@ -3,14 +3,13 @@ package http
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
-	"github.com/google/uuid"
 
 	"rag-platform/internal/agent"
 	"rag-platform/internal/agent/job"
@@ -475,23 +474,8 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 	}
 	agent.Session.AddMessage("user", req.Message)
 	if h.jobStore != nil {
-		jobID := "job-" + uuid.New().String()
-		if h.jobEventStore != nil {
-			payload, _ := json.Marshal(map[string]string{"agent_id": id, "goal": req.Message})
-			_, errAppend := h.jobEventStore.Append(ctx, jobID, 0, jobstore.JobEvent{
-				JobID: jobID, Type: jobstore.JobCreated, Payload: payload,
-			})
-			if errAppend != nil {
-				hlog.CtxErrorf(ctx, "追加 JobCreated 事件失败: %v", errAppend)
-				if errors.Is(errAppend, jobstore.ErrVersionMismatch) {
-					c.JSON(consts.StatusInternalServerError, map[string]string{
-						"error": "创建任务失败（版本冲突）",
-					})
-					return
-				}
-			}
-		}
-		j := &job.Job{ID: jobID, AgentID: id, Goal: req.Message, Status: job.StatusPending}
+		// 先创建 Job 得到稳定 jobID，再双写事件流，避免 Create 失败时留下孤立事件
+		j := &job.Job{AgentID: id, Goal: req.Message, Status: job.StatusPending}
 		jobIDOut, errCreate := h.jobStore.Create(ctx, j)
 		if errCreate != nil {
 			hlog.CtxErrorf(ctx, "创建 Job 失败: %v", errCreate)
@@ -499,6 +483,16 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 				"error": "创建任务失败",
 			})
 			return
+		}
+		if h.jobEventStore != nil {
+			payload, _ := json.Marshal(map[string]string{"agent_id": id, "goal": req.Message})
+			_, errAppend := h.jobEventStore.Append(ctx, jobIDOut, 0, jobstore.JobEvent{
+				JobID: jobIDOut, Type: jobstore.JobCreated, Payload: payload,
+			})
+			if errAppend != nil {
+				hlog.CtxErrorf(ctx, "追加 JobCreated 事件失败（Job 已创建，可继续执行）: %v", errAppend)
+				// 不阻塞 202：Job 已存在，Scheduler 可拉取执行
+			}
 		}
 		c.JSON(consts.StatusAccepted, map[string]interface{}{
 			"status":   "accepted",
@@ -585,6 +579,100 @@ func (h *Handler) AgentStop(ctx context.Context, c *app.RequestContext) {
 	c.JSON(consts.StatusOK, map[string]interface{}{
 		"status":   "ok",
 		"agent_id": id,
+	})
+}
+
+// ListAgentJobs 列出该 Agent 的 Job 列表（可选 status、limit 查询参数）
+func (h *Handler) ListAgentJobs(ctx context.Context, c *app.RequestContext) {
+	if h.agentManager == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{
+			"error": "Agent Runtime 未配置",
+		})
+		return
+	}
+	if h.jobStore == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{
+			"error": "Job 未启用",
+		})
+		return
+	}
+	id := c.Param("id")
+	if _, err := h.agentManager.Get(ctx, id); err != nil {
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "Agent 不存在"})
+		return
+	}
+	list, err := h.jobStore.ListByAgent(ctx, id)
+	if err != nil {
+		hlog.CtxErrorf(ctx, "列出 Job 失败: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "列出任务失败"})
+		return
+	}
+	statusFilter := c.Query("status")
+	limitStr := c.DefaultQuery("limit", "20")
+	limit, _ := strconv.Atoi(limitStr)
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	var jobs []*job.Job
+	for _, j := range list {
+		if statusFilter != "" && j.Status.String() != statusFilter {
+			continue
+		}
+		jobs = append(jobs, j)
+		if len(jobs) >= limit {
+			break
+		}
+	}
+	out := make([]map[string]interface{}, 0, len(jobs))
+	for _, j := range jobs {
+		out = append(out, map[string]interface{}{
+			"id":          j.ID,
+			"agent_id":    j.AgentID,
+			"goal":        j.Goal,
+			"status":      j.Status.String(),
+			"cursor":      j.Cursor,
+			"retry_count": j.RetryCount,
+			"created_at":  j.CreatedAt,
+			"updated_at":  j.UpdatedAt,
+		})
+	}
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"jobs":  out,
+		"total": len(out),
+	})
+}
+
+// GetAgentJob 返回单条 Job 详情（需属于该 Agent）
+func (h *Handler) GetAgentJob(ctx context.Context, c *app.RequestContext) {
+	if h.jobStore == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{
+			"error": "Job 未启用",
+		})
+		return
+	}
+	id := c.Param("id")
+	jobID := c.Param("job_id")
+	j, err := h.jobStore.Get(ctx, jobID)
+	if err != nil || j == nil {
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+		return
+	}
+	if j.AgentID != id {
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+		return
+	}
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"id":          j.ID,
+		"agent_id":    j.AgentID,
+		"goal":        j.Goal,
+		"status":      j.Status.String(),
+		"cursor":      j.Cursor,
+		"retry_count": j.RetryCount,
+		"created_at":  j.CreatedAt,
+		"updated_at":  j.UpdatedAt,
 	})
 }
 

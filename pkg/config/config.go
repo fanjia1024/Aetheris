@@ -11,11 +11,24 @@ import (
 // Config 应用配置结构体
 type Config struct {
 	API    APIConfig    `mapstructure:"api"`
+	Agent  AgentConfig  `mapstructure:"agent"`
 	Worker WorkerConfig `mapstructure:"worker"`
 	Model  ModelConfig  `mapstructure:"model"`
 	Storage StorageConfig `mapstructure:"storage"`
 	Log    LogConfig    `mapstructure:"log"`
 	Monitoring MonitoringConfig `mapstructure:"monitoring"`
+}
+
+// AgentConfig Agent 与 Job 调度相关配置
+type AgentConfig struct {
+	JobScheduler JobSchedulerConfig `mapstructure:"job_scheduler"`
+}
+
+// JobSchedulerConfig Scheduler 并发、重试与 backoff
+type JobSchedulerConfig struct {
+	MaxConcurrency int    `mapstructure:"max_concurrency"` // 最大并发执行数，<=0 使用默认 2
+	RetryMax       int    `mapstructure:"retry_max"`       // 失败后最大重试次数（不含首次），<0 使用默认 2
+	Backoff        string `mapstructure:"backoff"`         // 重试前等待时间，如 "1s"，空则默认 1s
 }
 
 // APIConfig API 服务配置
