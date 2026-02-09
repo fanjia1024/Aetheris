@@ -68,9 +68,9 @@ This checklist ensures that Aetheris v1.0 is fully ready for open source release
 ## 7. CI/CD & Security
 | Check Item | Goal | Verification Method | Status |
 |------------|------|------------------|--------|
-| GitHub Actions | Build, test, and release workflows run | Check Actions logs | ☐ |
+| GitHub Actions | Build, test, and release workflows run | See `.github/workflows/ci.yml` (build, vet, gofmt, test); check Actions tab | ☐ |
 | SLSA3 / Provenance | Provenance generation available | Configure SLSA3 workflow | ☐ |
-| Dependency Security | Go modules checked for vulnerabilities | Run `govulncheck` | ☐ |
+| Dependency Security | Go modules checked for vulnerabilities | `.github/workflows/dependency-review.yml` runs `govulncheck` on push/PR and weekly | ☐ |
 
 ---
 
