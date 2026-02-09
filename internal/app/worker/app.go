@@ -122,6 +122,10 @@ func NewApp(cfg *config.Config) (*App, error) {
 		dagRunner.SetPlanGeneratedSink(api.NewPlanGeneratedSink(pgEventStore))
 		dagRunner.SetNodeEventSink(nodeEventSink)
 		dagRunner.SetReplayContextBuilder(api.NewReplayContextBuilder(pgEventStore))
+		maxAttempts := cfg.Worker.MaxAttempts
+		if maxAttempts <= 0 {
+			maxAttempts = 3
+		}
 		runJob := func(ctx context.Context, j *job.Job) error {
 			sessionID := j.SessionID
 			if sessionID == "" {
@@ -142,19 +146,19 @@ func NewApp(cfg *config.Config) (*App, error) {
 				_ = agentStateStore.SaveAgentState(ctx, j.AgentID, agent.Session.ID, runtime.SessionToAgentState(agent.Session))
 			}
 			_, ver, _ := pgEventStore.ListEvents(ctx, j.ID)
-			evType := jobstore.JobCompleted
 			if err != nil {
-				evType = jobstore.JobFailed
-			}
-			errStr := ""
-			if err != nil {
-				errStr = err.Error()
-			}
-			payload, _ := json.Marshal(map[string]interface{}{"goal": j.Goal, "error": errStr})
-			_, _ = pgEventStore.Append(ctx, j.ID, ver, jobstore.JobEvent{JobID: j.ID, Type: evType, Payload: payload})
-			if err != nil {
-				_ = pgJobStore.UpdateStatus(ctx, j.ID, job.StatusFailed)
+				// 毒任务保护：达到 max_attempts 后标记 Failed 并写 job_failed，不再调度；否则 Requeue（不写终端事件）供再次 Claim
+				if j.RetryCount+1 >= maxAttempts {
+					errStr := err.Error()
+					payload, _ := json.Marshal(map[string]interface{}{"goal": j.Goal, "error": errStr})
+					_, _ = pgEventStore.Append(ctx, j.ID, ver, jobstore.JobEvent{JobID: j.ID, Type: jobstore.JobFailed, Payload: payload})
+					_ = pgJobStore.UpdateStatus(ctx, j.ID, job.StatusFailed)
+				} else {
+					_ = pgJobStore.Requeue(ctx, j)
+				}
 			} else {
+				payload, _ := json.Marshal(map[string]interface{}{"goal": j.Goal})
+				_, _ = pgEventStore.Append(ctx, j.ID, ver, jobstore.JobEvent{JobID: j.ID, Type: jobstore.JobCompleted, Payload: payload})
 				_ = pgJobStore.UpdateStatus(ctx, j.ID, job.StatusCompleted)
 			}
 			return err

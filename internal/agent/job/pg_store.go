@@ -110,9 +110,9 @@ func (s *JobStorePg) Create(ctx context.Context, j *Job) (string, error) {
 		j.UpdatedAt = now
 	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO jobs (id, agent_id, goal, status, cursor, retry_count, session_id, cancel_requested_at, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-		id, j.AgentID, j.Goal, statusToPg(StatusPending), j.Cursor, j.RetryCount, nullStr(j.SessionID), nullTime(j.CancelRequestedAt), j.CreatedAt, j.UpdatedAt)
+		`INSERT INTO jobs (id, agent_id, goal, status, cursor, retry_count, session_id, cancel_requested_at, created_at, updated_at, idempotency_key)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		id, j.AgentID, j.Goal, statusToPg(StatusPending), j.Cursor, j.RetryCount, nullStr(j.SessionID), nullTime(j.CancelRequestedAt), j.CreatedAt, j.UpdatedAt, nullStr(j.IdempotencyKey))
 	if err != nil {
 		return "", err
 	}
@@ -126,9 +126,10 @@ func (s *JobStorePg) Get(ctx context.Context, jobID string) (*Job, error) {
 	var retryCount int
 	var cancelRequestedAt *time.Time
 	var createdAt, updatedAt time.Time
+	var idempotencyKey *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, agent_id, goal, status, cursor, retry_count, session_id, cancel_requested_at, created_at, updated_at FROM jobs WHERE id = $1`,
-		jobID).Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &cancelRequestedAt, &createdAt, &updatedAt)
+		`SELECT id, agent_id, goal, status, cursor, retry_count, session_id, cancel_requested_at, created_at, updated_at, idempotency_key FROM jobs WHERE id = $1`,
+		jobID).Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &cancelRequestedAt, &createdAt, &updatedAt, &idempotencyKey)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -148,12 +149,54 @@ func (s *JobStorePg) Get(ctx context.Context, jobID string) (*Job, error) {
 	j.RetryCount = retryCount
 	j.CreatedAt = createdAt
 	j.UpdatedAt = updatedAt
+	if idempotencyKey != nil {
+		j.IdempotencyKey = *idempotencyKey
+	}
+	return &j, nil
+}
+
+func (s *JobStorePg) GetByAgentAndIdempotencyKey(ctx context.Context, agentID, idempotencyKey string) (*Job, error) {
+	if idempotencyKey == "" {
+		return nil, nil
+	}
+	var j Job
+	var status int
+	var cursor, sessionID *string
+	var retryCount int
+	var cancelRequestedAt *time.Time
+	var createdAt, updatedAt time.Time
+	var key *string
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, agent_id, goal, status, cursor, retry_count, session_id, cancel_requested_at, created_at, updated_at, idempotency_key FROM jobs WHERE agent_id = $1 AND idempotency_key = $2`,
+		agentID, idempotencyKey).Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &cancelRequestedAt, &createdAt, &updatedAt, &key)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	j.Status = pgToStatus(status)
+	if cursor != nil {
+		j.Cursor = *cursor
+	}
+	if sessionID != nil {
+		j.SessionID = *sessionID
+	}
+	if cancelRequestedAt != nil {
+		j.CancelRequestedAt = *cancelRequestedAt
+	}
+	if key != nil {
+		j.IdempotencyKey = *key
+	}
+	j.RetryCount = retryCount
+	j.CreatedAt = createdAt
+	j.UpdatedAt = updatedAt
 	return &j, nil
 }
 
 func (s *JobStorePg) ListByAgent(ctx context.Context, agentID string) ([]*Job, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, agent_id, goal, status, cursor, retry_count, session_id, cancel_requested_at, created_at, updated_at FROM jobs WHERE agent_id = $1 ORDER BY created_at DESC`,
+		`SELECT id, agent_id, goal, status, cursor, retry_count, session_id, cancel_requested_at, created_at, updated_at, idempotency_key FROM jobs WHERE agent_id = $1 ORDER BY created_at DESC`,
 		agentID)
 	if err != nil {
 		return nil, err
@@ -163,11 +206,11 @@ func (s *JobStorePg) ListByAgent(ctx context.Context, agentID string) ([]*Job, e
 	for rows.Next() {
 		var j Job
 		var status int
-		var cursor, sessionID *string
+		var cursor, sessionID, idempotencyKey *string
 		var retryCount int
 		var cancelRequestedAt *time.Time
 		var createdAt, updatedAt time.Time
-		if err := rows.Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &cancelRequestedAt, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &cancelRequestedAt, &createdAt, &updatedAt, &idempotencyKey); err != nil {
 			return nil, err
 		}
 		j.Status = pgToStatus(status)
@@ -179,6 +222,9 @@ func (s *JobStorePg) ListByAgent(ctx context.Context, agentID string) ([]*Job, e
 		}
 		if cancelRequestedAt != nil {
 			j.CancelRequestedAt = *cancelRequestedAt
+		}
+		if idempotencyKey != nil {
+			j.IdempotencyKey = *idempotencyKey
 		}
 		j.RetryCount = retryCount
 		j.CreatedAt = createdAt

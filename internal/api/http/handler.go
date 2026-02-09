@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -519,6 +520,19 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 		})
 		return
 	}
+	// 幂等：若带 Idempotency-Key 且该 Agent 下已有同 key 的 Job，直接返回已有 job_id（202），不写 Session、不新建 Job
+	idempotencyKey := strings.TrimSpace(string(c.GetHeader("Idempotency-Key")))
+	if idempotencyKey != "" && h.jobStore != nil {
+		existing, _ := h.jobStore.GetByAgentAndIdempotencyKey(ctx, id, idempotencyKey)
+		if existing != nil {
+			c.JSON(consts.StatusAccepted, map[string]interface{}{
+				"status":   "accepted",
+				"agent_id": id,
+				"job_id":   existing.ID,
+			})
+			return
+		}
+	}
 	agent.Session.AddMessage("user", req.Message)
 	if h.agentStateStore != nil {
 		state := agentruntime.SessionToAgentState(agent.Session)
@@ -526,7 +540,7 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 	}
 	if h.jobStore != nil {
 		// 先创建 Job 得到稳定 jobID，再双写事件流，避免 Create 失败时留下孤立事件
-		j := &job.Job{AgentID: id, Goal: req.Message, Status: job.StatusPending, SessionID: agent.Session.ID}
+		j := &job.Job{AgentID: id, Goal: req.Message, Status: job.StatusPending, SessionID: agent.Session.ID, IdempotencyKey: idempotencyKey}
 		jobIDOut, errCreate := h.jobStore.Create(ctx, j)
 		if errCreate != nil {
 			hlog.CtxErrorf(ctx, "创建 Job 失败: %v", errCreate)

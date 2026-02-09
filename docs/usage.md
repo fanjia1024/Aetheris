@@ -117,10 +117,15 @@ curl -X POST http://localhost:8080/api/query/batch \
 | **v1 Agent** | | |
 | POST | /api/agents | 创建 Agent |
 | GET | /api/agents | 列出所有 Agent |
-| POST | /api/agents/:id/message | 向 Agent 发送消息（创建 Job，返回 202 + job_id） |
+| POST | /api/agents/:id/message | 向 Agent 发送消息（创建 Job，返回 202 + job_id）；可选 `Idempotency-Key` header 防重复创建 |
 | GET | /api/agents/:id/state | Agent 状态（status、current_task、last_checkpoint） |
 | GET | /api/agents/:id/jobs | 列出该 Agent 的 Job 列表（可选 ?status=、?limit=） |
 | GET | /api/agents/:id/jobs/:job_id | 单条 Job 详情（轮询任务状态） |
+| **Execution Trace（可解释执行）** | | |
+| GET | /api/jobs/:id/events | 该 Job 的原始事件流（id, type, payload, created_at），供前端/审计用 |
+| GET | /api/jobs/:id/trace | 执行时间线与派生数据（含 execution_tree、node 耗时等） |
+| GET | /api/jobs/:id/trace/page | 同上，HTML 页面，便于浏览器直接查看 |
+| GET | /api/jobs/:id/replay | 只读回放（不重执行） |
 | POST | /api/agents/:id/resume | 恢复执行 |
 | POST | /api/agents/:id/stop | 停止执行 |
 | **文档与知识库** | | |
@@ -142,9 +147,21 @@ curl -X POST http://localhost:8080/api/query/batch \
 
 以上文档类、知识库类、Agent 类、查询类路由可能挂有鉴权中间件，见 `internal/api/http/router.go`。
 
+## Execution Trace（可解释 AI 执行）
+
+发消息得到 `job_id` 后，可用以下端点查看「该任务做了什么」：
+
+- **GET /api/jobs/:id/events**：返回该 Job 的完整事件流（`job_created`、`plan_generated`、`node_started`、`node_finished`、`command_emitted`、`command_committed`、`tool_called`、`tool_returned`、`job_completed` 等）。前端或运维可据此还原「User → Plan → 节点 → 工具调用」的因果链。
+- **GET /api/jobs/:id/trace**：在事件流基础上返回时间线、节点耗时与 **execution_tree**（树形结构），便于直接渲染「可解释执行」视图。
+- **GET /api/jobs/:id/trace/page**：同上，以 HTML 页面形式展示，浏览器打开即可查看。
+
+事件语义与树推导规则见 [design/execution-trace.md](../design/execution-trace.md)。
+
 ## 常见问题
 
 - **Job 与事件流**：创建任务时返回的 `job_id` 同时写入事件流（JobCreated）与状态型 Job，便于未来从事件重放恢复或多 Worker 消费；当前执行仍由状态型 JobStore + Scheduler 驱动。
+- **Idempotency-Key**：`POST /api/agents/:id/message` 支持请求头 `Idempotency-Key`。同一 Agent 下相同 key 的重复请求（如网络重试）会返回已有 `job_id`（202），不新建 Job、不重复写 Session/Plan。
+- **毒任务**：某 Job 反复失败时，达到配置的 max_attempts（Scheduler 的 retry_max、Worker 的 max_attempts）后会被标记为 Failed 并不再调度，见 [design/poison-job.md](../design/poison-job.md)。
 - **v1 Agent 与 /api/query 区别**：v1 Agent 以「Agent + Session + 规划 → TaskGraph → eino DAG」为唯一执行路径，RAG 作为可选工具；`/api/query` 仍直连 query_pipeline，已标记废弃，建议新用法走 Agent 发消息。
 - **PLANNER_TYPE=rule**：用于调试时关闭 LLM 规划，规则规划器返回固定单节点 llm TaskGraph，便于验证 Executor 与 DAG 链路。
 - **无 OPENAI_API_KEY**：未设置或未在配置中填写时，API 仍可启动，但不会注册带真实 LLM/Embedding 的 query 与 ingest 工作流，查询/上传会走占位或返回错误。使用 RulePlanner 时规划不依赖 LLM，但执行 llm 节点仍需要 LLM 配置。

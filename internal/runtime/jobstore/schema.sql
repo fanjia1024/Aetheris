@@ -34,15 +34,21 @@ CREATE TABLE IF NOT EXISTS jobs (
     session_id           TEXT,
     cancel_requested_at  TIMESTAMPTZ,
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    idempotency_key      TEXT
 );
 
 -- 升级已有库时如缺少 cancel_requested_at 可执行：
 -- ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cancel_requested_at TIMESTAMPTZ;
+-- 升级已有库时如缺少 idempotency_key 可执行：
+-- ALTER TABLE jobs ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+-- CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_agent_idempotency ON jobs (agent_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_jobs_agent_id ON jobs (agent_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs (status);
 CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs (created_at);
+-- 同一 Agent 下幂等键唯一，用于 Idempotency-Key header 去重
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_agent_idempotency ON jobs (agent_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 
 -- Agent 状态表（会话/记忆快照），供 Worker 恢复与多实例共享
 CREATE TABLE IF NOT EXISTS agent_states (

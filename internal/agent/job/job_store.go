@@ -12,6 +12,8 @@ import (
 type JobStore interface {
 	Create(ctx context.Context, job *Job) (string, error)
 	Get(ctx context.Context, jobID string) (*Job, error)
+	// GetByAgentAndIdempotencyKey 按 Agent 与幂等键查已有 Job，用于 Idempotency-Key 去重；无则返回 nil, nil
+	GetByAgentAndIdempotencyKey(ctx context.Context, agentID, idempotencyKey string) (*Job, error)
 	ListByAgent(ctx context.Context, agentID string) ([]*Job, error)
 	UpdateStatus(ctx context.Context, jobID string, status JobStatus) error
 	// UpdateCursor 更新 Job 的恢复游标（Checkpoint ID），用于恢复时从 LastCheckpoint 继续
@@ -67,6 +69,21 @@ func (s *JobStoreMem) Get(ctx context.Context, jobID string) (*Job, error) {
 	}
 	cp := *j
 	return &cp, nil
+}
+
+func (s *JobStoreMem) GetByAgentAndIdempotencyKey(ctx context.Context, agentID, idempotencyKey string) (*Job, error) {
+	if idempotencyKey == "" {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, j := range s.byID {
+		if j.AgentID == agentID && j.IdempotencyKey == idempotencyKey {
+			cp := *j
+			return &cp, nil
+		}
+	}
+	return nil, nil
 }
 
 func (s *JobStoreMem) ListByAgent(ctx context.Context, agentID string) ([]*Job, error) {

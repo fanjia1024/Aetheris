@@ -83,6 +83,7 @@ type WorkerConfig struct {
 	RetryDelay    string `mapstructure:"retry_delay"`
 	Timeout       string `mapstructure:"timeout"`
 	PollInterval  string `mapstructure:"poll_interval"` // Agent Job Claim 轮询间隔，如 "2s"
+	MaxAttempts   int    `mapstructure:"max_attempts"`  // Agent Job 最大执行次数（含首次），达此后标记 Failed 不再调度；<=0 时默认 3
 }
 
 // ModelConfig 模型配置

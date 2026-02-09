@@ -46,4 +46,6 @@ type Job struct {
 	SessionID string
 	// CancelRequestedAt 非零表示已请求取消，Worker 应取消 runCtx 并将状态置为 Cancelled
 	CancelRequestedAt time.Time
+	// IdempotencyKey 幂等键：POST message 时可选 Idempotency-Key header，同 Agent 下相同 key 在有效窗口内只创建一次 Job
+	IdempotencyKey string
 }
