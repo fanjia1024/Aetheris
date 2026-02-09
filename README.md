@@ -36,6 +36,8 @@ go run ./cmd/api
 
 环境变量示例：`export OPENAI_API_KEY=sk-...`；配置中可使用 `${OPENAI_API_KEY}`。
 
+**最小示例（无需 HTTP/配置文件）**：`go run ./examples/simple_chat_agent` 即可用 CoRag 跑一次对话（依赖 `OPENAI_API_KEY`）。
+
 ## 主要功能
 
 - **v1 Agent（推荐）**：`POST /api/agents` 创建 Agent，`POST /api/agents/:id/message` 发送消息并创建 Job（返回 202 + `job_id`），由 Scheduler 拉取并执行（Steppable + 节点级 Checkpoint，支持恢复）；支持状态查询、恢复、停止。规划器可通过环境变量 `PLANNER_TYPE=rule` 切换为无 LLM 的规则规划器便于调试。
@@ -65,7 +67,14 @@ API 启动时通过 `LoadAPIConfigWithModel` 合并 api + model 配置，因此�
 - 目录结构：`cmd/` 入口，`internal/` 核心（app、runtime/eino、pipeline、model、storage），`pkg/` 公共库，`design/` 设计文档。
 - 设计文档：[design/core.md](design/core.md)、[design/struct.md](design/struct.md)、[design/services.md](design/services.md)
 - 使用说明与 API 汇总：[docs/](docs/)
-- 示例代码：[examples/](examples/)
+- 示例代码：[examples/](examples/)（含 `simple_chat_agent`：基于 `pkg/agent` 的可编程 Agent，无需启动服务）
+
+### 可编程 Agent（pkg/agent）
+
+通过 `rag-platform/pkg/agent` 可在代码中直接创建 Agent、注册工具并执行，无需启动 HTTP 或 Worker：
+
+- **注册工具**：`agent.Tool(name, description, runFunc)` 或 `agent.RegisterTool(tools.Tool)`。注册后的工具会进入同一 Registry，**Planner 通过 Schema 可见**，**Runner 按名调用执行**；在服务端 Job 路径下执行时与事件流一致。
+- **执行**：`agent.Run(ctx, prompt)` 或 `agent.RunWithSession(ctx, sessionID, prompt)`，返回最终回答、步数、耗时。
 
 ## License
 

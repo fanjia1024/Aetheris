@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"rag-platform/internal/agent/planner"
+	"rag-platform/internal/agent/replay"
 	"rag-platform/internal/agent/runtime"
 )
 
@@ -20,12 +21,20 @@ type PlanGeneratedSink interface {
 	AppendPlanGenerated(ctx context.Context, jobID string, taskGraphJSON []byte, goal string) error
 }
 
+// NodeEventSink 节点级事件写入：RunForJob 每步前后写入 NodeStarted/NodeFinished，供 Replay 重建上下文
+type NodeEventSink interface {
+	AppendNodeStarted(ctx context.Context, jobID string, nodeID string) error
+	AppendNodeFinished(ctx context.Context, jobID string, nodeID string, payloadResults []byte) error
+}
+
 // Runner 单轮执行：PlanGoal → Compile → Invoke；可选 Checkpoint/JobStore 时支持 RunForJob 逐节点 checkpoint 与恢复
 type Runner struct {
 	compiler          *Compiler
 	checkpointStore   runtime.CheckpointStore
 	jobStore          JobStoreForRunner
 	planGeneratedSink PlanGeneratedSink
+	nodeEventSink     NodeEventSink
+	replayBuilder     replay.ReplayContextBuilder
 }
 
 // NewRunner 创建 Runner（仅编译与单次 Invoke）
@@ -42,6 +51,16 @@ func (r *Runner) SetCheckpointStores(cp runtime.CheckpointStore, js JobStoreForR
 // SetPlanGeneratedSink 设置规划事件写入（可选）；Plan 成功后 Append PlanGenerated，供 Trace/Replay 使用
 func (r *Runner) SetPlanGeneratedSink(sink PlanGeneratedSink) {
 	r.planGeneratedSink = sink
+}
+
+// SetNodeEventSink 设置节点事件写入（可选）；RunForJob 每步前后写入 NodeStarted/NodeFinished，供 Replay 使用
+func (r *Runner) SetNodeEventSink(sink NodeEventSink) {
+	r.nodeEventSink = sink
+}
+
+// SetReplayContextBuilder 设置从事件流重建执行上下文的 Builder（可选）；无 Checkpoint 时尝试从事件恢复
+func (r *Runner) SetReplayContextBuilder(b replay.ReplayContextBuilder) {
+	r.replayBuilder = b
 }
 
 // Run 执行单轮：通过 Agent 的 Planner 得到 TaskGraph，编译为 DAG 并执行
@@ -158,6 +177,31 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 			}
 		}
 	} else {
+		// 无 Cursor 时优先尝试从事件流重建上下文（Replay），避免重复 Plan/执行
+		if r.replayBuilder != nil {
+			rctx, rerr := r.replayBuilder.BuildFromEvents(ctx, j.ID)
+			if rerr == nil && rctx != nil {
+				recoveredGraph, rerr := rctx.TaskGraph()
+				if rerr == nil && recoveredGraph != nil {
+					var compErr error
+					steps, compErr = r.compiler.CompileSteppable(ctx, recoveredGraph, agent)
+					if compErr == nil {
+						taskGraph = recoveredGraph
+						payload = NewAgentDAGPayload(j.Goal, agent.ID, sessionID)
+						if len(rctx.PayloadResults) > 0 {
+							_ = json.Unmarshal(rctx.PayloadResults, &payload.Results)
+						}
+						for i, s := range steps {
+							if s.NodeID == rctx.CursorNode {
+								startIndex = i + 1
+								break
+							}
+						}
+						goto runLoop
+					}
+				}
+			}
+		}
 		if agent.Planner == nil {
 			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
 			return fmt.Errorf("executor: agent.Planner 未配置")
@@ -190,10 +234,15 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 		payload = NewAgentDAGPayload(j.Goal, agent.ID, sessionID)
 	}
 
+runLoop:
+
 	const statusCompleted = 2 // 对应 job.StatusCompleted
 	graphBytes, _ := taskGraph.Marshal()
 	for i := startIndex; i < len(steps); i++ {
 		step := steps[i]
+		if r.nodeEventSink != nil {
+			_ = r.nodeEventSink.AppendNodeStarted(ctx, j.ID, step.NodeID)
+		}
 		ctx = WithAgent(ctx, agent)
 		var runErr error
 		payload, runErr = step.Run(ctx, payload)
@@ -202,6 +251,9 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 			return fmt.Errorf("executor: 节点 %s 执行失败: %w", step.NodeID, runErr)
 		}
 		payloadResults, _ := json.Marshal(payload.Results)
+		if r.nodeEventSink != nil {
+			_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults)
+		}
 		cp := runtime.NewNodeCheckpoint(agent.ID, sessionID, j.ID, step.NodeID, graphBytes, payloadResults, nil)
 		cpID, saveErr := r.checkpointStore.Save(ctx, cp)
 		if saveErr != nil {

@@ -212,6 +212,8 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	checkpointStore := runtime.NewCheckpointStoreMem()
 	dagRunner.SetCheckpointStores(checkpointStore, &jobStoreForRunnerAdapter{JobStore: jobStore})
 	dagRunner.SetPlanGeneratedSink(NewPlanGeneratedSink(jobEventStore))
+	dagRunner.SetNodeEventSink(NewNodeEventSink(jobEventStore))
+	dagRunner.SetReplayContextBuilder(NewReplayContextBuilder(jobEventStore))
 	runJob := func(ctx context.Context, j *job.Job) error {
 		agent, _ := agentRuntimeManager.Get(ctx, j.AgentID)
 		if agent == nil {

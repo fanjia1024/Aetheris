@@ -113,6 +113,8 @@ func NewApp(cfg *config.Config) (*App, error) {
 		}
 		dagRunner.SetCheckpointStores(checkpointStore, &jobStoreForRunnerAdapter{JobStore: pgJobStore})
 		dagRunner.SetPlanGeneratedSink(api.NewPlanGeneratedSink(pgEventStore))
+		dagRunner.SetNodeEventSink(api.NewNodeEventSink(pgEventStore))
+		dagRunner.SetReplayContextBuilder(api.NewReplayContextBuilder(pgEventStore))
 		runJob := func(ctx context.Context, j *job.Job) error {
 			sessionID := j.SessionID
 			if sessionID == "" {
