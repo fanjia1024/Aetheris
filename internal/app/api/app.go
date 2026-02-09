@@ -199,8 +199,19 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		jobStore = job.NewJobStoreMem()
 		jobEventStore = jobstore.NewMemoryStore()
 	}
+	var agentStateStore runtime.AgentStateStore
+	if bootstrap.Config != nil && bootstrap.Config.JobStore.Type == "postgres" && bootstrap.Config.JobStore.DSN != "" {
+		pgState, errState := runtime.NewAgentStateStorePg(context.Background(), bootstrap.Config.JobStore.DSN)
+		if errState != nil {
+			return nil, fmt.Errorf("初始化 AgentStateStore(postgres) 失败: %w", errState)
+		}
+		agentStateStore = pgState
+	} else {
+		agentStateStore = runtime.NewAgentStateStoreMem()
+	}
 	checkpointStore := runtime.NewCheckpointStoreMem()
 	dagRunner.SetCheckpointStores(checkpointStore, &jobStoreForRunnerAdapter{JobStore: jobStore})
+	dagRunner.SetPlanGeneratedSink(NewPlanGeneratedSink(jobEventStore))
 	runJob := func(ctx context.Context, j *job.Job) error {
 		agent, _ := agentRuntimeManager.Get(ctx, j.AgentID)
 		if agent == nil {
@@ -209,6 +220,9 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		err := dagRunner.RunForJob(ctx, agent, &agentexec.JobForRunner{
 			ID: j.ID, AgentID: j.AgentID, Goal: j.Goal, Cursor: j.Cursor,
 		})
+		if agentStateStore != nil && agent.Session != nil {
+			_ = agentStateStore.SaveAgentState(ctx, j.AgentID, agent.Session.ID, runtime.SessionToAgentState(agent.Session))
+		}
 		// 事件流补全：执行结束后追加 JobCompleted / JobFailed，便于审计与回放
 		if jobEventStore != nil {
 			_, ver, _ := jobEventStore.ListEvents(ctx, j.ID)
@@ -245,6 +259,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	jobScheduler := job.NewScheduler(jobStore, runJob, schedulerConfig)
 	handler.SetJobStore(jobStore)
 	handler.SetJobEventStore(jobEventStore)
+	handler.SetAgentStateStore(agentStateStore)
 	handler.SetToolsRegistry(toolsReg)
 
 	mw := middleware.NewMiddleware()
@@ -346,10 +361,13 @@ func (a *App) Run(addr string) error {
 	} else {
 		a.hertz = a.router.Build(addr)
 	}
-	// 仅当配置启用时在 API 进程内启动 Scheduler；分布式模式（job_scheduler.enabled=false）由 Worker 进程拉取执行；未配置时默认 true
-	jobSchedulerEnabled := true
-	if a.config.Config != nil && a.config.Config.Agent.JobScheduler.Enabled != nil {
-		jobSchedulerEnabled = *a.config.Config.Agent.JobScheduler.Enabled
+	// 单一执行权：jobstore.type=postgres 时禁止 API 内 Scheduler，仅由 Worker 通过事件 Claim 执行；避免双通道重复执行
+	jobSchedulerEnabled := false
+	if a.config.Config != nil && a.config.Config.JobStore.Type != "postgres" {
+		jobSchedulerEnabled = true
+		if a.config.Config.Agent.JobScheduler.Enabled != nil {
+			jobSchedulerEnabled = *a.config.Config.Agent.JobScheduler.Enabled
+		}
 	}
 	if a.jobScheduler != nil && jobSchedulerEnabled {
 		go a.jobScheduler.Start(context.Background())

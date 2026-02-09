@@ -75,6 +75,13 @@ func pgToStatus(i int) JobStatus {
 	}
 }
 
+func nullStr(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 func (s *JobStorePg) Create(ctx context.Context, j *Job) (string, error) {
 	if j == nil {
 		return "", errors.New("job is nil")
@@ -91,9 +98,9 @@ func (s *JobStorePg) Create(ctx context.Context, j *Job) (string, error) {
 		j.UpdatedAt = now
 	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO jobs (id, agent_id, goal, status, cursor, retry_count, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		id, j.AgentID, j.Goal, statusToPg(StatusPending), j.Cursor, j.RetryCount, j.CreatedAt, j.UpdatedAt)
+		`INSERT INTO jobs (id, agent_id, goal, status, cursor, retry_count, session_id, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		id, j.AgentID, j.Goal, statusToPg(StatusPending), j.Cursor, j.RetryCount, nullStr(j.SessionID), j.CreatedAt, j.UpdatedAt)
 	if err != nil {
 		return "", err
 	}
@@ -103,12 +110,12 @@ func (s *JobStorePg) Create(ctx context.Context, j *Job) (string, error) {
 func (s *JobStorePg) Get(ctx context.Context, jobID string) (*Job, error) {
 	var j Job
 	var status int
-	var cursor *string
+	var cursor, sessionID *string
 	var retryCount int
 	var createdAt, updatedAt time.Time
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, agent_id, goal, status, cursor, retry_count, created_at, updated_at FROM jobs WHERE id = $1`,
-		jobID).Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &createdAt, &updatedAt)
+		`SELECT id, agent_id, goal, status, cursor, retry_count, session_id, created_at, updated_at FROM jobs WHERE id = $1`,
+		jobID).Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &createdAt, &updatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -119,6 +126,9 @@ func (s *JobStorePg) Get(ctx context.Context, jobID string) (*Job, error) {
 	if cursor != nil {
 		j.Cursor = *cursor
 	}
+	if sessionID != nil {
+		j.SessionID = *sessionID
+	}
 	j.RetryCount = retryCount
 	j.CreatedAt = createdAt
 	j.UpdatedAt = updatedAt
@@ -127,7 +137,7 @@ func (s *JobStorePg) Get(ctx context.Context, jobID string) (*Job, error) {
 
 func (s *JobStorePg) ListByAgent(ctx context.Context, agentID string) ([]*Job, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, agent_id, goal, status, cursor, retry_count, created_at, updated_at FROM jobs WHERE agent_id = $1 ORDER BY created_at DESC`,
+		`SELECT id, agent_id, goal, status, cursor, retry_count, session_id, created_at, updated_at FROM jobs WHERE agent_id = $1 ORDER BY created_at DESC`,
 		agentID)
 	if err != nil {
 		return nil, err
@@ -137,15 +147,18 @@ func (s *JobStorePg) ListByAgent(ctx context.Context, agentID string) ([]*Job, e
 	for rows.Next() {
 		var j Job
 		var status int
-		var cursor *string
+		var cursor, sessionID *string
 		var retryCount int
 		var createdAt, updatedAt time.Time
-		if err := rows.Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		j.Status = pgToStatus(status)
 		if cursor != nil {
 			j.Cursor = *cursor
+		}
+		if sessionID != nil {
+			j.SessionID = *sessionID
 		}
 		j.RetryCount = retryCount
 		j.CreatedAt = createdAt
@@ -179,14 +192,14 @@ func (s *JobStorePg) ClaimNextPending(ctx context.Context) (*Job, error) {
 	// 原子取一条 status=0 并置为 1
 	var j Job
 	var status int
-	var cursor *string
+	var cursor, sessionID *string
 	var retryCount int
 	var createdAt, updatedAt time.Time
 	err := s.pool.QueryRow(ctx,
 		`UPDATE jobs SET status = $1, updated_at = now()
 		 WHERE id = (SELECT id FROM jobs WHERE status = $2 ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED)
-		 RETURNING id, agent_id, goal, status, cursor, retry_count, created_at, updated_at`,
-		pgStatusRunning, pgStatusPending).Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &createdAt, &updatedAt)
+		 RETURNING id, agent_id, goal, status, cursor, retry_count, session_id, created_at, updated_at`,
+		pgStatusRunning, pgStatusPending).Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &createdAt, &updatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -196,6 +209,9 @@ func (s *JobStorePg) ClaimNextPending(ctx context.Context) (*Job, error) {
 	j.Status = StatusRunning
 	if cursor != nil {
 		j.Cursor = *cursor
+	}
+	if sessionID != nil {
+		j.SessionID = *sessionID
 	}
 	j.RetryCount = retryCount
 	j.CreatedAt = createdAt

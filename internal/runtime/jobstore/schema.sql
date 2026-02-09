@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     status      INT  NOT NULL,
     cursor      TEXT,
     retry_count INT  NOT NULL DEFAULT 0,
+    session_id  TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -37,3 +38,12 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS idx_jobs_agent_id ON jobs (agent_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs (status);
 CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs (created_at);
+
+-- Agent 状态表（会话/记忆快照），供 Worker 恢复与多实例共享
+CREATE TABLE IF NOT EXISTS agent_states (
+    agent_id   TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    payload    JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (agent_id, session_id)
+);

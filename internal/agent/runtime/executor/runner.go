@@ -15,11 +15,17 @@ type JobStoreForRunner interface {
 	UpdateStatus(ctx context.Context, jobID string, status int) error
 }
 
+// PlanGeneratedSink 规划结果事件化：Plan 成功后由 Runner 调用，便于 Trace/Replay 确定复现
+type PlanGeneratedSink interface {
+	AppendPlanGenerated(ctx context.Context, jobID string, taskGraphJSON []byte, goal string) error
+}
+
 // Runner 单轮执行：PlanGoal → Compile → Invoke；可选 Checkpoint/JobStore 时支持 RunForJob 逐节点 checkpoint 与恢复
 type Runner struct {
-	compiler        *Compiler
-	checkpointStore runtime.CheckpointStore
-	jobStore        JobStoreForRunner
+	compiler          *Compiler
+	checkpointStore   runtime.CheckpointStore
+	jobStore          JobStoreForRunner
+	planGeneratedSink PlanGeneratedSink
 }
 
 // NewRunner 创建 Runner（仅编译与单次 Invoke）
@@ -31,6 +37,11 @@ func NewRunner(compiler *Compiler) *Runner {
 func (r *Runner) SetCheckpointStores(cp runtime.CheckpointStore, js JobStoreForRunner) {
 	r.checkpointStore = cp
 	r.jobStore = js
+}
+
+// SetPlanGeneratedSink 设置规划事件写入（可选）；Plan 成功后 Append PlanGenerated，供 Trace/Replay 使用
+func (r *Runner) SetPlanGeneratedSink(sink PlanGeneratedSink) {
+	r.planGeneratedSink = sink
 }
 
 // Run 执行单轮：通过 Agent 的 Planner 得到 TaskGraph，编译为 DAG 并执行
@@ -163,6 +174,11 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 			agent.SetStatus(runtime.StatusFailed)
 			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
 			return fmt.Errorf("executor: Planner 未返回 *TaskGraph")
+		}
+		// 规划事件化：写入 PlanGenerated 便于 Trace/Replay 确定复现
+		if r.planGeneratedSink != nil {
+			graphBytes, _ := taskGraph.Marshal()
+			_ = r.planGeneratedSink.AppendPlanGenerated(ctx, j.ID, graphBytes, j.Goal)
 		}
 		var compErr error
 		steps, compErr = r.compiler.CompileSteppable(ctx, taskGraph, agent)

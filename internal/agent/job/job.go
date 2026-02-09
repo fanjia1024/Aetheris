@@ -39,4 +39,6 @@ type Job struct {
 	Cursor string
 	// RetryCount 已重试次数，供 Scheduler 重试与 backoff
 	RetryCount int
+	// SessionID 关联会话，Worker 恢复时 LoadAgentState(AgentID, SessionID)；空时用 AgentID 作为 sessionID
+	SessionID string
 }

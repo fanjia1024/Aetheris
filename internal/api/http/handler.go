@@ -50,9 +50,10 @@ type Handler struct {
 	agentManager   *agentruntime.Manager
 	agentScheduler *agentruntime.Scheduler
 	agentCreator   AgentCreator
-	jobStore       job.JobStore
-	jobEventStore  jobstore.JobStore
-	toolsRegistry  *tools.Registry
+	jobStore        job.JobStore
+	jobEventStore   jobstore.JobStore
+	toolsRegistry   *tools.Registry
+	agentStateStore agentruntime.AgentStateStore
 }
 
 // NewHandler 创建新的 HTTP 处理器
@@ -93,6 +94,11 @@ func (h *Handler) SetJobEventStore(store jobstore.JobStore) {
 // SetToolsRegistry 设置工具注册表；设置后提供 GET /api/tools 与 GET /api/tools/:name
 func (h *Handler) SetToolsRegistry(reg *tools.Registry) {
 	h.toolsRegistry = reg
+}
+
+// SetAgentStateStore 设置 Agent 状态存储；设置后 message 与 runJob 会持久化/加载会话，供 Worker 恢复
+func (h *Handler) SetAgentStateStore(store agentruntime.AgentStateStore) {
+	h.agentStateStore = store
 }
 
 // HealthCheck 健康检查
@@ -480,9 +486,13 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	agent.Session.AddMessage("user", req.Message)
+	if h.agentStateStore != nil {
+		state := agentruntime.SessionToAgentState(agent.Session)
+		_ = h.agentStateStore.SaveAgentState(ctx, id, agent.Session.ID, state)
+	}
 	if h.jobStore != nil {
 		// 先创建 Job 得到稳定 jobID，再双写事件流，避免 Create 失败时留下孤立事件
-		j := &job.Job{AgentID: id, Goal: req.Message, Status: job.StatusPending}
+		j := &job.Job{AgentID: id, Goal: req.Message, Status: job.StatusPending, SessionID: agent.Session.ID}
 		jobIDOut, errCreate := h.jobStore.Create(ctx, j)
 		if errCreate != nil {
 			hlog.CtxErrorf(ctx, "创建 Job 失败: %v", errCreate)

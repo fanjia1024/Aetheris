@@ -19,15 +19,16 @@ api:
     port: 9090
 
 # 任务事件存储（事件流 + 租约）；未配置或 type 非 postgres 时使用内存后端
+# 当 type=postgres 时，仅由 Worker 进程通过事件 Claim 执行，API 不启动进程内 Scheduler（单一执行权）
 jobstore:
   type: "memory"           # memory | postgres
   dsn: ""                  # type=postgres 时必填，如 "postgres://user:pass@localhost:5432/db?sslmode=disable"
   lease_duration: "30s"     # 租约时长；Heartbeat 间隔建议 < lease_duration/2
 
-# v1 Agent 与 Job 调度（可选；未配置时使用默认）
+# v1 Agent 与 Job 调度（仅 jobstore.type=memory 时生效；postgres 时 API 不拉取，由 Worker 唯一执行）
 agent:
   job_scheduler:
-    enabled: true        # false 时 API 不拉取执行 Job，由独立 Worker 进程 Claim 执行（jobstore.type=postgres 时建议 false）
+    enabled: true        # 仅内存模式有效；postgres 时强制不启 API Scheduler
     max_concurrency: 2   # 最大并发执行 Job 数
     retry_max: 2       # 失败后最大重试次数（不含首次）
     backoff: "1s"      # 重试前等待时间

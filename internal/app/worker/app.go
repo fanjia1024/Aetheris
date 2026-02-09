@@ -107,15 +107,31 @@ func NewApp(cfg *config.Config) (*App, error) {
 		dagCompiler := api.NewDAGCompiler(llmClient, toolsReg, engine)
 		dagRunner := api.NewDAGRunner(dagCompiler)
 		checkpointStore := runtime.NewCheckpointStoreMem()
+		agentStateStore, errState := runtime.NewAgentStateStorePg(context.Background(), dsn)
+		if errState != nil {
+			return nil, fmt.Errorf("初始化 AgentStateStore(postgres) 失败: %w", errState)
+		}
 		dagRunner.SetCheckpointStores(checkpointStore, &jobStoreForRunnerAdapter{JobStore: pgJobStore})
+		dagRunner.SetPlanGeneratedSink(api.NewPlanGeneratedSink(pgEventStore))
 		runJob := func(ctx context.Context, j *job.Job) error {
-			sess := runtime.NewSession("", j.AgentID)
+			sessionID := j.SessionID
+			if sessionID == "" {
+				sessionID = j.AgentID
+			}
+			state, _ := agentStateStore.LoadAgentState(ctx, j.AgentID, sessionID)
+			sess := runtime.NewSession(sessionID, j.AgentID)
+			if state != nil {
+				runtime.ApplyAgentState(sess, state)
+			}
 			plannerProv := newPlannerProviderAdapter(v1Planner)
 			toolsProv := newToolsProviderAdapter(toolsReg)
 			agent := runtime.NewAgent(j.AgentID, j.AgentID, sess, nil, plannerProv, toolsProv)
 			err := dagRunner.RunForJob(ctx, agent, &agentexec.JobForRunner{
 				ID: j.ID, AgentID: j.AgentID, Goal: j.Goal, Cursor: j.Cursor,
 			})
+			if agentStateStore != nil && agent.Session != nil {
+				_ = agentStateStore.SaveAgentState(ctx, j.AgentID, agent.Session.ID, runtime.SessionToAgentState(agent.Session))
+			}
 			_, ver, _ := pgEventStore.ListEvents(ctx, j.ID)
 			evType := jobstore.JobCompleted
 			if err != nil {

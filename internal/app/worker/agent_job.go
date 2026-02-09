@@ -102,6 +102,8 @@ func (r *AgentJobRunner) executeJob(ctx context.Context, jobID string) {
 		r.logger.Warn("Get Job 失败或不存在，跳过", "job_id", jobID, "error", err)
 		return
 	}
+	// 元数据与事件一致：Claim 成功后标记 Running，便于查询与运维
+	_ = r.jobStore.UpdateStatus(ctx, jobID, job.StatusRunning)
 	r.logger.Info("开始执行 Job", "job_id", jobID, "agent_id", j.AgentID, "goal", j.Goal)
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
