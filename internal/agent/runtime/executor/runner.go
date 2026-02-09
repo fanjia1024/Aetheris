@@ -155,6 +155,8 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 	var steps []SteppableStep
 	var payload *AgentDAGPayload
 	startIndex := 0
+	// completedSet：事件流/Checkpoint 推导的已完成节点集合，runLoop 中步前检查，避免重复执行
+	var completedSet map[string]struct{}
 
 	// 与 job.JobStatus 对应，避免 executor 依赖 job 包：2=Completed, 3=Failed
 	const statusFailed = 3
@@ -175,7 +177,9 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
 			return fmt.Errorf("executor: CompileSteppable 失败: %w", compErr)
 		}
+		completedSet = make(map[string]struct{})
 		for i, s := range steps {
+			completedSet[s.NodeID] = struct{}{}
 			if s.NodeID == cp.CursorNode {
 				startIndex = i + 1
 				break
@@ -203,9 +207,11 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 						if len(rctx.PayloadResults) > 0 {
 							_ = json.Unmarshal(rctx.PayloadResults, &payload.Results)
 						}
+						completedSet = rctx.CompletedNodeIDs
+						startIndex = 0
 						for i, s := range steps {
-							if s.NodeID == rctx.CursorNode {
-								startIndex = i + 1
+							if _, done := completedSet[s.NodeID]; !done {
+								startIndex = i
 								break
 							}
 						}
@@ -254,6 +260,11 @@ runLoop:
 	graphBytes, _ := taskGraph.Marshal()
 	for i := startIndex; i < len(steps); i++ {
 		step := steps[i]
+		if completedSet != nil {
+			if _, done := completedSet[step.NodeID]; done {
+				continue
+			}
+		}
 		if r.nodeEventSink != nil {
 			_ = r.nodeEventSink.AppendNodeStarted(ctx, j.ID, step.NodeID)
 		}

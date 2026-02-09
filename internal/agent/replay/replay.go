@@ -10,9 +10,11 @@ import (
 
 // ReplayContext 从事件流重建的执行上下文，供 Runner 恢复时使用（不重复执行已完成节点）
 type ReplayContext struct {
-	TaskGraphState []byte
-	CursorNode     string
-	PayloadResults []byte
+	TaskGraphState       []byte            // PlanGenerated 的 task_graph
+	CursorNode           string            // 最后一条 NodeFinished 的 node_id，兼容 Trace/旧逻辑
+	PayloadResults       []byte            // 最后一条 NodeFinished 的 payload_results（累积状态）
+	CompletedNodeIDs     map[string]struct{} // 所有已出现 NodeFinished 的 node_id 集合，供确定性重放
+	PayloadResultsByNode map[string][]byte  // 按 node_id 的 payload_results，供跳过时合并（可选）
 }
 
 // ReplayContextBuilder 从 JobStore 事件流构建 ReplayContext
@@ -31,7 +33,7 @@ func NewReplayContextBuilder(store jobstore.JobStore) ReplayContextBuilder {
 }
 
 // BuildFromEvents 从 job 的事件列表重建执行上下文；事件流为权威来源
-// 若有 PlanGenerated 则得到 TaskGraph；若有 NodeFinished 则取最后一条得到 CursorNode 与 PayloadResults
+// PlanGenerated 得到 TaskGraph；每条 NodeFinished 加入 CompletedNodeIDs 并更新最后 CursorNode/PayloadResults；按 node 存 PayloadResultsByNode
 func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*ReplayContext, error) {
 	if b.store == nil {
 		return nil, nil
@@ -40,7 +42,10 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 	if err != nil || len(events) == 0 {
 		return nil, err
 	}
-	var out ReplayContext
+	out := ReplayContext{
+		CompletedNodeIDs:     make(map[string]struct{}),
+		PayloadResultsByNode: make(map[string][]byte),
+	}
 	for _, e := range events {
 		switch e.Type {
 		case jobstore.PlanGenerated:
@@ -59,9 +64,11 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 			if err := json.Unmarshal(e.Payload, &payload); err != nil {
 				continue
 			}
+			out.CompletedNodeIDs[payload.NodeID] = struct{}{}
 			out.CursorNode = payload.NodeID
 			if len(payload.PayloadResults) > 0 {
 				out.PayloadResults = []byte(payload.PayloadResults)
+				out.PayloadResultsByNode[payload.NodeID] = []byte(payload.PayloadResults)
 			}
 		}
 	}
