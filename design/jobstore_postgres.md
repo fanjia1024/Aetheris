@@ -74,3 +74,7 @@
 
 - SQL 脚本：`internal/runtime/jobstore/schema.sql`（含 job_events、job_claims、jobs）
 - 部署时执行即可创建表与索引；可选后续引入 migrate 库做版本化迁移
+
+## 生产部署
+
+生产环境请使用 `jobstore.type: postgres`，并先执行 [internal/runtime/jobstore/schema.sql](internal/runtime/jobstore/schema.sql)。Compose/K8s 等若已提供 Postgres 服务，只需在 configs 中配置 `jobstore.dsn` 并执行上述 schema 即可。Runner 从事件流恢复执行状态的说明见 [event-replay-recovery.md](event-replay-recovery.md)。

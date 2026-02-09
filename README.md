@@ -6,7 +6,7 @@ Go + eino 驱动的 **Agent Runtime** 与 RAG 平台：以 Agent 为第一公民
 
 - **API 层**：HTTP/REST，提供 **v1 Agent API**（创建/发消息/状态/恢复/停止）、文档上传、查询、知识库管理、系统状态等接口。
 - **Agent 中心**：用户请求经 Agent Manager → Session；发消息时创建 **Job**（双写 **事件流 JobStore** + 状态型 Job）→ **Scheduler**（并发/重试）拉取 Job → **Runner.RunForJob**（Steppable + 节点级 Checkpoint）→ Planner 产出 TaskGraph → 执行适配层逐节点执行；RAG/Pipeline 作为 workflow 或工具节点可被规划器选用。
-- **任务存储（JobStore）**：`internal/runtime/jobstore` 提供**事件流**语义：版本化 Append（乐观并发）、Claim/Heartbeat（租约）、Watch（订阅）。当前为内存实现；为崩溃恢复、多 Worker、审计/回放与未来分布式打基础。
+- **任务存储（JobStore）**：`internal/runtime/jobstore` 提供**事件流**语义：版本化 Append（乐观并发）、Claim/Heartbeat（租约）、Watch（订阅）。支持 **Postgres** 作为生产持久化后端（`jobstore.type: postgres`）：事件持久、重启/滚动更新不丢任务；多 Worker 通过 Claim/Heartbeat 抢占执行；Runner 无 Checkpoint 时从事件流 Replay 恢复。内存实现保留为开发快速启动选项；生产推荐 Postgres，表结构见 [internal/runtime/jobstore/schema.sql](internal/runtime/jobstore/schema.sql)，详见 [design/jobstore_postgres.md](design/jobstore_postgres.md)。
 - **编排核心（eino）**：仅作为 Agent 的**执行内核**被调用（DAG 调度、Context 传递）；不再直接面对「用户查询」请求。
 - **领域 Pipeline**：Ingest、Query 等由 eino 调度，可作为 TaskGraph 中的 workflow 节点被 Agent 调用。
 - **模型与存储**：LLM、Embedding、Vision 多厂商抽象；元数据、向量、对象、缓存抽象，当前默认提供 memory 实现。
@@ -40,7 +40,7 @@ go run ./cmd/api
 
 ## 主要功能
 
-- **v1 Agent（推荐）**：`POST /api/agents` 创建 Agent，`POST /api/agents/:id/message` 发送消息并创建 Job（返回 202 + `job_id`），由 Scheduler 拉取并执行（Steppable + 节点级 Checkpoint，支持恢复）；支持状态查询、恢复、停止。规划器可通过环境变量 `PLANNER_TYPE=rule` 切换为无 LLM 的规则规划器便于调试。
+- **v1 Agent（推荐）**：`POST /api/agents` 创建 Agent，`POST /api/agents/:id/message` 发送消息并创建 Job（返回 202 + `job_id`），由 Scheduler 或 Worker 拉取并执行（Steppable + 节点级 Checkpoint，支持恢复）；支持状态查询、恢复、停止。使用 Postgres JobStore 时可实现崩溃恢复、多 Worker、长任务与审计回放。规划器可通过环境变量 `PLANNER_TYPE=rule` 切换为无 LLM 的规则规划器便于调试。
 - **文档上传**：`POST /api/documents/upload` 触发 ingest_pipeline（解析 → 切片 → 向量化 → 写入向量与元数据）。
 - **查询**：`POST /api/query` 使用 query_pipeline（已标记 Deprecated，推荐通过 Agent 发消息交互）。
 - **知识库**：集合的列表/创建/删除（见 `/api/knowledge/collections`）。
@@ -62,10 +62,12 @@ API 启动时通过 `LoadAPIConfigWithModel` 合并 api + model 配置，因此�
 - Compose：[deployments/compose/](deployments/compose/)
 - K8s：[deployments/k8s/](deployments/k8s/)
 
+**生产环境**：请使用 `jobstore.type: postgres`，并先执行 [internal/runtime/jobstore/schema.sql](internal/runtime/jobstore/schema.sql) 创建事件流与租约表。Compose/K8s 等若已提供 Postgres 服务，只需配置 DSN（如 `configs/api.yaml`、`configs/worker.yaml` 中的 `jobstore.dsn`）并执行上述 schema 即可。
+
 ## 开发与设计
 
 - 目录结构：`cmd/` 入口，`internal/` 核心（app、runtime/eino、pipeline、model、storage），`pkg/` 公共库，`design/` 设计文档。
-- 设计文档：[design/core.md](design/core.md)、[design/struct.md](design/struct.md)、[design/services.md](design/services.md)
+- 设计文档：[design/core.md](design/core.md)、[design/struct.md](design/struct.md)、[design/services.md](design/services.md)、[design/jobstore_postgres.md](design/jobstore_postgres.md)、[design/event-replay-recovery.md](design/event-replay-recovery.md)
 - 使用说明与 API 汇总：[docs/](docs/)
 - 示例代码：[examples/](examples/)（含 `simple_chat_agent`：基于 `pkg/agent` 的可编程 Agent，无需启动服务）
 
