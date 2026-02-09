@@ -60,7 +60,7 @@ internal/app/
 
 ---
 
-### 3.2 internal/runtime —— eino Runtime（系统大脑）
+### 3.2 internal/runtime —— eino 与运行时基础设施
 
 ```
 internal/runtime/
@@ -70,18 +70,44 @@ internal/runtime/
 │   ├── agent.go            # Agent 定义
 │   ├── node.go             # 通用 Node 封装
 │   └── context.go          # Context / State 扩展
+├── jobstore/
+│   ├── event.go            # JobEvent、EventType
+│   ├── store.go            # JobStore 接口（ListEvents/Append/Claim/Heartbeat/Watch）
+│   └── memory_store.go     # 内存实现（版本、租约、Watch）
+└── session/
+    └── ...                 # 会话存储等
 ```
 
-这是你整个系统 **最核心的目录**：
-
-- Workflow / DAG
-- Agent 执行
-- Retry / Fallback
-- Context 传递
+- **eino**：Workflow / DAG、Agent 执行、Context 传递；仅作为执行内核被 agent executor 调用。
+- **jobstore**：任务事件流与调度语义（ListEvents 带 version、版本化 Append、Claim/Heartbeat 租约、Watch）；当前为内存实现，为崩溃恢复、多 Worker、审计回放打基础。
+- **session**：会话相关存储与能力。
 
 ---
 
-### 3.3 internal/pipeline —— 业务 Pipeline（纯 Go）
+### 3.3 internal/agent —— Agent 运行时与领域
+
+```
+internal/agent/
+├── runtime/
+│   ├── agent.go, session.go, manager.go, scheduler.go, checkpoint.go
+│   └── executor/
+│       ├── types.go, node_adapter.go, compiler.go, runner.go, steppable.go
+├── job/
+│   ├── job.go, job_store.go, scheduler.go, job_runner.go
+├── memory/
+├── planner/
+└── tools/
+```
+
+- **agent/runtime**：Agent、Session、Manager、Scheduler、Checkpoint。**executor/**：AgentDAGPayload、NodeAdapter（LLM/Tool/Workflow）、Compiler、Runner、Steppable（TopoOrder、CompileSteppable）、RunForJob 与节点级 Checkpoint 恢复。
+- **agent/job**：Job 实体、JobStore（Create/Get/UpdateStatus/UpdateCursor/ClaimNextPending/Requeue）、Scheduler（并发与重试）、JobRunner；当前由 app 使用 Scheduler 拉取 Job 并执行 RunForJob。
+- **agent/memory**：Memory、WorkingSession、Working、Episodic、Semantic。
+- **agent/planner**：TaskGraph、Planner、LLMPlanner、RulePlanner。
+- **agent/tools**：Tool、ToolResult（Done/State/Output）、Registry。
+
+---
+
+### 3.4 internal/pipeline —— 业务 Pipeline（纯 Go）
 
 ```
 internal/pipeline/
@@ -116,7 +142,7 @@ internal/pipeline/
 
 ---
 
-### 3.4 internal/splitter —— 切片引擎（能力模块）
+### 3.5 internal/splitter —— 切片引擎（能力模块）
 
 ```
 internal/splitter/
@@ -132,7 +158,7 @@ internal/splitter/
 
 ---
 
-### 3.5 internal/model —— 模型抽象层
+### 3.6 internal/model —— 模型抽象层
 
 ```
 internal/model/
@@ -156,7 +182,7 @@ internal/model/
 
 ---
 
-### 3.6 internal/storage —— 存储抽象
+### 3.7 internal/storage —— 存储抽象
 
 ```
 internal/storage/
@@ -175,7 +201,7 @@ internal/storage/
 
 ---
 
-### 3.7 internal/api —— API 层实现
+### 3.8 internal/api —— API 层实现
 
 ```
 internal/api/
@@ -237,11 +263,15 @@ cmd
  ↓
 internal/app
  ↓
-internal/runtime (eino)
+internal/api (Handler：创建 Job、双写事件流)
  ↓
-internal/pipeline
+internal/agent/job (Scheduler 拉取 Job)
  ↓
-internal/model / storage
+internal/agent/runtime/executor (Runner.RunForJob → Planner / Compiler / Steppable)
+ ↓
+internal/runtime/eino（仅被 executor 调用）
+ ↓
+internal/pipeline / internal/model / storage
 ```
 
 ❌ 禁止反向依赖

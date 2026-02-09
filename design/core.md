@@ -81,6 +81,20 @@ eino Runtime
 > ⚠️ 所有 Pipeline **只能被 eino 调度**
 > ⚠️ 不允许 Pipeline 之间直接互相调用
 
+### 4.1 Agent Runtime 与任务执行
+
+以 **Agent 为第一公民** 的请求路径：
+
+1. 用户发消息 → API 创建 **Job**（双写：事件流 `jobstore.Append(JobCreated)` + 状态型 `job.JobStore.Create`）。
+2. **Scheduler** 从状态型 JobStore 拉取 Pending Job → 调用 `Runner.RunForJob`。
+3. **RunForJob**：若 `Job.Cursor` 存在则从 Checkpoint 恢复；否则 PlanGoal 产出 TaskGraph → Compiler 编译为 DAG → **Steppable** 逐节点执行；每节点执行后落盘 Checkpoint、更新 Session.LastCheckpoint 与 Job.Cursor；恢复时从下一节点继续。
+4. Pipeline（如 RAG、Ingest）可作为 TaskGraph 中的 **workflow 节点** 被规划器选用。
+
+**事件化 JobStore**（`internal/runtime/jobstore`）：
+
+- 任务以**事件流**形态存储：ListEvents（带 version）、版本化 Append（乐观并发）、Claim/Heartbeat（租约）、Watch（订阅）。
+- 与 eino 的关系：eino **仅作为 DAG 执行内核** 被 `internal/agent/runtime/executor` 调用，不直接面对“创建任务”；任务创建与调度由 Agent Runtime 与 JobStore 负责。
+
 ---
 
 ## 5. Domain Pipelines（Go Native）
@@ -188,7 +202,18 @@ Storage Layer
 
 ## 9. 典型执行路径
 
-### 9.1 离线索引流程
+### 9.1 Agent 发消息（推荐）
+
+```
+Message
+ → API 创建 Job（双写事件流 + 状态型 Job）
+ → Scheduler 拉取 Pending Job
+ → Runner.RunForJob（Steppable + 节点级 Checkpoint）
+ → PlanGoal → TaskGraph → Compiler → 逐节点执行
+ → Tools / RAG / LLM（Pipeline 可作为 workflow 节点被规划器选用）
+```
+
+### 9.2 离线索引流程
 
 ```
 Upload
@@ -199,7 +224,7 @@ Upload
  → Vector Store
 ```
 
-### 9.2 在线查询流程
+### 9.3 在线查询流程
 
 ```
 Query

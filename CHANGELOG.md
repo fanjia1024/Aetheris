@@ -51,6 +51,10 @@
 
 - `POST /api/query`、`POST /api/query/batch`：推荐使用 `POST /api/agents/{id}/message` 以 Agent 为中心与系统交互；路由与 Handler 注释已标 Deprecated
 
+### Documentation
+
+- 根据最新代码更新设计文档、使用说明与文档中心：包含 Agent 执行路径（Message → Job → Scheduler → RunForJob）、事件化 JobStore 接口与语义、`internal/agent` 与 `internal/runtime/jobstore` 目录结构、API 端点与典型流程（含 job 列表/详情）。详见 [design/](design/)、[docs/](docs/)。
+
 ---
 
 ## 历史版本（摘要）

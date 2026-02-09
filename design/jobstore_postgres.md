@@ -1,5 +1,7 @@
 # JobStore PostgreSQL 设计
 
+当前内存实现见 [internal/runtime/jobstore/memory_store.go](internal/runtime/jobstore/memory_store.go)，接口定义见 [internal/runtime/jobstore/store.go](internal/runtime/jobstore/store.go)。本设计为 Postgres 实现与配置切换方案。
+
 ## 目标
 
 将 `internal/runtime/jobstore` 的事件流与租约语义持久化到 PostgreSQL，实现崩溃恢复、多 Worker、任务接管与审计回放。Postgres 实现与现有内存实现实现同一 `JobStore` 接口，通过配置切换。

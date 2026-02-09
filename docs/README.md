@@ -4,13 +4,14 @@
 
 ## 版本与变更
 
-- [CHANGELOG.md](../CHANGELOG.md) — 版本历史与重要变更（v1 Agent API、TaskGraph 执行适配层、RulePlanner、Planner 选择等）
+- [CHANGELOG.md](../CHANGELOG.md) — 版本历史与重要变更（v0.8 持久化运行时、事件化 JobStore、Job/Scheduler/Checkpoint/Steppable、v1 Agent API、TaskGraph 执行适配层、RulePlanner、Planner 选择等）
 
 ## 设计文档
 
-- [design/core.md](../design/core.md) — 总体架构、分层、Pipeline 与 eino 编排核心
-- [design/struct.md](../design/struct.md) — 仓库结构与模块职责
+- [design/core.md](../design/core.md) — 总体架构、分层、Agent Runtime 与任务执行、Pipeline 与 eino 编排核心
+- [design/struct.md](../design/struct.md) — 仓库结构与模块职责（含 internal/agent、internal/runtime/jobstore）
 - [design/services.md](../design/services.md) — 多 Service 架构（api / agent / index）
+- [design/jobstore_postgres.md](../design/jobstore_postgres.md) — JobStore 事件模型与 Postgres 实现设计
 
 ## 使用与 API
 

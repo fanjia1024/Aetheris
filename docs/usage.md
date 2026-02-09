@@ -83,9 +83,11 @@ curl http://localhost:8080/api/agents/<agent-id>/state
 curl http://localhost:8080/api/agents
 ```
 
-**v0.8 执行路径**：消息写入 Session → 创建 Job（双写事件流到 JobStore）→ Scheduler 拉取 Pending Job → Runner.RunForJob（Steppable + 节点级 Checkpoint）→ PlanGoal 产出 TaskGraph → 编译为 eino DAG → 逐节点执行 → 完成/失败时更新 Job 状态。RAG 可通过 workflow 节点被规划器选用。
+**v0.8 执行路径**：消息写入 Session → **双写**创建 Job：若配置了 JobEventStore，先向事件流 JobStore `Append(JobCreated)`，再调用状态型 JobStore.Create → Scheduler 从状态型 JobStore 拉取 Pending Job → Runner.RunForJob（Steppable + 节点级 Checkpoint）→ PlanGoal 产出 TaskGraph → 编译为 eino DAG → 逐节点执行 → 完成/失败时更新 Job 状态。RAG 可通过 workflow 节点被规划器选用。
 
-**Scheduler 行为**：调度器在 API 进程内运行，从 Job 队列拉取任务并执行。可配置项包括：`MaxConcurrency`（最大并发执行数）、`RetryMax`（失败后最大重试次数）、`Backoff`（重试前等待时间）。默认值见 `configs/api.yaml` 中的 `agent.job_scheduler`（若未配置则使用代码默认：并发 2、重试 2 次、Backoff 1s）。
+**任务存储（事件流）**：事件流接口（ListEvents、Append、Claim、Heartbeat、Watch）为崩溃恢复、多 Worker 与审计回放预留；当前 API 进程内使用内存实现。
+
+**Scheduler 行为**：调度器在 API 进程内运行，从 Job 队列拉取任务并执行。Scheduler 参数（MaxConcurrency、RetryMax、Backoff）由应用代码默认配置（如并发 2、重试 2 次、Backoff 1s），见 `internal/app/api/app.go`。
 
 ### 4. 发起查询（已废弃，建议用 Agent 发消息）
 
@@ -140,6 +142,7 @@ curl -X POST http://localhost:8080/api/query/batch \
 
 ## 常见问题
 
+- **Job 与事件流**：创建任务时返回的 `job_id` 同时写入事件流（JobCreated）与状态型 Job，便于未来从事件重放恢复或多 Worker 消费；当前执行仍由状态型 JobStore + Scheduler 驱动。
 - **v1 Agent 与 /api/query 区别**：v1 Agent 以「Agent + Session + 规划 → TaskGraph → eino DAG」为唯一执行路径，RAG 作为可选工具；`/api/query` 仍直连 query_pipeline，已标记废弃，建议新用法走 Agent 发消息。
 - **PLANNER_TYPE=rule**：用于调试时关闭 LLM 规划，规则规划器返回固定单节点 llm TaskGraph，便于验证 Executor 与 DAG 链路。
 - **无 OPENAI_API_KEY**：未设置或未在配置中填写时，API 仍可启动，但不会注册带真实 LLM/Embedding 的 query 与 ingest 工作流，查询/上传会走占位或返回错误。使用 RulePlanner 时规划不依赖 LLM，但执行 llm 节点仍需要 LLM 配置。

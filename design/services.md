@@ -44,12 +44,17 @@
 
 ### 内部结构
 
+任务执行路径：Job + 事件流 JobStore（版本化 Append、Claim/Heartbeat）+ Scheduler 拉取 → Runner.RunForJob（Steppable + 节点级 Checkpoint）；eino 作为 DAG 执行内核由 executor 调用。
+
 ```
-eino Runtime
-├── Workflow Engine
-├── Agent Executor
-├── Context / Memory
-└── Retry / Fallback
+Agent Runtime
+├── Job / 事件流 JobStore（ListEvents、Append、Claim、Heartbeat、Watch）
+├── Scheduler（拉取 Pending Job）
+├── Runner.RunForJob（Steppable、Checkpoint 恢复）
+└── eino Runtime（Workflow / DAG，仅被 executor 调用）
+    ├── Workflow Engine
+    ├── Context / Memory
+    └── Retry / Fallback
 ```
 
 ---
@@ -97,3 +102,4 @@ eino Runtime
 - Tool-Using Agent
 - 多 Workflow 协同
 - 人工干预（Human-in-the-loop）
+- 多 Worker 与持久化 JobStore（如 Postgres）：接口与设计已具备，见 [jobstore_postgres.md](jobstore_postgres.md)
