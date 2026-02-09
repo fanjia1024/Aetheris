@@ -173,22 +173,30 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	agentCreator := NewAgentCreator(agentRuntimeManager, v1Planner, toolsReg)
 	handler.SetAgentRuntime(agentRuntimeManager, agentScheduler, agentCreator)
 		// v0.8 Job System：message -> create Job -> Scheduler（并发/重试）-> Worker -> Executor；Checkpoint 支持恢复
-	jobStore := job.NewJobStoreMem()
+	// Job 元数据存储：postgres 时与 Worker 共享 jobs 表，否则内存（仅 API 进程内）
+	var jobStore job.JobStore
 	var jobEventStore jobstore.JobStore
 	if bootstrap.Config != nil && bootstrap.Config.JobStore.Type == "postgres" && bootstrap.Config.JobStore.DSN != "" {
+		dsn := bootstrap.Config.JobStore.DSN
 		leaseDur := 30 * time.Second
 		if bootstrap.Config.JobStore.LeaseDuration != "" {
 			if d, err := time.ParseDuration(bootstrap.Config.JobStore.LeaseDuration); err == nil && d > 0 {
 				leaseDur = d
 			}
 		}
-		pgStore, err := jobstore.NewPostgresStore(context.Background(), bootstrap.Config.JobStore.DSN, leaseDur)
+		pgEventStore, err := jobstore.NewPostgresStore(context.Background(), dsn, leaseDur)
 		if err != nil {
-			return nil, fmt.Errorf("初始化 JobStore(postgres) 失败: %w", err)
+			return nil, fmt.Errorf("初始化 JobStore 事件(postgres) 失败: %w", err)
 		}
-		jobEventStore = pgStore
-		bootstrap.Logger.Info("JobStore 使用 PostgreSQL 后端", "dsn", bootstrap.Config.JobStore.DSN)
+		jobEventStore = pgEventStore
+		pgJobStore, err := job.NewJobStorePg(context.Background(), dsn)
+		if err != nil {
+			return nil, fmt.Errorf("初始化 Job 元数据(postgres) 失败: %w", err)
+		}
+		jobStore = pgJobStore
+		bootstrap.Logger.Info("JobStore 使用 PostgreSQL 后端", "dsn", dsn)
 	} else {
+		jobStore = job.NewJobStoreMem()
 		jobEventStore = jobstore.NewMemoryStore()
 	}
 	checkpointStore := runtime.NewCheckpointStoreMem()
@@ -237,6 +245,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	jobScheduler := job.NewScheduler(jobStore, runJob, schedulerConfig)
 	handler.SetJobStore(jobStore)
 	handler.SetJobEventStore(jobEventStore)
+	handler.SetToolsRegistry(toolsReg)
 
 	mw := middleware.NewMiddleware()
 	router := http.NewRouter(handler, mw)
@@ -337,7 +346,12 @@ func (a *App) Run(addr string) error {
 	} else {
 		a.hertz = a.router.Build(addr)
 	}
-	if a.jobScheduler != nil {
+	// 仅当配置启用时在 API 进程内启动 Scheduler；分布式模式（job_scheduler.enabled=false）由 Worker 进程拉取执行；未配置时默认 true
+	jobSchedulerEnabled := true
+	if a.config.Config != nil && a.config.Config.Agent.JobScheduler.Enabled != nil {
+		jobSchedulerEnabled = *a.config.Config.Agent.JobScheduler.Enabled
+	}
+	if a.jobScheduler != nil && jobSchedulerEnabled {
 		go a.jobScheduler.Start(context.Background())
 	}
 	return a.hertz.Run()

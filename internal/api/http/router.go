@@ -85,6 +85,22 @@ func (r *Router) Build(addr string, opts ...config.Option) *server.Hertz {
 		agents.GET("/:id/jobs", authHandler, r.handler.ListAgentJobs)
 	}
 
+	// Execution Trace：Job 时间线与节点详情（可观测）
+	jobs := api.Group("/jobs")
+	{
+		jobs.GET("/:id", authHandler, r.handler.GetJob)
+		jobs.GET("/:id/events", authHandler, r.handler.GetJobEvents)
+		jobs.GET("/:id/trace", authHandler, r.handler.GetJobTrace)
+		jobs.GET("/:id/nodes/:node_id", authHandler, r.handler.GetJobNode)
+		jobs.GET("/:id/trace/page", authHandler, r.handler.GetJobTracePage)
+	}
+
+	toolsGroup := api.Group("/tools")
+	{
+		toolsGroup.GET("/", authHandler, r.handler.ListTools)
+		toolsGroup.GET("/:name", authHandler, r.handler.GetTool)
+	}
+
 	system := api.Group("/system")
 	{
 		system.GET("/status", authHandler, r.handler.SystemStatus)

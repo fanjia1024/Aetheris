@@ -34,6 +34,8 @@ type AgentConfig struct {
 
 // JobSchedulerConfig Scheduler 并发、重试与 backoff
 type JobSchedulerConfig struct {
+	// Enabled 为 false 时 API 不启动进程内 Scheduler，由独立 Worker 进程拉取执行（分布式模式）；未配置时默认 true
+	Enabled        *bool  `mapstructure:"enabled"`
 	MaxConcurrency int    `mapstructure:"max_concurrency"` // 最大并发执行数，<=0 使用默认 2
 	RetryMax       int    `mapstructure:"retry_max"`       // 失败后最大重试次数（不含首次），<0 使用默认 2
 	Backoff        string `mapstructure:"backoff"`         // 重试前等待时间，如 "1s"，空则默认 1s
@@ -73,11 +75,12 @@ type MiddlewareConfig struct {
 
 // WorkerConfig Worker 服务配置
 type WorkerConfig struct {
-	Concurrency int    `mapstructure:"concurrency"`
-	QueueSize   int    `mapstructure:"queue_size"`
-	RetryCount  int    `mapstructure:"retry_count"`
-	RetryDelay  string `mapstructure:"retry_delay"`
-	Timeout     string `mapstructure:"timeout"`
+	Concurrency   int    `mapstructure:"concurrency"`
+	QueueSize     int    `mapstructure:"queue_size"`
+	RetryCount    int    `mapstructure:"retry_count"`
+	RetryDelay    string `mapstructure:"retry_delay"`
+	Timeout       string `mapstructure:"timeout"`
+	PollInterval  string `mapstructure:"poll_interval"` // Agent Job Claim 轮询间隔，如 "2s"
 }
 
 // ModelConfig 模型配置

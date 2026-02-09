@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
+	"time"
 
 	"rag-platform/pkg/config"
 )
@@ -12,22 +16,50 @@ func main() {
 		printUsage()
 		os.Exit(0)
 	}
-	switch os.Args[1] {
+	cmd := os.Args[1]
+	args := os.Args[2:]
+	switch cmd {
 	case "version":
 		fmt.Println("rag-platform cli 0.1.0")
 	case "health":
-		// 仅做占位：可后续调用 app 提供的健康检查
 		fmt.Println("ok")
 	case "config":
-		// 加载并打印当前配置路径/概要（不写 Pipeline/Workflow）
-		cfg, err := config.LoadAPIConfig()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
+		runConfig()
+	case "server":
+		if len(args) > 0 && args[0] == "start" {
+			runServerStart()
+		} else {
+			fmt.Fprintf(os.Stderr, "Usage: corag server start\n")
 			os.Exit(1)
 		}
-		if cfg != nil {
-			fmt.Printf("api.port=%d\n", cfg.API.Port)
+	case "worker":
+		if len(args) > 0 && args[0] == "start" {
+			runWorkerStart()
+		} else {
+			fmt.Fprintf(os.Stderr, "Usage: corag worker start\n")
+			os.Exit(1)
 		}
+	case "agent":
+		if len(args) > 0 && args[0] == "create" {
+			name := ""
+			if len(args) > 1 {
+				name = args[1]
+			}
+			runAgentCreate(name)
+		} else {
+			fmt.Fprintf(os.Stderr, "Usage: corag agent create [name]\n")
+			os.Exit(1)
+		}
+	case "chat":
+		runChat(args)
+	case "jobs":
+		runJobs(args)
+	case "trace":
+		if len(args) < 1 {
+			fmt.Fprintf(os.Stderr, "Usage: corag trace <job_id>\n")
+			os.Exit(1)
+		}
+		runTrace(args[0])
 	default:
 		printUsage()
 		os.Exit(1)
@@ -35,8 +67,130 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println("Usage: cli <command>")
-	fmt.Println("  version   - 显示版本")
-	fmt.Println("  health    - 健康检查占位")
-	fmt.Println("  config    - 显示配置概要")
+	fmt.Println("Usage: corag <command> [args]")
+	fmt.Println("  version         - 显示版本")
+	fmt.Println("  health          - 健康检查")
+	fmt.Println("  config          - 显示配置概要")
+	fmt.Println("  server start    - 启动 API 服务（go run ./cmd/api）")
+	fmt.Println("  worker start    - 启动 Worker 服务（go run ./cmd/worker）")
+	fmt.Println("  agent create [name] - 创建 Agent，返回 agent_id")
+	fmt.Println("  chat [agent_id] - 交互式对话（未传 agent_id 时需环境 CORAG_AGENT_ID）")
+	fmt.Println("  jobs <agent_id> - 列出该 Agent 的 Jobs")
+	fmt.Println("  trace <job_id>  - 输出 Job 执行时间线，并打印 Trace 页面 URL")
+}
+
+func runConfig() {
+	cfg, err := config.LoadAPIConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
+		os.Exit(1)
+	}
+	if cfg != nil {
+		fmt.Printf("api.port=%d\n", cfg.API.Port)
+		fmt.Printf("api.host=%s\n", cfg.API.Host)
+	}
+}
+
+func runServerStart() {
+	c := exec.Command("go", "run", "./cmd/api")
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	c.Dir = "."
+	if err := c.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "server start: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runWorkerStart() {
+	c := exec.Command("go", "run", "./cmd/worker")
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	c.Dir = "."
+	if err := c.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "worker start: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runAgentCreate(name string) {
+	if name == "" {
+		name = "default"
+	}
+	id, err := createAgent(name)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "创建 Agent 失败: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(id)
+}
+
+func runChat(args []string) {
+	agentID := os.Getenv("CORAG_AGENT_ID")
+	if len(args) > 0 {
+		agentID = args[0]
+	}
+	if agentID == "" {
+		fmt.Fprintf(os.Stderr, "请指定 agent_id: corag chat <agent_id> 或设置 CORAG_AGENT_ID\n")
+		os.Exit(1)
+	}
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Print("> ")
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			break
+		}
+		msg := strings.TrimSpace(line)
+		if msg == "" {
+			continue
+		}
+		if msg == "exit" || msg == "quit" {
+			break
+		}
+		jobID, err := postMessage(agentID, msg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "发送失败: %v\n", err)
+			continue
+		}
+		fmt.Printf("Job: %s (轮询状态中...)\n", jobID)
+		for i := 0; i < 60; i++ {
+			time.Sleep(1 * time.Second)
+			j, err := getJob(jobID)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "查询失败: %v\n", err)
+				break
+			}
+			status, _ := j["status"].(string)
+			fmt.Printf("  status: %s\n", status)
+			if status == "completed" || status == "failed" {
+				break
+			}
+		}
+	}
+}
+
+func runJobs(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintf(os.Stderr, "Usage: corag jobs <agent_id>\n")
+		os.Exit(1)
+	}
+	agentID := args[0]
+	jobs, err := listAgentJobs(agentID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "列出 Jobs 失败: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(prettyJSON(jobs))
+}
+
+func runTrace(jobID string) {
+	trace, err := getJobTrace(jobID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "获取 Trace 失败: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(prettyJSON(trace))
+	fmt.Println()
+	fmt.Println("Trace 页面:", tracePageURL(jobID))
 }

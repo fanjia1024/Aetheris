@@ -50,7 +50,25 @@
 - jobstore.dsn：Postgres 连接串（type=postgres 时必填）
 - jobstore.lease_duration：租约时长，如 "30s"，默认 30s
 
+## jobs 表（Job 元数据，API 与 Worker 共享）
+
+当使用 Postgres 时，除事件流与租约外，需共享 Job 元数据以便 Worker 进程拉取执行。
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| id | TEXT | 主键，job ID |
+| agent_id | TEXT | 所属 Agent |
+| goal | TEXT | 目标/消息 |
+| status | INT | 0=Pending, 1=Running, 2=Completed, 3=Failed |
+| cursor | TEXT | 恢复游标（Checkpoint ID） |
+| retry_count | INT | 已重试次数 |
+| created_at | TIMESTAMPTZ | 创建时间 |
+| updated_at | TIMESTAMPTZ | 更新时间 |
+
+- 实现：`internal/agent/job/pg_store.go`，实现 `job.JobStore` 接口（Create, Get, ListByAgent, UpdateStatus, UpdateCursor, ClaimNextPending, Requeue）。
+- API 与 Worker 共用同一 DSN 时，均使用此表读写 Job。
+
 ## 迁移
 
-- SQL 脚本：`internal/runtime/jobstore/schema.sql`
+- SQL 脚本：`internal/runtime/jobstore/schema.sql`（含 job_events、job_claims、jobs）
 - 部署时执行即可创建表与索引；可选后续引入 migrate 库做版本化迁移

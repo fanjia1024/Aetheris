@@ -5,6 +5,14 @@ worker:
   retry_count: 3
   retry_delay: 1s
   timeout: 5m
+  # Agent Job 拉取间隔（从事件存储 Claim）
+  poll_interval: "2s"
+
+# 任务事件与元数据存储（与 API 共用 DSN 时，Worker Claim 执行 Job）
+jobstore:
+  type: "memory"
+  dsn: ""
+  lease_duration: "30s"
 
 # 存储配置
 storage:

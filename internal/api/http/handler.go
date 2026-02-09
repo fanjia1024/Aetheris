@@ -13,6 +13,7 @@ import (
 
 	"rag-platform/internal/agent"
 	"rag-platform/internal/agent/job"
+	"rag-platform/internal/agent/tools"
 	agentruntime "rag-platform/internal/agent/runtime"
 	appcore "rag-platform/internal/app"
 	"rag-platform/internal/model/llm"
@@ -51,6 +52,7 @@ type Handler struct {
 	agentCreator   AgentCreator
 	jobStore       job.JobStore
 	jobEventStore  jobstore.JobStore
+	toolsRegistry  *tools.Registry
 }
 
 // NewHandler 创建新的 HTTP 处理器
@@ -86,6 +88,11 @@ func (h *Handler) SetJobStore(store job.JobStore) {
 // SetJobEventStore 设置任务事件存储；设置后 message 创建任务时会先追加 JobCreated 事件（与 SetJobStore 双写）
 func (h *Handler) SetJobEventStore(store jobstore.JobStore) {
 	h.jobEventStore = store
+}
+
+// SetToolsRegistry 设置工具注册表；设置后提供 GET /api/tools 与 GET /api/tools/:name
+func (h *Handler) SetToolsRegistry(reg *tools.Registry) {
+	h.toolsRegistry = reg
 }
 
 // HealthCheck 健康检查
@@ -705,4 +712,205 @@ func (h *Handler) ListAgents(ctx context.Context, c *app.RequestContext) {
 		"agents": agents,
 		"total":  len(agents),
 	})
+}
+
+// GetJob 按 job_id 返回 Job 元数据（供 Trace 等使用）
+func (h *Handler) GetJob(ctx context.Context, c *app.RequestContext) {
+	if h.jobStore == nil || h.jobEventStore == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "Job 未启用"})
+		return
+	}
+	jobID := c.Param("id")
+	j, err := h.jobStore.Get(ctx, jobID)
+	if err != nil || j == nil {
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+		return
+	}
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"id":          j.ID,
+		"agent_id":    j.AgentID,
+		"goal":        j.Goal,
+		"status":      j.Status.String(),
+		"cursor":      j.Cursor,
+		"retry_count": j.RetryCount,
+		"created_at":  j.CreatedAt,
+		"updated_at":  j.UpdatedAt,
+	})
+}
+
+// GetJobEvents 返回该 Job 的原始事件列表
+func (h *Handler) GetJobEvents(ctx context.Context, c *app.RequestContext) {
+	if h.jobEventStore == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "事件存储未启用"})
+		return
+	}
+	jobID := c.Param("id")
+	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
+	if err != nil {
+		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件失败"})
+		return
+	}
+	out := make([]map[string]interface{}, 0, len(events))
+	for _, e := range events {
+		payload := json.RawMessage(e.Payload)
+		if len(e.Payload) == 0 {
+			payload = []byte("null")
+		}
+		out = append(out, map[string]interface{}{
+			"id":         e.ID,
+			"job_id":     e.JobID,
+			"type":       string(e.Type),
+			"payload":    payload,
+			"created_at": e.CreatedAt,
+		})
+	}
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"job_id": jobID,
+		"events": out,
+	})
+}
+
+// GetJobTrace 返回执行时间线（由事件流派生）
+func (h *Handler) GetJobTrace(ctx context.Context, c *app.RequestContext) {
+	if h.jobEventStore == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "事件存储未启用"})
+		return
+	}
+	jobID := c.Param("id")
+	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
+	if err != nil {
+		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取时间线失败"})
+		return
+	}
+	timeline := make([]map[string]interface{}, 0, len(events))
+	for _, e := range events {
+		payload := json.RawMessage(e.Payload)
+		if len(e.Payload) == 0 {
+			payload = []byte("null")
+		}
+		entry := map[string]interface{}{
+			"type":       string(e.Type),
+			"created_at": e.CreatedAt,
+			"payload":    payload,
+		}
+		// 节点类事件可带 node_id 便于前端定位
+		var pl map[string]interface{}
+		if _ = json.Unmarshal(e.Payload, &pl); pl != nil {
+			if n, ok := pl["node_id"]; ok {
+				entry["node_id"] = n
+			}
+		}
+		timeline = append(timeline, entry)
+	}
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"job_id":   jobID,
+		"timeline": timeline,
+	})
+}
+
+// GetJobNode 返回某节点的相关事件与 payload（输入/输出等）
+func (h *Handler) GetJobNode(ctx context.Context, c *app.RequestContext) {
+	if h.jobEventStore == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "事件存储未启用"})
+		return
+	}
+	jobID := c.Param("id")
+	nodeID := c.Param("node_id")
+	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
+	if err != nil {
+		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取节点详情失败"})
+		return
+	}
+	var nodeEvents []map[string]interface{}
+	for _, e := range events {
+		var pl map[string]interface{}
+		if len(e.Payload) > 0 {
+			_ = json.Unmarshal(e.Payload, &pl)
+		}
+		evNodeID, _ := pl["node_id"].(string)
+		if evNodeID != nodeID {
+			continue
+		}
+		payload := json.RawMessage(e.Payload)
+		if len(e.Payload) == 0 {
+			payload = []byte("null")
+		}
+		nodeEvents = append(nodeEvents, map[string]interface{}{
+			"type":       string(e.Type),
+			"created_at": e.CreatedAt,
+			"payload":    payload,
+		})
+	}
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"job_id": jobID,
+		"node_id": nodeID,
+		"events":  nodeEvents,
+	})
+}
+
+// GetJobTracePage 返回简单 Trace 回放页（HTML）
+func (h *Handler) GetJobTracePage(ctx context.Context, c *app.RequestContext) {
+	if h.jobEventStore == nil || h.jobStore == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "Trace 未启用"})
+		return
+	}
+	jobID := c.Param("id")
+	j, _ := h.jobStore.Get(ctx, jobID)
+	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件失败"})
+		return
+	}
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	c.WriteString(buildTraceHTML(jobID, j, events))
+}
+
+func buildTraceHTML(jobID string, j *job.Job, events []jobstore.JobEvent) string {
+	status := "unknown"
+	goal := ""
+	if j != nil {
+		status = j.Status.String()
+		goal = j.Goal
+	}
+	s := "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Trace " + jobID + "</title></head><body>"
+	s += "<h1>Job: " + jobID + "</h1>"
+	s += "<p><b>Goal:</b> " + goal + "</p>"
+	s += "<p><b>Status:</b> " + status + "</p>"
+	s += "<h2>Timeline</h2><ul>"
+	for _, e := range events {
+		s += "<li><code>" + string(e.Type) + "</code> " + e.CreatedAt.Format("15:04:05") + " <pre>" + string(e.Payload) + "</pre></li>"
+	}
+	s += "</ul></body></html>"
+	return s
+}
+
+// ListTools 返回所有工具的 Manifest 列表（GET /api/tools）
+func (h *Handler) ListTools(ctx context.Context, c *app.RequestContext) {
+	if h.toolsRegistry == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "工具注册表未配置"})
+		return
+	}
+	manifests := h.toolsRegistry.Manifests()
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"tools": manifests,
+		"total": len(manifests),
+	})
+}
+
+// GetTool 返回指定名称工具的 Manifest（GET /api/tools/:name）
+func (h *Handler) GetTool(ctx context.Context, c *app.RequestContext) {
+	if h.toolsRegistry == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "工具注册表未配置"})
+		return
+	}
+	name := c.Param("name")
+	m := h.toolsRegistry.Manifest(name)
+	if m == nil {
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "工具不存在"})
+		return
+	}
+	c.JSON(consts.StatusOK, m)
 }

@@ -21,3 +21,19 @@ CREATE TABLE IF NOT EXISTS job_claims (
 );
 
 CREATE INDEX IF NOT EXISTS idx_job_claims_expires_at ON job_claims (expires_at);
+
+-- Job 元数据表（API 与 Worker 共享；与 internal/agent/job 语义一致）
+CREATE TABLE IF NOT EXISTS jobs (
+    id          TEXT PRIMARY KEY,
+    agent_id    TEXT NOT NULL,
+    goal        TEXT NOT NULL,
+    status      INT  NOT NULL,
+    cursor      TEXT,
+    retry_count INT  NOT NULL DEFAULT 0,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_agent_id ON jobs (agent_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs (status);
+CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs (created_at);

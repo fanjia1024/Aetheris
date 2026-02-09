@@ -1,2 +1,5 @@
 *.log
 *.pdf
+/bin/*
+/coverage.out
+/coverage.html

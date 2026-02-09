@@ -49,6 +49,16 @@ type ToolSchemaForLLM struct {
 	Parameters  map[string]any  `json:"parameters"`
 }
 
+// ToolManifest 工具能力声明（可发现、可版本化）
+type ToolManifest struct {
+	Name         string         `json:"name"`
+	Description  string         `json:"description"`
+	InputSchema  map[string]any `json:"input_schema"`
+	OutputSchema map[string]any `json:"output_schema,omitempty"`
+	Timeout      string         `json:"timeout,omitempty"`
+	Version      string         `json:"version,omitempty"`
+}
+
 // SchemasForLLM 返回所有工具的 Schema 列表（JSON，供 Planner 使用）
 func (r *Registry) SchemasForLLM() ([]byte, error) {
 	r.mu.RLock()
@@ -62,4 +72,38 @@ func (r *Registry) SchemasForLLM() ([]byte, error) {
 		})
 	}
 	return json.Marshal(list)
+}
+
+// Manifests 返回所有工具的 Manifest 列表（供 API/CLI 发现）
+func (r *Registry) Manifests() []ToolManifest {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	list := make([]ToolManifest, 0, len(r.tools))
+	for _, t := range r.tools {
+		list = append(list, ToolManifest{
+			Name:         t.Name(),
+			Description:  t.Description(),
+			InputSchema:  t.Schema(),
+			OutputSchema: nil,
+			Timeout:      "",
+			Version:      "1.0",
+		})
+	}
+	return list
+}
+
+// Manifest 返回指定名称工具的 Manifest，不存在返回 nil
+func (r *Registry) Manifest(name string) *ToolManifest {
+	t, ok := r.Get(name)
+	if !ok {
+		return nil
+	}
+	return &ToolManifest{
+		Name:         t.Name(),
+		Description:  t.Description(),
+		InputSchema:  t.Schema(),
+		OutputSchema: nil,
+		Timeout:      "",
+		Version:      "1.0",
+	}
 }
