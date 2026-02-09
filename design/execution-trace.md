@@ -6,17 +6,21 @@
 
 定义见 [internal/runtime/jobstore/event.go](internal/runtime/jobstore/event.go)。
 
-| EventType       | 含义           | 写入方           |
-|-----------------|----------------|------------------|
-| job_created     | Job 创建       | API（创建 Job 时） |
-| plan_generated  | 规划完成，产出 TaskGraph | Runner（Plan 后）  |
-| node_started    | 某 DAG 节点开始执行 | NodeEventSink     |
-| node_finished   | 某 DAG 节点结束   | NodeEventSink     |
-| tool_called     | 工具调用（入参）   | NodeEventSink     |
-| tool_returned   | 工具返回（出参）   | NodeEventSink     |
-| job_completed   | Job 成功结束    | API/Worker        |
-| job_failed      | Job 失败结束    | API/Worker        |
-| job_cancelled   | Job 被取消     | Worker            |
+| EventType         | 含义                         | 写入方           |
+|-------------------|------------------------------|------------------|
+| job_created       | Job 创建                     | API（创建 Job 时） |
+| plan_generated    | 规划完成，产出 TaskGraph     | Runner（Plan 后）  |
+| node_started      | 某 DAG 节点开始执行          | NodeEventSink     |
+| node_finished     | 某 DAG 节点结束              | NodeEventSink     |
+| command_emitted   | 即将执行一条可产生副作用的命令 | CommandEventSink（Adapter） |
+| command_committed | 命令已执行且结果已持久化     | CommandEventSink（Adapter） |
+| tool_called       | 工具调用（入参）             | NodeEventSink     |
+| tool_returned     | 工具返回（出参）             | NodeEventSink     |
+| job_completed     | Job 成功结束                 | API/Worker        |
+| job_failed        | Job 失败结束                 | API/Worker        |
+| job_cancelled     | Job 被取消                   | Worker            |
+
+命令级事件（command_emitted / command_committed）用于**副作用安全**：Replay 时已提交命令永不重放，仅推进游标并注入 CommandResults。顺序为：command_emitted → 执行 → command_committed → node_finished。
 
 ## 二、Payload 约定（含可解释因果字段）
 
@@ -34,6 +38,8 @@
 - **plan_generated**：`task_graph`, `goal`；建议 `trace_span_id: "plan"`, `parent_span_id: "root"`, `step_index: <version>`。
 - **node_started**：`node_id`；建议 `trace_span_id: <node_id>`, `parent_span_id: "plan"`, `step_index: <version>`。
 - **node_finished**：`node_id`, `payload_results`；建议同 node_started 的 span（同一 span 的结束），`step_index`。
+- **command_emitted**：`node_id`, `command_id`, `kind`（tool/llm/workflow）, `input`；执行副作用前写入，供审计。
+- **command_committed**：`node_id`, `command_id`, `result`；命令执行成功后立即写入，Replay 时用于跳过执行并注入 result。
 - **tool_called**：`node_id`, `tool_name`, `input`；建议 `trace_span_id: "<node_id>:tool:<tool_name>:<step_index>"`, `parent_span_id: <node_id>`, `step_index`。
 - **tool_returned**：`node_id`, `output`；建议与对应 tool_called 同 span 或配对，`step_index`。
 - **job_completed / job_failed / job_cancelled**：可选 `goal`, `error`；可选 `parent_span_id: "plan"` 表示整棵树的结束。

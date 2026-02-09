@@ -47,7 +47,8 @@ type WorkflowExec interface {
 
 // LLMNodeAdapter 将 llm 型 TaskNode 转为 DAG 节点
 type LLMNodeAdapter struct {
-	LLM LLMGen
+	LLM             LLMGen
+	CommandEventSink CommandEventSink // 可选；执行成功后立即写 command_committed，保证副作用安全
 }
 
 func (a *LLMNodeAdapter) runNode(ctx context.Context, taskID string, cfg map[string]any, agent *runtime.Agent, p *AgentDAGPayload) (*AgentDAGPayload, error) {
@@ -57,9 +58,21 @@ func (a *LLMNodeAdapter) runNode(ctx context.Context, taskID string, cfg map[str
 			prompt = g
 		}
 	}
+	if a.CommandEventSink != nil {
+		if jobID := JobIDFromContext(ctx); jobID != "" {
+			inputBytes, _ := json.Marshal(map[string]any{"prompt": prompt})
+			_ = a.CommandEventSink.AppendCommandEmitted(ctx, jobID, taskID, taskID, "llm", inputBytes)
+		}
+	}
 	resp, err := a.LLM.Generate(ctx, prompt)
 	if err != nil {
 		return nil, err
+	}
+	if a.CommandEventSink != nil {
+		if jobID := JobIDFromContext(ctx); jobID != "" {
+			resultBytes, _ := json.Marshal(resp)
+			_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, resultBytes)
+		}
 	}
 	if p.Results == nil {
 		p.Results = make(map[string]any)
@@ -95,8 +108,9 @@ func (a *LLMNodeAdapter) ToNodeRunner(task *planner.TaskNode, agent *runtime.Age
 
 // ToolNodeAdapter 将 tool 型 TaskNode 转为 DAG 节点
 type ToolNodeAdapter struct {
-	Tools          ToolExec
-	ToolEventSink  ToolEventSink // 可选；Tool 执行前后写 ToolCalled/ToolReturned
+	Tools            ToolExec
+	ToolEventSink    ToolEventSink    // 可选；Tool 执行前后写 ToolCalled/ToolReturned
+	CommandEventSink CommandEventSink // 可选；执行成功后立即写 command_committed，保证副作用安全
 }
 
 func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, cfg map[string]any, agent *runtime.Agent, p *AgentDAGPayload) (*AgentDAGPayload, error) {
@@ -115,6 +129,12 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 	if prev, ok := p.Results[taskID]; ok {
 		if m, ok := prev.(map[string]any); ok {
 			state = m["state"]
+		}
+	}
+	if a.CommandEventSink != nil {
+		if jobID := JobIDFromContext(ctx); jobID != "" {
+			inputBytes, _ := json.Marshal(cfg)
+			_ = a.CommandEventSink.AppendCommandEmitted(ctx, jobID, taskID, taskID, "tool", inputBytes)
 		}
 	}
 	if a.ToolEventSink != nil {
@@ -145,12 +165,20 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 		}
 		return nil, err
 	}
+	nodeResult := map[string]any{
+		"done": result.Done, "state": result.State, "output": result.Output, "error": result.Err,
+	}
+	// 副作用安全：执行成功后立即写 command_committed，再更新内存与 ToolReturned
+	if a.CommandEventSink != nil {
+		if jobID := JobIDFromContext(ctx); jobID != "" {
+			resultBytes, _ := json.Marshal(nodeResult)
+			_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, resultBytes)
+		}
+	}
 	if p.Results == nil {
 		p.Results = make(map[string]any)
 	}
-	p.Results[taskID] = map[string]any{
-		"done": result.Done, "state": result.State, "output": result.Output, "error": result.Err,
-	}
+	p.Results[taskID] = nodeResult
 	if a.ToolEventSink != nil {
 		if jobID := JobIDFromContext(ctx); jobID != "" {
 			outBytes, _ := json.Marshal(map[string]interface{}{"output": result.Output, "error": result.Err, "done": result.Done})
@@ -215,10 +243,17 @@ func (a *ToolNodeAdapter) ToNodeRunner(task *planner.TaskNode, agent *runtime.Ag
 
 // WorkflowNodeAdapter 将 workflow 型 TaskNode 转为 DAG 节点
 type WorkflowNodeAdapter struct {
-	Workflow WorkflowExec
+	Workflow         WorkflowExec
+	CommandEventSink CommandEventSink // 可选；执行成功后立即写 command_committed，保证副作用安全
 }
 
 func (a *WorkflowNodeAdapter) runNode(ctx context.Context, taskID, name string, params map[string]any, p *AgentDAGPayload) (*AgentDAGPayload, error) {
+	if a.CommandEventSink != nil {
+		if jobID := JobIDFromContext(ctx); jobID != "" {
+			inputBytes, _ := json.Marshal(map[string]any{"workflow": name, "params": params})
+			_ = a.CommandEventSink.AppendCommandEmitted(ctx, jobID, taskID, taskID, "workflow", inputBytes)
+		}
+	}
 	result, err := a.Workflow.ExecuteWorkflow(ctx, name, params)
 	if err != nil {
 		if p.Results == nil {
@@ -226,6 +261,12 @@ func (a *WorkflowNodeAdapter) runNode(ctx context.Context, taskID, name string, 
 		}
 		p.Results[taskID] = map[string]any{"error": err.Error(), "at": time.Now()}
 		return nil, err
+	}
+	if a.CommandEventSink != nil {
+		if jobID := JobIDFromContext(ctx); jobID != "" {
+			resultBytes, _ := json.Marshal(result)
+			_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, resultBytes)
+		}
 	}
 	if p.Results == nil {
 		p.Results = make(map[string]any)

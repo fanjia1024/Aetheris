@@ -15,8 +15,8 @@ type nodeEventSinkImpl struct {
 	store jobstore.JobStore
 }
 
-// NewNodeEventSink 创建 NodeEventSink + ToolEventSink；store 为 nil 时不写入。返回值可同时用于 SetNodeEventSink 与 NewDAGCompiler 的 toolEventSink 参数。
-func NewNodeEventSink(store jobstore.JobStore) agentexec.NodeAndToolEventSink {
+// NewNodeEventSink 创建节点/工具/命令事件 Sink；store 为 nil 时不写入。返回值可同时用于 SetNodeEventSink 与 NewDAGCompiler 的 toolEventSink/commandEventSink 参数。
+func NewNodeEventSink(store jobstore.JobStore) agentexec.NodeToolAndCommandEventSink {
 	return &nodeEventSinkImpl{store: store}
 }
 
@@ -120,6 +120,57 @@ func (s *nodeEventSinkImpl) AppendToolReturned(ctx context.Context, jobID string
 	}
 	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{
 		JobID: jobID, Type: jobstore.ToolReturned, Payload: payload,
+	})
+	return err
+}
+
+// AppendCommandEmitted 实现 CommandEventSink；执行副作用前写入，供审计
+func (s *nodeEventSinkImpl) AppendCommandEmitted(ctx context.Context, jobID string, nodeID string, commandID string, kind string, input []byte) error {
+	if s.store == nil {
+		return nil
+	}
+	_, ver, err := s.store.ListEvents(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	stepIndex := ver + 1
+	payload, err := json.Marshal(map[string]interface{}{
+		"node_id":       nodeID,
+		"command_id":   commandID,
+		"kind":         kind,
+		"input":        json.RawMessage(input),
+		"step_index":   stepIndex,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{
+		JobID: jobID, Type: jobstore.CommandEmitted, Payload: payload,
+	})
+	return err
+}
+
+// AppendCommandCommitted 实现 CommandEventSink；命令执行成功后立即写入，Replay 时已提交命令永不重放
+func (s *nodeEventSinkImpl) AppendCommandCommitted(ctx context.Context, jobID string, nodeID string, commandID string, result []byte) error {
+	if s.store == nil {
+		return nil
+	}
+	_, ver, err := s.store.ListEvents(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	stepIndex := ver + 1
+	payload, err := json.Marshal(map[string]interface{}{
+		"node_id":     nodeID,
+		"command_id":  commandID,
+		"result":      json.RawMessage(result),
+		"step_index":  stepIndex,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{
+		JobID: jobID, Type: jobstore.CommandCommitted, Payload: payload,
 	})
 	return err
 }

@@ -39,6 +39,18 @@ type NodeAndToolEventSink interface {
 	ToolEventSink
 }
 
+// CommandEventSink 命令级事件写入：执行副作用前 command_emitted、成功后立即 command_committed，供 Replay 判定已提交命令永不重放
+type CommandEventSink interface {
+	AppendCommandEmitted(ctx context.Context, jobID string, nodeID string, commandID string, kind string, input []byte) error
+	AppendCommandCommitted(ctx context.Context, jobID string, nodeID string, commandID string, result []byte) error
+}
+
+// NodeToolAndCommandEventSink 同时支持节点、工具与命令级事件（同一实现可传 Runner 与 Compiler/Adapter）
+type NodeToolAndCommandEventSink interface {
+	NodeAndToolEventSink
+	CommandEventSink
+}
+
 // Runner 单轮执行：PlanGoal → Compile → Invoke；可选 Checkpoint/JobStore 时支持 RunForJob 逐节点 checkpoint 与恢复
 type Runner struct {
 	compiler          *Compiler
@@ -157,6 +169,8 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 	startIndex := 0
 	// completedSet：事件流/Checkpoint 推导的已完成节点集合，runLoop 中步前检查，避免重复执行
 	var completedSet map[string]struct{}
+	// replayCtx：仅从事件流 Replay 进入时非空，含 CompletedCommandIDs/CommandResults，用于命令级跳过与注入
+	var replayCtx *replay.ReplayContext
 
 	// 与 job.JobStatus 对应，避免 executor 依赖 job 包：2=Completed, 3=Failed
 	const statusFailed = 3
@@ -208,6 +222,7 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 							_ = json.Unmarshal(rctx.PayloadResults, &payload.Results)
 						}
 						completedSet = rctx.CompletedNodeIDs
+						replayCtx = rctx
 						startIndex = 0
 						for i, s := range steps {
 							if _, done := completedSet[s.NodeID]; !done {
@@ -260,6 +275,41 @@ runLoop:
 	graphBytes, _ := taskGraph.Marshal()
 	for i := startIndex; i < len(steps); i++ {
 		step := steps[i]
+		commandID := step.NodeID // 单命令每节点
+		// 命令级跳过：事件流中已 command_committed 的永不重放，仅注入结果并推进游标
+		if replayCtx != nil {
+			if _, committed := replayCtx.CompletedCommandIDs[commandID]; committed {
+				if resultBytes, ok := replayCtx.CommandResults[commandID]; ok && len(resultBytes) > 0 {
+					var nodeResult interface{}
+					if err := json.Unmarshal(resultBytes, &nodeResult); err == nil {
+						if payload.Results == nil {
+							payload.Results = make(map[string]any)
+						}
+						payload.Results[step.NodeID] = nodeResult
+					}
+				}
+				payloadResults, _ := json.Marshal(payload.Results)
+				if completedSet != nil {
+					if _, done := completedSet[step.NodeID]; !done {
+						if r.nodeEventSink != nil {
+							_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults)
+						}
+						completedSet[step.NodeID] = struct{}{}
+					}
+				}
+				cp := runtime.NewNodeCheckpoint(agent.ID, sessionID, j.ID, step.NodeID, graphBytes, payloadResults, nil)
+				cpID, saveErr := r.checkpointStore.Save(ctx, cp)
+				if saveErr != nil {
+					_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
+					return fmt.Errorf("executor: 保存 checkpoint 失败: %w", saveErr)
+				}
+				if agent.Session != nil {
+					agent.Session.SetLastCheckpoint(cpID)
+				}
+				_ = r.jobStore.UpdateCursor(ctx, j.ID, cpID)
+				continue
+			}
+		}
 		if completedSet != nil {
 			if _, done := completedSet[step.NodeID]; done {
 				continue

@@ -111,7 +111,7 @@ func NewApp(cfg *config.Config) (*App, error) {
 			v1Planner = planner.NewLLMPlanner(llmClient)
 		}
 		nodeEventSink := api.NewNodeEventSink(pgEventStore)
-		dagCompiler := api.NewDAGCompiler(llmClient, toolsReg, engine, nodeEventSink)
+		dagCompiler := api.NewDAGCompiler(llmClient, toolsReg, engine, nodeEventSink, nodeEventSink)
 		dagRunner := api.NewDAGRunner(dagCompiler)
 		checkpointStore := runtime.NewCheckpointStoreMem()
 		agentStateStore, errState := runtime.NewAgentStateStorePg(context.Background(), dsn)

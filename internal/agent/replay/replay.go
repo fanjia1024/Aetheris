@@ -10,11 +10,13 @@ import (
 
 // ReplayContext 从事件流重建的执行上下文，供 Runner 恢复时使用（不重复执行已完成节点）
 type ReplayContext struct {
-	TaskGraphState       []byte            // PlanGenerated 的 task_graph
-	CursorNode           string            // 最后一条 NodeFinished 的 node_id，兼容 Trace/旧逻辑
-	PayloadResults       []byte            // 最后一条 NodeFinished 的 payload_results（累积状态）
-	CompletedNodeIDs     map[string]struct{} // 所有已出现 NodeFinished 的 node_id 集合，供确定性重放
-	PayloadResultsByNode map[string][]byte  // 按 node_id 的 payload_results，供跳过时合并（可选）
+	TaskGraphState        []byte              // PlanGenerated 的 task_graph
+	CursorNode            string              // 最后一条 NodeFinished 的 node_id，兼容 Trace/旧逻辑
+	PayloadResults        []byte              // 最后一条 NodeFinished 的 payload_results（累积状态）
+	CompletedNodeIDs      map[string]struct{} // 所有已出现 NodeFinished 的 node_id 集合，供确定性重放
+	PayloadResultsByNode  map[string][]byte  // 按 node_id 的 payload_results，供跳过时合并（可选）
+	CompletedCommandIDs   map[string]struct{} // 所有已出现 command_committed 的 command_id，已提交命令永不重放
+	CommandResults       map[string][]byte   // command_id -> 该命令的 result JSON，Replay 时注入 payload
 }
 
 // ReplayContextBuilder 从 JobStore 事件流构建 ReplayContext
@@ -43,8 +45,10 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 		return nil, err
 	}
 	out := ReplayContext{
-		CompletedNodeIDs:     make(map[string]struct{}),
+		CompletedNodeIDs:    make(map[string]struct{}),
 		PayloadResultsByNode: make(map[string][]byte),
+		CompletedCommandIDs:  make(map[string]struct{}),
+		CommandResults:      make(map[string][]byte),
 	}
 	for _, e := range events {
 		switch e.Type {
@@ -69,6 +73,23 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 			if len(payload.PayloadResults) > 0 {
 				out.PayloadResults = []byte(payload.PayloadResults)
 				out.PayloadResultsByNode[payload.NodeID] = []byte(payload.PayloadResults)
+			}
+		case jobstore.CommandCommitted:
+			var payload struct {
+				NodeID    string          `json:"node_id"`
+				CommandID string          `json:"command_id"`
+				Result    json.RawMessage `json:"result"`
+			}
+			if err := json.Unmarshal(e.Payload, &payload); err != nil {
+				continue
+			}
+			cmdID := payload.CommandID
+			if cmdID == "" {
+				cmdID = payload.NodeID
+			}
+			out.CompletedCommandIDs[cmdID] = struct{}{}
+			if len(payload.Result) > 0 {
+				out.CommandResults[cmdID] = []byte(payload.Result)
 			}
 		}
 	}

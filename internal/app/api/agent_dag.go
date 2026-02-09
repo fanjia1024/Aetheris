@@ -85,16 +85,27 @@ func (a *workflowExecAdapter) ExecuteWorkflow(ctx context.Context, name string, 
 	return a.engine.ExecuteWorkflow(ctx, name, pm)
 }
 
-// NewDAGCompiler 创建 TaskGraph→eino DAG 的编译器（注册 llm/tool/workflow 适配器）；toolEventSink 可选，用于 Tool 节点写 ToolCalled/ToolReturned
-func NewDAGCompiler(llmClient llm.Client, toolsReg *tools.Registry, engine *eino.Engine, toolEventSink agentexec.ToolEventSink) *agentexec.Compiler {
+// NewDAGCompiler 创建 TaskGraph→eino DAG 的编译器（注册 llm/tool/workflow 适配器）；toolEventSink 可选；commandEventSink 可选，用于命令级 command_emitted/command_committed 保证副作用安全
+func NewDAGCompiler(llmClient llm.Client, toolsReg *tools.Registry, engine *eino.Engine, toolEventSink agentexec.ToolEventSink, commandEventSink agentexec.CommandEventSink) *agentexec.Compiler {
 	toolAdapter := &agentexec.ToolNodeAdapter{Tools: &toolExecAdapter{reg: toolsReg}}
 	if toolEventSink != nil {
 		toolAdapter.ToolEventSink = toolEventSink
 	}
+	if commandEventSink != nil {
+		toolAdapter.CommandEventSink = commandEventSink
+	}
+	llmAdapter := &agentexec.LLMNodeAdapter{LLM: &llmGenAdapter{client: llmClient}}
+	if commandEventSink != nil {
+		llmAdapter.CommandEventSink = commandEventSink
+	}
+	workflowAdapter := &agentexec.WorkflowNodeAdapter{Workflow: &workflowExecAdapter{engine: engine}}
+	if commandEventSink != nil {
+		workflowAdapter.CommandEventSink = commandEventSink
+	}
 	adapters := map[string]agentexec.NodeAdapter{
-		planner.NodeLLM:      &agentexec.LLMNodeAdapter{LLM: &llmGenAdapter{client: llmClient}},
-		planner.NodeTool:    toolAdapter,
-		planner.NodeWorkflow: &agentexec.WorkflowNodeAdapter{Workflow: &workflowExecAdapter{engine: engine}},
+		planner.NodeLLM:      llmAdapter,
+		planner.NodeTool:     toolAdapter,
+		planner.NodeWorkflow: workflowAdapter,
 	}
 	return agentexec.NewCompiler(adapters)
 }
