@@ -10,13 +10,21 @@ import (
 
 // Config 应用配置结构体
 type Config struct {
-	API    APIConfig    `mapstructure:"api"`
-	Agent  AgentConfig  `mapstructure:"agent"`
-	Worker WorkerConfig `mapstructure:"worker"`
-	Model  ModelConfig  `mapstructure:"model"`
-	Storage StorageConfig `mapstructure:"storage"`
-	Log    LogConfig    `mapstructure:"log"`
+	API      APIConfig      `mapstructure:"api"`
+	Agent    AgentConfig    `mapstructure:"agent"`
+	JobStore JobStoreConfig `mapstructure:"jobstore"`
+	Worker   WorkerConfig   `mapstructure:"worker"`
+	Model    ModelConfig    `mapstructure:"model"`
+	Storage  StorageConfig  `mapstructure:"storage"`
+	Log      LogConfig      `mapstructure:"log"`
 	Monitoring MonitoringConfig `mapstructure:"monitoring"`
+}
+
+// JobStoreConfig 任务事件存储配置（事件流 + 租约）
+type JobStoreConfig struct {
+	Type          string `mapstructure:"type"`            // memory | postgres
+	DSN           string `mapstructure:"dsn"`             // Postgres 连接串，type=postgres 时必填
+	LeaseDuration string `mapstructure:"lease_duration"` // 租约时长，如 "30s"，空则默认 30s
 }
 
 // AgentConfig Agent 与 Job 调度相关配置

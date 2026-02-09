@@ -172,9 +172,25 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	agentScheduler := runtime.NewScheduler(agentRuntimeManager, RunFuncForScheduler(agentRuntimeManager, dagRunner))
 	agentCreator := NewAgentCreator(agentRuntimeManager, v1Planner, toolsReg)
 	handler.SetAgentRuntime(agentRuntimeManager, agentScheduler, agentCreator)
-	// v0.8 Job System：message -> create Job -> Scheduler（并发/重试）-> Worker -> Executor；Checkpoint 支持恢复
+		// v0.8 Job System：message -> create Job -> Scheduler（并发/重试）-> Worker -> Executor；Checkpoint 支持恢复
 	jobStore := job.NewJobStoreMem()
-	jobEventStore := jobstore.NewMemoryStore()
+	var jobEventStore jobstore.JobStore
+	if bootstrap.Config != nil && bootstrap.Config.JobStore.Type == "postgres" && bootstrap.Config.JobStore.DSN != "" {
+		leaseDur := 30 * time.Second
+		if bootstrap.Config.JobStore.LeaseDuration != "" {
+			if d, err := time.ParseDuration(bootstrap.Config.JobStore.LeaseDuration); err == nil && d > 0 {
+				leaseDur = d
+			}
+		}
+		pgStore, err := jobstore.NewPostgresStore(context.Background(), bootstrap.Config.JobStore.DSN, leaseDur)
+		if err != nil {
+			return nil, fmt.Errorf("初始化 JobStore(postgres) 失败: %w", err)
+		}
+		jobEventStore = pgStore
+		bootstrap.Logger.Info("JobStore 使用 PostgreSQL 后端", "dsn", bootstrap.Config.JobStore.DSN)
+	} else {
+		jobEventStore = jobstore.NewMemoryStore()
+	}
 	checkpointStore := runtime.NewCheckpointStoreMem()
 	dagRunner.SetCheckpointStores(checkpointStore, &jobStoreForRunnerAdapter{JobStore: jobStore})
 	runJob := func(ctx context.Context, j *job.Job) error {

@@ -18,6 +18,12 @@ api:
     enable: false
     port: 9090
 
+# 任务事件存储（事件流 + 租约）；未配置或 type 非 postgres 时使用内存后端
+jobstore:
+  type: "memory"           # memory | postgres
+  dsn: ""                  # type=postgres 时必填，如 "postgres://user:pass@localhost:5432/db?sslmode=disable"
+  lease_duration: "30s"     # 租约时长；Heartbeat 间隔建议 < lease_duration/2
+
 # v1 Agent 与 Job 调度（可选；未配置时使用默认：并发 2、重试 2、Backoff 1s）
 agent:
   job_scheduler:

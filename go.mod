@@ -8,9 +8,15 @@ require (
 	github.com/cloudwego/hertz v0.10.4
 	github.com/go-resty/resty/v2 v2.7.0
 	github.com/google/uuid v1.6.0
+	github.com/hertz-contrib/jwt v1.0.4
 	github.com/hertz-contrib/logger/slog v1.0.0
+	github.com/hertz-contrib/obs-opentelemetry/provider v0.3.0
+	github.com/hertz-contrib/obs-opentelemetry/tracing v0.4.1
+	github.com/jackc/pgx/v5 v5.8.0
 	github.com/spf13/viper v1.18.2
 	github.com/unidoc/unipdf/v3 v3.69.0
+	google.golang.org/grpc v1.59.0
+	google.golang.org/protobuf v1.36.9
 )
 
 require (
@@ -39,10 +45,9 @@ require (
 	github.com/goph/emperror v0.17.2 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.18.1 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
-	github.com/hertz-contrib/jwt v1.0.4 // indirect
-	github.com/hertz-contrib/obs-opentelemetry v0.4.0 // indirect
-	github.com/hertz-contrib/obs-opentelemetry/provider v0.3.0 // indirect
-	github.com/hertz-contrib/obs-opentelemetry/tracing v0.4.1 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
@@ -90,7 +95,6 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.20.0 // indirect
 	go.opentelemetry.io/otel/trace v1.20.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.0.0 // indirect
-	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/mock v0.5.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.20.0 // indirect
@@ -98,14 +102,12 @@ require (
 	golang.org/x/exp v0.0.0-20250218142911-aa4b98e5adaa // indirect
 	golang.org/x/image v0.24.0 // indirect
 	golang.org/x/net v0.42.0 // indirect
+	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
-	golang.org/x/text v0.27.0 // indirect
+	golang.org/x/text v0.29.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20231106174013-bbf56f31fb17 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20231120223509-83a465c0220f // indirect
-	google.golang.org/grpc v1.59.0 // indirect
-	google.golang.org/protobuf v1.36.9 // indirect
-	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
