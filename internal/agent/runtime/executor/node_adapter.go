@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -94,14 +95,32 @@ func (a *LLMNodeAdapter) ToNodeRunner(task *planner.TaskNode, agent *runtime.Age
 
 // ToolNodeAdapter 将 tool 型 TaskNode 转为 DAG 节点
 type ToolNodeAdapter struct {
-	Tools ToolExec
+	Tools          ToolExec
+	ToolEventSink  ToolEventSink // 可选；Tool 执行前后写 ToolCalled/ToolReturned
 }
 
 func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, cfg map[string]any, agent *runtime.Agent, p *AgentDAGPayload) (*AgentDAGPayload, error) {
+	// 1.0 短路：Replay 已注入的节点结果不再执行真实 Tool，避免二次副作用
+	if prev, ok := p.Results[taskID]; ok {
+		if m, ok := prev.(map[string]any); ok {
+			if _, hasDone := m["done"]; hasDone {
+				return p, nil
+			}
+			if _, hasOut := m["output"]; hasOut {
+				return p, nil
+			}
+		}
+	}
 	var state interface{}
 	if prev, ok := p.Results[taskID]; ok {
 		if m, ok := prev.(map[string]any); ok {
 			state = m["state"]
+		}
+	}
+	if a.ToolEventSink != nil {
+		if jobID := JobIDFromContext(ctx); jobID != "" {
+			inputBytes, _ := json.Marshal(cfg)
+			_ = a.ToolEventSink.AppendToolCalled(ctx, jobID, taskID, toolName, inputBytes)
 		}
 	}
 	result, err := a.Tools.Execute(ctx, toolName, cfg, state)
@@ -110,6 +129,20 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 			p.Results = make(map[string]any)
 		}
 		p.Results[taskID] = map[string]any{"error": err.Error(), "at": time.Now()}
+		if a.ToolEventSink != nil {
+			if jobID := JobIDFromContext(ctx); jobID != "" {
+				outBytes, _ := json.Marshal(map[string]interface{}{"error": err.Error()})
+				_ = a.ToolEventSink.AppendToolReturned(ctx, jobID, taskID, outBytes)
+			}
+		}
+		if agent != nil && agent.Session != nil {
+			inputStr := ""
+			if len(cfg) > 0 {
+				b, _ := json.Marshal(cfg)
+				inputStr = string(b)
+			}
+			agent.Session.AddToolCall(toolName, inputStr, "error: "+err.Error())
+		}
 		return nil, err
 	}
 	if p.Results == nil {
@@ -118,12 +151,30 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 	p.Results[taskID] = map[string]any{
 		"done": result.Done, "state": result.State, "output": result.Output, "error": result.Err,
 	}
+	if a.ToolEventSink != nil {
+		if jobID := JobIDFromContext(ctx); jobID != "" {
+			outBytes, _ := json.Marshal(map[string]interface{}{"output": result.Output, "error": result.Err, "done": result.Done})
+			_ = a.ToolEventSink.AppendToolReturned(ctx, jobID, taskID, outBytes)
+		}
+	}
 	msg := result.Output
 	if result.Err != "" {
 		msg = "error: " + result.Err
 	}
-	if agent != nil && agent.Session != nil && (result.Output != "" || result.Err != "") {
-		agent.Session.AddMessage("tool", msg)
+	if agent != nil && agent.Session != nil {
+		if msg != "" {
+			agent.Session.AddMessage("tool", msg)
+		}
+		inputStr := ""
+		if len(cfg) > 0 {
+			b, _ := json.Marshal(cfg)
+			inputStr = string(b)
+		}
+		outStr := result.Output
+		if result.Err != "" {
+			outStr = "error: " + result.Err
+		}
+		agent.Session.AddToolCall(toolName, inputStr, outStr)
 	}
 	return p, nil
 }

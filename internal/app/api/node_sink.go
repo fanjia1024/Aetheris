@@ -14,8 +14,8 @@ type nodeEventSinkImpl struct {
 	store jobstore.JobStore
 }
 
-// NewNodeEventSink 创建 NodeEventSink；store 为 nil 时不写入
-func NewNodeEventSink(store jobstore.JobStore) agentexec.NodeEventSink {
+// NewNodeEventSink 创建 NodeEventSink + ToolEventSink；store 为 nil 时不写入。返回值可同时用于 SetNodeEventSink 与 NewDAGCompiler 的 toolEventSink 参数。
+func NewNodeEventSink(store jobstore.JobStore) agentexec.NodeAndToolEventSink {
 	return &nodeEventSinkImpl{store: store}
 }
 
@@ -56,6 +56,51 @@ func (s *nodeEventSinkImpl) AppendNodeFinished(ctx context.Context, jobID string
 	}
 	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{
 		JobID: jobID, Type: jobstore.NodeFinished, Payload: payload,
+	})
+	return err
+}
+
+// AppendToolCalled 实现 ToolEventSink
+func (s *nodeEventSinkImpl) AppendToolCalled(ctx context.Context, jobID string, nodeID string, toolName string, input []byte) error {
+	if s.store == nil {
+		return nil
+	}
+	_, ver, err := s.store.ListEvents(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]interface{}{
+		"node_id":   nodeID,
+		"tool_name": toolName,
+		"input":     json.RawMessage(input),
+	})
+	if err != nil {
+		return err
+	}
+	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{
+		JobID: jobID, Type: jobstore.ToolCalled, Payload: payload,
+	})
+	return err
+}
+
+// AppendToolReturned 实现 ToolEventSink
+func (s *nodeEventSinkImpl) AppendToolReturned(ctx context.Context, jobID string, nodeID string, output []byte) error {
+	if s.store == nil {
+		return nil
+	}
+	_, ver, err := s.store.ListEvents(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]interface{}{
+		"node_id": nodeID,
+		"output":  json.RawMessage(output),
+	})
+	if err != nil {
+		return err
+	}
+	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{
+		JobID: jobID, Type: jobstore.ToolReturned, Payload: payload,
 	})
 	return err
 }

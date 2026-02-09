@@ -167,9 +167,13 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	} else {
 		v1Planner = planner.NewLLMPlanner(llmClientForAgent)
 	}
-	dagCompiler := NewDAGCompiler(llmClientForAgent, toolsReg, engine)
-	dagRunner := NewDAGRunner(dagCompiler)
-	agentScheduler := runtime.NewScheduler(agentRuntimeManager, RunFuncForScheduler(agentRuntimeManager, dagRunner))
+	var dagCompiler *agentexec.Compiler
+	var dagRunner *agentexec.Runner
+	agentScheduler := runtime.NewScheduler(agentRuntimeManager, func(ctx context.Context, agentID string) {
+		if dagRunner != nil {
+			RunFuncForScheduler(agentRuntimeManager, dagRunner)(ctx, agentID)
+		}
+	})
 	agentCreator := NewAgentCreator(agentRuntimeManager, v1Planner, toolsReg)
 	handler.SetAgentRuntime(agentRuntimeManager, agentScheduler, agentCreator)
 		// v0.8 Job System：message -> create Job -> Scheduler（并发/重试）-> Worker -> Executor；Checkpoint 支持恢复
@@ -199,6 +203,9 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		jobStore = job.NewJobStoreMem()
 		jobEventStore = jobstore.NewMemoryStore()
 	}
+	nodeEventSink := NewNodeEventSink(jobEventStore)
+	dagCompiler = NewDAGCompiler(llmClientForAgent, toolsReg, engine, nodeEventSink)
+	dagRunner = NewDAGRunner(dagCompiler)
 	var agentStateStore runtime.AgentStateStore
 	if bootstrap.Config != nil && bootstrap.Config.JobStore.Type == "postgres" && bootstrap.Config.JobStore.DSN != "" {
 		pgState, errState := runtime.NewAgentStateStorePg(context.Background(), bootstrap.Config.JobStore.DSN)
@@ -212,7 +219,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	checkpointStore := runtime.NewCheckpointStoreMem()
 	dagRunner.SetCheckpointStores(checkpointStore, &jobStoreForRunnerAdapter{JobStore: jobStore})
 	dagRunner.SetPlanGeneratedSink(NewPlanGeneratedSink(jobEventStore))
-	dagRunner.SetNodeEventSink(NewNodeEventSink(jobEventStore))
+	dagRunner.SetNodeEventSink(nodeEventSink)
 	dagRunner.SetReplayContextBuilder(NewReplayContextBuilder(jobEventStore))
 	runJob := func(ctx context.Context, j *job.Job) error {
 		agent, _ := agentRuntimeManager.Get(ctx, j.AgentID)
@@ -263,6 +270,10 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	handler.SetJobEventStore(jobEventStore)
 	handler.SetAgentStateStore(agentStateStore)
 	handler.SetToolsRegistry(toolsReg)
+	// 1.0 Plan 事件化：Job 创建时即生成并持久化 TaskGraph，执行阶段只读
+	if jobEventStore != nil {
+		handler.SetPlanAtJobCreation(PlanGoalForJobFunc(agentRuntimeManager, v1Planner))
+	}
 
 	mw := middleware.NewMiddleware()
 	router := http.NewRouter(handler, mw)
@@ -363,7 +374,7 @@ func (a *App) Run(addr string) error {
 	} else {
 		a.hertz = a.router.Build(addr)
 	}
-	// 单一执行权：jobstore.type=postgres 时禁止 API 内 Scheduler，仅由 Worker 通过事件 Claim 执行；避免双通道重复执行
+	// 单一执行权 / Control vs Data Plane：jobstore.type=postgres 时 API 不启动 Scheduler，不执行任何 Job（API = 控制面；Worker = 数据面，仅由 Worker 通过事件 Claim 执行）
 	jobSchedulerEnabled := false
 	if a.config.Config != nil && a.config.Config.JobStore.Type != "postgres" {
 		jobSchedulerEnabled = true

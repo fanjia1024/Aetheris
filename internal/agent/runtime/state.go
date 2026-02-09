@@ -6,14 +6,24 @@ import (
 	"time"
 )
 
+// ToolCallRecord 单次工具调用记录（供持久化与恢复、Trace 展示）
+type ToolCallRecord struct {
+	ToolName string    `json:"tool_name"`
+	Input    string    `json:"input,omitempty"`
+	Output   string    `json:"output,omitempty"`
+	At       time.Time `json:"at"`
+}
+
 // AgentState 可序列化的 Agent/会话状态（供持久化与恢复）
 type AgentState struct {
-	AgentID       string    `json:"agent_id"`
-	SessionID     string    `json:"session_id"`
-	Messages      []Message `json:"messages"`
-	Variables     map[string]any `json:"variables,omitempty"`
-	LastCheckpoint string   `json:"last_checkpoint,omitempty"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	AgentID        string           `json:"agent_id"`
+	SessionID      string           `json:"session_id"`
+	Messages       []Message        `json:"messages"`
+	Variables      map[string]any   `json:"variables,omitempty"`
+	ToolCalls      []ToolCallRecord `json:"tool_calls,omitempty"`
+	Scratchpad     string           `json:"scratchpad,omitempty"`
+	LastCheckpoint string           `json:"last_checkpoint,omitempty"`
+	UpdatedAt      time.Time        `json:"updated_at"`
 }
 
 // AgentStateStore 持久化 Agent 状态，供 Worker 恢复会话与多实例共享
@@ -45,6 +55,13 @@ func SessionToAgentState(s *Session) *AgentState {
 			state.Variables[k] = v
 		}
 	}
+	if len(s.ToolCalls) > 0 {
+		state.ToolCalls = make([]ToolCallRecord, len(s.ToolCalls))
+		copy(state.ToolCalls, s.ToolCalls)
+	}
+	if s.Scratchpad != "" {
+		state.Scratchpad = s.Scratchpad
+	}
 	return state
 }
 
@@ -64,6 +81,13 @@ func ApplyAgentState(s *Session, state *AgentState) {
 		for k, v := range state.Variables {
 			s.Variables[k] = v
 		}
+	}
+	if len(state.ToolCalls) > 0 {
+		s.ToolCalls = make([]ToolCallRecord, len(state.ToolCalls))
+		copy(s.ToolCalls, state.ToolCalls)
+	}
+	if state.Scratchpad != "" {
+		s.Scratchpad = state.Scratchpad
 	}
 	s.LastCheckpoint = state.LastCheckpoint
 	s.UpdatedAt = state.UpdatedAt

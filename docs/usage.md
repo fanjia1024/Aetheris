@@ -89,6 +89,8 @@ curl http://localhost:8080/api/agents
 
 **Scheduler 行为**：调度器在 API 进程内运行，从 Job 队列拉取任务并执行。Scheduler 参数（MaxConcurrency、RetryMax、Backoff）由应用代码默认配置（如并发 2、重试 2 次、Backoff 1s），见 `internal/app/api/app.go`。
 
+**Control Plane / Data Plane（Postgres 时）**：当 `jobstore.type=postgres` 时，API 仅作为控制面（创建 Job、查询、取消），**不启动 Scheduler、不执行任何 Job**；所有执行由 Worker 通过 Postgres Claim 完成。API 重启或扩缩容不影响已 Claim 的 Job。详见 [design/services.md](../design/services.md) 第 7 节。
+
 ### 4. 发起查询（已废弃，建议用 Agent 发消息）
 
 ```bash

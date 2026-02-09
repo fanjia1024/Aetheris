@@ -109,7 +109,8 @@ func NewApp(cfg *config.Config) (*App, error) {
 		} else {
 			v1Planner = planner.NewLLMPlanner(llmClient)
 		}
-		dagCompiler := api.NewDAGCompiler(llmClient, toolsReg, engine)
+		nodeEventSink := api.NewNodeEventSink(pgEventStore)
+		dagCompiler := api.NewDAGCompiler(llmClient, toolsReg, engine, nodeEventSink)
 		dagRunner := api.NewDAGRunner(dagCompiler)
 		checkpointStore := runtime.NewCheckpointStoreMem()
 		agentStateStore, errState := runtime.NewAgentStateStorePg(context.Background(), dsn)
@@ -118,7 +119,7 @@ func NewApp(cfg *config.Config) (*App, error) {
 		}
 		dagRunner.SetCheckpointStores(checkpointStore, &jobStoreForRunnerAdapter{JobStore: pgJobStore})
 		dagRunner.SetPlanGeneratedSink(api.NewPlanGeneratedSink(pgEventStore))
-		dagRunner.SetNodeEventSink(api.NewNodeEventSink(pgEventStore))
+		dagRunner.SetNodeEventSink(nodeEventSink)
 		dagRunner.SetReplayContextBuilder(api.NewReplayContextBuilder(pgEventStore))
 		runJob := func(ctx context.Context, j *job.Job) error {
 			sessionID := j.SessionID

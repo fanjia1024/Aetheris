@@ -85,11 +85,15 @@ func (a *workflowExecAdapter) ExecuteWorkflow(ctx context.Context, name string, 
 	return a.engine.ExecuteWorkflow(ctx, name, pm)
 }
 
-// NewDAGCompiler 创建 TaskGraph→eino DAG 的编译器（注册 llm/tool/workflow 适配器）
-func NewDAGCompiler(llmClient llm.Client, toolsReg *tools.Registry, engine *eino.Engine) *agentexec.Compiler {
+// NewDAGCompiler 创建 TaskGraph→eino DAG 的编译器（注册 llm/tool/workflow 适配器）；toolEventSink 可选，用于 Tool 节点写 ToolCalled/ToolReturned
+func NewDAGCompiler(llmClient llm.Client, toolsReg *tools.Registry, engine *eino.Engine, toolEventSink agentexec.ToolEventSink) *agentexec.Compiler {
+	toolAdapter := &agentexec.ToolNodeAdapter{Tools: &toolExecAdapter{reg: toolsReg}}
+	if toolEventSink != nil {
+		toolAdapter.ToolEventSink = toolEventSink
+	}
 	adapters := map[string]agentexec.NodeAdapter{
 		planner.NodeLLM:      &agentexec.LLMNodeAdapter{LLM: &llmGenAdapter{client: llmClient}},
-		planner.NodeTool:    &agentexec.ToolNodeAdapter{Tools: &toolExecAdapter{reg: toolsReg}},
+		planner.NodeTool:    toolAdapter,
 		planner.NodeWorkflow: &agentexec.WorkflowNodeAdapter{Workflow: &workflowExecAdapter{engine: engine}},
 	}
 	return agentexec.NewCompiler(adapters)

@@ -96,7 +96,22 @@ Agent Runtime
 
 ---
 
-## 7. 演进方向
+## 7. Control Plane vs Data Plane（1.0 可证明分离）
+
+当 `jobstore.type=postgres` 时，系统明确分为：
+
+- **API（控制面）**：创建 Job、查询状态、取消、配置；**不持有**任何执行中的 lease/checkpoint，**不执行**任何 Job。重启或扩缩容不影响已 Claim 的 Job。
+- **Worker（数据面）**：通过 Postgres Claim Job、执行、Heartbeat；状态与事件均在 Postgres。Worker 仅依赖 Postgres 与自身配置。
+
+可验证点：
+
+- API 的 Job 创建路径仅写 Job 元数据 + 事件（如 JobCreated、PlanGenerated），绝不调用 Runner 或执行器。
+- 内存 Scheduler 仅在非 postgres 时启用；postgres 下 API 不启动 Scheduler，Job 仅由 Worker Claim 执行。
+- API 健康（如 `/api/health`）不依赖 Worker 存活；Worker 活跃由 job_claims 或 metrics 体现。
+
+---
+
+## 8. 演进方向
 
 - Planner Agent
 - Tool-Using Agent

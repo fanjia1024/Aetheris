@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 
 	"rag-platform/internal/agent/memory"
 	"rag-platform/internal/agent/planner"
@@ -96,4 +97,20 @@ func (c *agentCreatorImpl) Create(ctx context.Context, name string) (*runtime.Ag
 	plannerProvider := &plannerProviderAdapter{p: c.planner}
 	toolsProvider := &toolsProviderAdapter{r: c.tools}
 	return c.manager.Create(ctx, name, sess, memProvider, plannerProvider, toolsProvider)
+}
+
+// PlanGoalForJobFunc 返回「Job 创建时规划」函数：根据 agentID 与 goal 生成 TaskGraph（1.0 Plan 事件化）
+func PlanGoalForJobFunc(manager *runtime.Manager, p planGoaler) func(context.Context, string, string) (*planner.TaskGraph, error) {
+	return func(ctx context.Context, agentID, goal string) (*planner.TaskGraph, error) {
+		agent, _ := manager.Get(ctx, agentID)
+		if agent == nil {
+			return nil, fmt.Errorf("agent not found: %s", agentID)
+		}
+		var mem memory.Memory = memory.NewCompositeMemory()
+		if agent.Session != nil {
+			working := memory.NewWorkingSession(agent.Session)
+			mem = memory.NewCompositeMemory(working, memory.NewEpisodic(1000))
+		}
+		return p.PlanGoal(ctx, goal, mem)
+	}
 }

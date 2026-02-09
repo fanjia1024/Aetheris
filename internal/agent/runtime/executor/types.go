@@ -8,8 +8,11 @@ import (
 
 // agentContextKey 用于在 context 中传递 *runtime.Agent（ToolExec 等可从 ctx 取 agent）
 type agentContextKey struct{}
+// jobIDContextKey 用于在 context 中传递 jobID，供 Tool 节点写入 ToolCalled/ToolReturned
+type jobIDContextKey struct{}
 
 var theAgentContextKey = agentContextKey{}
+var theJobIDContextKey = jobIDContextKey{}
 
 // WithAgent 将 agent 放入 ctx，供 Runner.Invoke 时传入节点
 func WithAgent(ctx context.Context, agent *runtime.Agent) context.Context {
@@ -24,6 +27,21 @@ func AgentFromContext(ctx context.Context) *runtime.Agent {
 	}
 	a, _ := v.(*runtime.Agent)
 	return a
+}
+
+// WithJobID 将 jobID 放入 ctx，供 Tool 节点写入事件
+func WithJobID(ctx context.Context, jobID string) context.Context {
+	return context.WithValue(ctx, theJobIDContextKey, jobID)
+}
+
+// JobIDFromContext 从 context 取出 jobID
+func JobIDFromContext(ctx context.Context) string {
+	v := ctx.Value(theJobIDContextKey)
+	if v == nil {
+		return ""
+	}
+	s, _ := v.(string)
+	return s
 }
 
 // AgentDAGPayload DAG 统一载荷：整图节点入参/出参一致，便于多前驱时合并结果

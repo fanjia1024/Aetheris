@@ -27,6 +27,18 @@ type NodeEventSink interface {
 	AppendNodeFinished(ctx context.Context, jobID string, nodeID string, payloadResults []byte) error
 }
 
+// ToolEventSink 工具调用事件写入：Tool 节点执行前后写入 ToolCalled/ToolReturned，供 Trace/审计与恢复短路
+type ToolEventSink interface {
+	AppendToolCalled(ctx context.Context, jobID string, nodeID string, toolName string, input []byte) error
+	AppendToolReturned(ctx context.Context, jobID string, nodeID string, output []byte) error
+}
+
+// NodeAndToolEventSink 同时支持节点与工具事件（同一实现可传 Runner 与 Compiler）
+type NodeAndToolEventSink interface {
+	NodeEventSink
+	ToolEventSink
+}
+
 // Runner 单轮执行：PlanGoal → Compile → Invoke；可选 Checkpoint/JobStore 时支持 RunForJob 逐节点 checkpoint 与恢复
 type Runner struct {
 	compiler          *Compiler
@@ -202,6 +214,7 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 				}
 			}
 		}
+		// 1.0：API 在 Job 创建时已写 PlanGenerated，上段 Replay 应命中；此处仅兼容无 Plan 的旧 Job
 		if agent.Planner == nil {
 			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
 			return fmt.Errorf("executor: agent.Planner 未配置")
@@ -236,6 +249,7 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 
 runLoop:
 
+	ctx = WithJobID(ctx, j.ID)
 	const statusCompleted = 2 // 对应 job.StatusCompleted
 	graphBytes, _ := taskGraph.Marshal()
 	for i := startIndex; i < len(steps); i++ {

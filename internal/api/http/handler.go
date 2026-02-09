@@ -15,6 +15,7 @@ import (
 
 	"rag-platform/internal/agent"
 	"rag-platform/internal/agent/job"
+	"rag-platform/internal/agent/planner"
 	"rag-platform/internal/agent/tools"
 	agentruntime "rag-platform/internal/agent/runtime"
 	appcore "rag-platform/internal/app"
@@ -57,6 +58,8 @@ type Handler struct {
 	jobEventStore   jobstore.JobStore
 	toolsRegistry   *tools.Registry
 	agentStateStore agentruntime.AgentStateStore
+	// planAtJobCreation 在 Job 创建时生成并持久化 Plan（1.0：执行阶段只读，禁止再调 Planner）
+	planAtJobCreation func(ctx context.Context, agentID, goal string) (*planner.TaskGraph, error)
 }
 
 // NewHandler 创建新的 HTTP 处理器
@@ -102,6 +105,11 @@ func (h *Handler) SetToolsRegistry(reg *tools.Registry) {
 // SetAgentStateStore 设置 Agent 状态存储；设置后 message 与 runJob 会持久化/加载会话，供 Worker 恢复
 func (h *Handler) SetAgentStateStore(store agentruntime.AgentStateStore) {
 	h.agentStateStore = store
+}
+
+// SetPlanAtJobCreation 设置 Job 创建时规划函数；传入后 POST message 将先 Append PlanGenerated 再返回 202（1.0 确定性执行）
+func (h *Handler) SetPlanAtJobCreation(fn func(ctx context.Context, agentID, goal string) (*planner.TaskGraph, error)) {
+	h.planAtJobCreation = fn
 }
 
 // HealthCheck 健康检查
@@ -529,12 +537,31 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 		}
 		if h.jobEventStore != nil {
 			payload, _ := json.Marshal(map[string]string{"agent_id": id, "goal": req.Message})
-			_, errAppend := h.jobEventStore.Append(ctx, jobIDOut, 0, jobstore.JobEvent{
+			ver, errAppend := h.jobEventStore.Append(ctx, jobIDOut, 0, jobstore.JobEvent{
 				JobID: jobIDOut, Type: jobstore.JobCreated, Payload: payload,
 			})
 			if errAppend != nil {
 				hlog.CtxErrorf(ctx, "追加 JobCreated 事件失败（Job 已创建，可继续执行）: %v", errAppend)
-				// 不阻塞 202：Job 已存在，Scheduler 可拉取执行
+			} else if h.planAtJobCreation != nil {
+				// 1.0 Plan 事件化：Job 创建时即生成并持久化 TaskGraph，执行阶段只读
+				taskGraph, planErr := h.planAtJobCreation(ctx, id, req.Message)
+				if planErr != nil {
+					hlog.CtxErrorf(ctx, "Job 创建时 Plan 失败: %v", planErr)
+					c.JSON(consts.StatusInternalServerError, map[string]string{
+						"error": "规划失败，请重试",
+					})
+					return
+				}
+				if taskGraph != nil {
+					graphBytes, _ := taskGraph.Marshal()
+					payloadPlan, _ := json.Marshal(map[string]interface{}{
+						"task_graph": json.RawMessage(graphBytes),
+						"goal":       req.Message,
+					})
+					_, _ = h.jobEventStore.Append(ctx, jobIDOut, ver, jobstore.JobEvent{
+						JobID: jobIDOut, Type: jobstore.PlanGenerated, Payload: payloadPlan,
+					})
+				}
 			}
 		}
 		c.JSON(consts.StatusAccepted, map[string]interface{}{
@@ -802,6 +829,52 @@ func (h *Handler) JobStop(ctx context.Context, c *app.RequestContext) {
 	})
 }
 
+// GetJobReplay 返回只读的 Replay 视图（从事件流推导，不触发任何执行）；供 1.0 认证「Replay 一致性」校验
+func (h *Handler) GetJobReplay(ctx context.Context, c *app.RequestContext) {
+	if h.jobEventStore == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "事件存储未启用"})
+		return
+	}
+	jobID := c.Param("id")
+	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
+	if err != nil {
+		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取 Replay 失败"})
+		return
+	}
+	timeline := make([]map[string]interface{}, 0, len(events))
+	for _, e := range events {
+		payload := json.RawMessage(e.Payload)
+		if len(e.Payload) == 0 {
+			payload = []byte("null")
+		}
+		entry := map[string]interface{}{
+			"type":       string(e.Type),
+			"created_at": e.CreatedAt,
+			"payload":    payload,
+		}
+		var pl map[string]interface{}
+		if _ = json.Unmarshal(e.Payload, &pl); pl != nil {
+			if n, ok := pl["node_id"]; ok {
+				entry["node_id"] = n
+			}
+		}
+		timeline = append(timeline, entry)
+	}
+	goal := ""
+	if h.jobStore != nil {
+		if j, _ := h.jobStore.Get(ctx, jobID); j != nil {
+			goal = j.Goal
+		}
+	}
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"job_id":    jobID,
+		"goal":      goal,
+		"read_only": true,
+		"timeline":  timeline,
+	})
+}
+
 // GetJobEvents 返回该 Job 的原始事件列表
 func (h *Handler) GetJobEvents(ctx context.Context, c *app.RequestContext) {
 	if h.jobEventStore == nil {
@@ -849,6 +922,8 @@ func (h *Handler) GetJobTrace(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	timeline := make([]map[string]interface{}, 0, len(events))
+	nodeStarted := make(map[string]time.Time)
+	nodeDurations := make([]map[string]interface{}, 0)
 	for _, e := range events {
 		payload := json.RawMessage(e.Payload)
 		if len(e.Payload) == 0 {
@@ -859,18 +934,33 @@ func (h *Handler) GetJobTrace(ctx context.Context, c *app.RequestContext) {
 			"created_at": e.CreatedAt,
 			"payload":    payload,
 		}
-		// 节点类事件可带 node_id 便于前端定位
 		var pl map[string]interface{}
 		if _ = json.Unmarshal(e.Payload, &pl); pl != nil {
 			if n, ok := pl["node_id"]; ok {
+				nodeID, _ := n.(string)
 				entry["node_id"] = n
+				if e.Type == jobstore.NodeStarted && nodeID != "" {
+					nodeStarted[nodeID] = e.CreatedAt
+				}
+				if e.Type == jobstore.NodeFinished && nodeID != "" {
+					if startAt, ok := nodeStarted[nodeID]; ok {
+						durMs := e.CreatedAt.Sub(startAt).Milliseconds()
+						nodeDurations = append(nodeDurations, map[string]interface{}{
+							"node_id":      nodeID,
+							"started_at":  startAt,
+							"finished_at": e.CreatedAt,
+							"duration_ms": durMs,
+						})
+					}
+				}
 			}
 		}
 		timeline = append(timeline, entry)
 	}
 	c.JSON(consts.StatusOK, map[string]interface{}{
-		"job_id":   jobID,
-		"timeline": timeline,
+		"job_id":          jobID,
+		"timeline":        timeline,
+		"node_durations": nodeDurations,
 	})
 }
 

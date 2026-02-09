@@ -19,10 +19,12 @@ type Session struct {
 	ID        string
 	AgentID   string
 
-	Messages  []Message
-	Variables map[string]any
+	Messages   []Message
+	Variables  map[string]any
+	ToolCalls  []ToolCallRecord
+	Scratchpad string
 
-	CurrentTask   string
+	CurrentTask    string
 	LastCheckpoint string
 
 	UpdatedAt time.Time
@@ -70,6 +72,22 @@ func (s *Session) GetVariable(key string) (any, bool) {
 	defer s.mu.RUnlock()
 	v, ok := s.Variables[key]
 	return v, ok
+}
+
+// AddToolCall 追加一条工具调用记录（供持久化与恢复、Trace）
+func (s *Session) AddToolCall(toolName, input, output string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.UpdatedAt = time.Now()
+	s.ToolCalls = append(s.ToolCalls, ToolCallRecord{ToolName: toolName, Input: input, Output: output, At: s.UpdatedAt})
+}
+
+// SetScratchpad 设置推理草稿（可选，供恢复上下文）
+func (s *Session) SetScratchpad(text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.UpdatedAt = time.Now()
+	s.Scratchpad = text
 }
 
 // SetCurrentTask 设置当前任务
