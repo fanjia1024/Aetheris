@@ -1,4 +1,5 @@
-// 最小 CoRag Agent 示例：不启动 HTTP，直接 Run 一次对话。
+// 最小 Aetheris Agent 示例：不启动 HTTP，直接 Run 一次对话。
+// This demonstrates how an agent executes in Aetheris runtime with checkpointing.
 // 运行：OPENAI_API_KEY=sk-xxx go run ./examples/simple_chat_agent
 package main
 

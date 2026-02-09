@@ -1,6 +1,6 @@
 # Changelog
 
-本文档记录 CoRag 项目的版本与重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
+本文档记录 Aetheris 项目的版本与重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
 ## [Unreleased]
 

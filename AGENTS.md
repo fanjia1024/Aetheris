@@ -1,10 +1,10 @@
 # AGENTS.md
 
-This document provides guidelines for AI agents working with the CoRag codebase.
+This document provides guidelines for AI agents working with the Aetheris codebase.
 
 ## Project Overview
 
-CoRag is a Go + Cloudwego eino powered RAG/Agent platform. Key technologies:
+Aetheris is a Go + Cloudwego eino powered agent execution runtime. Key technologies:
 - **Go 1.25.1+**
 - **Cloudwego eino**: Workflow/DAG execution, Agent scheduling, Pipeline orchestration
 - **Hertz**: HTTP framework for REST APIs
