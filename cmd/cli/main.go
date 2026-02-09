@@ -60,6 +60,20 @@ func main() {
 			os.Exit(1)
 		}
 		runTrace(args[0])
+	case "workers":
+		runWorkers()
+	case "replay":
+		if len(args) < 1 {
+			fmt.Fprintf(os.Stderr, "Usage: corag replay <job_id>\n")
+			os.Exit(1)
+		}
+		runReplay(args[0])
+	case "cancel":
+		if len(args) < 1 {
+			fmt.Fprintf(os.Stderr, "Usage: corag cancel <job_id>\n")
+			os.Exit(1)
+		}
+		runCancel(args[0])
 	default:
 		printUsage()
 		os.Exit(1)
@@ -77,6 +91,9 @@ func printUsage() {
 	fmt.Println("  chat [agent_id] - 交互式对话（未传 agent_id 时需环境 CORAG_AGENT_ID）")
 	fmt.Println("  jobs <agent_id> - 列出该 Agent 的 Jobs")
 	fmt.Println("  trace <job_id>  - 输出 Job 执行时间线，并打印 Trace 页面 URL")
+	fmt.Println("  workers         - 列出当前活跃 Worker（Postgres 模式）")
+	fmt.Println("  replay <job_id> - 输出 Job 事件流（重放用）")
+	fmt.Println("  cancel <job_id> - 请求取消执行中的 Job")
 }
 
 func runConfig() {
@@ -193,4 +210,37 @@ func runTrace(jobID string) {
 	fmt.Println(prettyJSON(trace))
 	fmt.Println()
 	fmt.Println("Trace 页面:", tracePageURL(jobID))
+}
+
+func runWorkers() {
+	workers, err := listWorkers()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "列出 Worker 失败: %v\n", err)
+		os.Exit(1)
+	}
+	if len(workers) == 0 {
+		fmt.Println("[]")
+		return
+	}
+	fmt.Println(prettyJSON(workers))
+}
+
+func runReplay(jobID string) {
+	ev, err := getJobEvents(jobID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "获取事件流失败: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(prettyJSON(ev))
+	fmt.Println()
+	fmt.Println("Trace 页面:", tracePageURL(jobID))
+}
+
+func runCancel(jobID string) {
+	out, err := cancelJob(jobID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "取消失败: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(prettyJSON(out))
 }

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"sync"
 	"time"
@@ -9,9 +10,10 @@ import (
 	"rag-platform/internal/agent/job"
 	"rag-platform/internal/runtime/jobstore"
 	"rag-platform/pkg/log"
+	"rag-platform/pkg/metrics"
 )
 
-// AgentJobRunner 从事件存储 Claim Job，从元数据存储取 Job，执行 Runner 并写回事件与状态
+// AgentJobRunner 从事件存储 Claim Job，从元数据存储取 Job，执行 Runner 并写回事件与状态；支持并发上限（Backpressure）
 type AgentJobRunner struct {
 	workerID        string
 	jobEventStore   jobstore.JobStore
@@ -20,23 +22,29 @@ type AgentJobRunner struct {
 	pollInterval    time.Duration
 	leaseDuration   time.Duration
 	heartbeatTicker time.Duration
+	maxConcurrency  int
+	limiter         chan struct{} // 信号量，限制同时执行的 Job 数，避免 goroutine/LLM 爆炸
 	logger          *log.Logger
 	stopCh          chan struct{}
 	wg              sync.WaitGroup
 }
 
-// NewAgentJobRunner 创建 Agent Job 拉取执行器；runJob 由外部注入（含 DAG Runner 与事件写回）
+// NewAgentJobRunner 创建 Agent Job 拉取执行器；runJob 由外部注入；maxConcurrency 为同时执行 Job 上限，<=0 时默认 2
 func NewAgentJobRunner(
 	workerID string,
 	jobEventStore jobstore.JobStore,
 	jobStore job.JobStore,
 	runJob func(ctx context.Context, j *job.Job) error,
 	pollInterval, leaseDuration time.Duration,
+	maxConcurrency int,
 	logger *log.Logger,
 ) *AgentJobRunner {
 	heartbeat := leaseDuration / 2
 	if heartbeat <= 0 {
 		heartbeat = 15 * time.Second
+	}
+	if maxConcurrency <= 0 {
+		maxConcurrency = 2
 	}
 	return &AgentJobRunner{
 		workerID:        workerID,
@@ -46,12 +54,14 @@ func NewAgentJobRunner(
 		pollInterval:    pollInterval,
 		leaseDuration:   leaseDuration,
 		heartbeatTicker: heartbeat,
+		maxConcurrency:  maxConcurrency,
+		limiter:         make(chan struct{}, maxConcurrency),
 		logger:          logger,
 		stopCh:          make(chan struct{}),
 	}
 }
 
-// Start 启动 Claim 循环；在 goroutine 中拉取并执行 Job
+// Start 启动 Claim 循环；先占并发槽位再 Claim，执行后释放槽位（Backpressure）
 func (r *AgentJobRunner) Start(ctx context.Context) {
 	r.wg.Add(1)
 	go func() {
@@ -62,9 +72,11 @@ func (r *AgentJobRunner) Start(ctx context.Context) {
 				return
 			case <-ctx.Done():
 				return
-			default:
+			case r.limiter <- struct{}{}:
+				// 占一个槽位后再 Claim，避免 100+ job 时 goroutine/LLM 爆炸
 				jobID, _, err := r.jobEventStore.Claim(ctx, r.workerID)
 				if err != nil {
+					<-r.limiter
 					if err == jobstore.ErrNoJob {
 						select {
 						case <-r.stopCh:
@@ -79,10 +91,10 @@ func (r *AgentJobRunner) Start(ctx context.Context) {
 					time.Sleep(r.pollInterval)
 					continue
 				}
-				// 在 goroutine 中执行，避免阻塞 Claim 循环
 				r.wg.Add(1)
 				go func(claimedJobID string) {
 					defer r.wg.Done()
+					defer func() { <-r.limiter }()
 					r.executeJob(ctx, claimedJobID)
 				}(jobID)
 			}
@@ -96,12 +108,21 @@ func (r *AgentJobRunner) Stop() {
 	r.wg.Wait()
 }
 
+const cancelPollInterval = 500 * time.Millisecond
+
 func (r *AgentJobRunner) executeJob(ctx context.Context, jobID string) {
 	j, err := r.jobStore.Get(ctx, jobID)
 	if err != nil || j == nil {
 		r.logger.Warn("Get Job 失败或不存在，跳过", "job_id", jobID, "error", err)
 		return
 	}
+	metrics.WorkerBusy.WithLabelValues(r.workerID).Inc()
+	defer metrics.WorkerBusy.WithLabelValues(r.workerID).Dec()
+	start := time.Now()
+	defer func() {
+		dur := time.Since(start).Seconds()
+		metrics.JobDuration.WithLabelValues(j.AgentID).Observe(dur)
+	}()
 	// 元数据与事件一致：Claim 成功后标记 Running，便于查询与运维
 	_ = r.jobStore.UpdateStatus(ctx, jobID, job.StatusRunning)
 	r.logger.Info("开始执行 Job", "job_id", jobID, "agent_id", j.AgentID, "goal", j.Goal)
@@ -124,11 +145,42 @@ func (r *AgentJobRunner) executeJob(ctx context.Context, jobID string) {
 			}
 		}
 	}()
+	// 轮询取消请求：API 调用 RequestCancel 后 Worker 取消 runCtx，使 LLM/tool 中断
+	go func() {
+		ticker := time.NewTicker(cancelPollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-runCtx.Done():
+				return
+			case <-ticker.C:
+				j2, _ := r.jobStore.Get(ctx, jobID)
+				if j2 != nil && !j2.CancelRequestedAt.IsZero() {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
 	err = r.runJob(runCtx, j)
 	<-heartbeatDone
+	if runCtx.Err() == context.Canceled {
+		r.logger.Info("Job 已取消", "job_id", jobID)
+		metrics.JobTotal.WithLabelValues("cancelled").Inc()
+		metrics.JobFailTotal.WithLabelValues("cancelled").Inc()
+		_, ver, _ := r.jobEventStore.ListEvents(ctx, jobID)
+		payload, _ := json.Marshal(map[string]interface{}{"goal": j.Goal})
+		_, _ = r.jobEventStore.Append(ctx, jobID, ver, jobstore.JobEvent{JobID: jobID, Type: jobstore.JobCancelled, Payload: payload})
+		_ = r.jobStore.UpdateStatus(ctx, jobID, job.StatusCancelled)
+		return
+	}
 	if err != nil {
 		r.logger.Info("Job 执行失败", "job_id", jobID, "error", err)
+		metrics.JobTotal.WithLabelValues("failed").Inc()
+		metrics.JobFailTotal.WithLabelValues("failed").Inc()
+		return
 	}
+	metrics.JobTotal.WithLabelValues("completed").Inc()
 	// 事件与状态已在 runJob 内写回（由注入的 runJob 负责 Append job_completed/job_failed 与 UpdateStatus）
 }
 

@@ -89,6 +89,7 @@ func (r *Router) Build(addr string, opts ...config.Option) *server.Hertz {
 	jobs := api.Group("/jobs")
 	{
 		jobs.GET("/:id", authHandler, r.handler.GetJob)
+		jobs.POST("/:id/stop", authHandler, r.handler.JobStop)
 		jobs.GET("/:id/events", authHandler, r.handler.GetJobEvents)
 		jobs.GET("/:id/trace", authHandler, r.handler.GetJobTrace)
 		jobs.GET("/:id/nodes/:node_id", authHandler, r.handler.GetJobNode)
@@ -105,6 +106,7 @@ func (r *Router) Build(addr string, opts ...config.Option) *server.Hertz {
 	{
 		system.GET("/status", authHandler, r.handler.SystemStatus)
 		system.GET("/metrics", authHandler, r.handler.SystemMetrics)
+		system.GET("/workers", authHandler, r.handler.SystemWorkers)
 	}
 
 	return h

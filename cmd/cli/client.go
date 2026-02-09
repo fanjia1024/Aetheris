@@ -127,6 +127,50 @@ func tracePageURL(jobID string) string {
 	return apiBaseURL() + "/api/jobs/" + jobID + "/trace/page"
 }
 
+func getJobEvents(jobID string) (map[string]interface{}, error) {
+	var out map[string]interface{}
+	resp, err := newClient().R().
+		SetResult(&out).
+		Get("/api/jobs/" + jobID + "/events")
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("GET events: %s", resp.String())
+	}
+	return out, nil
+}
+
+func listWorkers() ([]string, error) {
+	var out struct {
+		Workers []string `json:"workers"`
+	}
+	resp, err := newClient().R().
+		SetResult(&out).
+		Get("/api/system/workers")
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("GET /api/system/workers: %s", resp.String())
+	}
+	return out.Workers, nil
+}
+
+func cancelJob(jobID string) (map[string]interface{}, error) {
+	var out map[string]interface{}
+	resp, err := newClient().R().
+		SetResult(&out).
+		Post("/api/jobs/" + jobID + "/stop")
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("POST stop: %s", resp.String())
+	}
+	return out, nil
+}
+
 func prettyJSON(v interface{}) string {
 	b, _ := json.MarshalIndent(v, "", "  ")
 	return string(b)

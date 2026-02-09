@@ -1,11 +1,15 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
+
+	"github.com/prometheus/common/expfmt"
 
 	"rag-platform/internal/agent/job"
 	"rag-platform/internal/agent/planner"
@@ -20,6 +24,7 @@ import (
 	"rag-platform/internal/storage/vector"
 	"rag-platform/pkg/config"
 	"rag-platform/pkg/log"
+	"rag-platform/pkg/metrics"
 )
 
 // App Worker 应用（Pipeline 由 eino 调度；JobStore=postgres 时拉取 Agent Job 执行）
@@ -158,6 +163,10 @@ func NewApp(cfg *config.Config) (*App, error) {
 				pollInterval = d
 			}
 		}
+		maxConcurrency := cfg.Worker.Concurrency
+		if maxConcurrency <= 0 {
+			maxConcurrency = 2
+		}
 		appObj.agentJobRunner = NewAgentJobRunner(
 			DefaultWorkerID(),
 			pgEventStore,
@@ -165,6 +174,7 @@ func NewApp(cfg *config.Config) (*App, error) {
 			runJob,
 			pollInterval,
 			leaseDur,
+			maxConcurrency,
 			logger,
 		)
 		logger.Info("Worker Agent Job 模式已启用", "worker_id", DefaultWorkerID(), "dsn", dsn)
@@ -181,6 +191,27 @@ func (a *App) Start() error {
 		ctx, cancel := context.WithCancel(context.Background())
 		a.agentJobCancel = cancel
 		a.agentJobRunner.Start(ctx)
+	}
+
+	// 可选：Prometheus /metrics 端点
+	if a.config != nil && a.config.Monitoring.Prometheus.Enable && a.config.Monitoring.Prometheus.Port > 0 {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
+			var buf bytes.Buffer
+			if err := metrics.WritePrometheus(&buf); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", string(expfmt.FmtText))
+			_, _ = w.Write(buf.Bytes())
+		})
+		addr := fmt.Sprintf(":%d", a.config.Monitoring.Prometheus.Port)
+		go func() {
+			if err := http.ListenAndServe(addr, mux); err != nil && err != http.ErrServerClosed {
+				a.logger.Error("metrics 服务异常", "error", err)
+			}
+		}()
+		a.logger.Info("Prometheus /metrics 已启用", "addr", addr)
 	}
 
 	// 启动工作队列消费者：收到入库任务时调用 engine.ExecuteWorkflow(ctx, "ingest_pipeline", payload)

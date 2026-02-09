@@ -113,7 +113,7 @@ func (s *memoryStore) Claim(ctx context.Context, workerID string) (string, int, 
 			continue
 		}
 		last := events[len(events)-1].Type
-		if last == JobCompleted || last == JobFailed {
+		if last == JobCompleted || last == JobFailed || last == JobCancelled {
 			continue
 		}
 		claim, ok := s.claims[jobID]

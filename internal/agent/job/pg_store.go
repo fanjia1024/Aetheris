@@ -10,12 +10,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// status 与 JobStatus 一致：0=Pending, 1=Running, 2=Completed, 3=Failed
+// status 与 JobStatus 一致：0=Pending, 1=Running, 2=Completed, 3=Failed, 4=Cancelled
 const (
 	pgStatusPending   = 0
 	pgStatusRunning   = 1
-	pgStatusCompleted  = 2
+	pgStatusCompleted = 2
 	pgStatusFailed    = 3
+	pgStatusCancelled = 4
 )
 
 // JobStorePg Postgres 实现：jobs 表，供 API 与 Worker 共享
@@ -55,6 +56,8 @@ func statusToPg(s JobStatus) int {
 		return pgStatusCompleted
 	case StatusFailed:
 		return pgStatusFailed
+	case StatusCancelled:
+		return pgStatusCancelled
 	default:
 		return pgStatusPending
 	}
@@ -70,6 +73,8 @@ func pgToStatus(i int) JobStatus {
 		return StatusCompleted
 	case pgStatusFailed:
 		return StatusFailed
+	case pgStatusCancelled:
+		return StatusCancelled
 	default:
 		return StatusPending
 	}
@@ -80,6 +85,13 @@ func nullStr(s string) interface{} {
 		return nil
 	}
 	return s
+}
+
+func nullTime(t time.Time) interface{} {
+	if t.IsZero() {
+		return nil
+	}
+	return t
 }
 
 func (s *JobStorePg) Create(ctx context.Context, j *Job) (string, error) {
@@ -98,9 +110,9 @@ func (s *JobStorePg) Create(ctx context.Context, j *Job) (string, error) {
 		j.UpdatedAt = now
 	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO jobs (id, agent_id, goal, status, cursor, retry_count, session_id, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		id, j.AgentID, j.Goal, statusToPg(StatusPending), j.Cursor, j.RetryCount, nullStr(j.SessionID), j.CreatedAt, j.UpdatedAt)
+		`INSERT INTO jobs (id, agent_id, goal, status, cursor, retry_count, session_id, cancel_requested_at, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		id, j.AgentID, j.Goal, statusToPg(StatusPending), j.Cursor, j.RetryCount, nullStr(j.SessionID), nullTime(j.CancelRequestedAt), j.CreatedAt, j.UpdatedAt)
 	if err != nil {
 		return "", err
 	}
@@ -112,10 +124,11 @@ func (s *JobStorePg) Get(ctx context.Context, jobID string) (*Job, error) {
 	var status int
 	var cursor, sessionID *string
 	var retryCount int
+	var cancelRequestedAt *time.Time
 	var createdAt, updatedAt time.Time
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, agent_id, goal, status, cursor, retry_count, session_id, created_at, updated_at FROM jobs WHERE id = $1`,
-		jobID).Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &createdAt, &updatedAt)
+		`SELECT id, agent_id, goal, status, cursor, retry_count, session_id, cancel_requested_at, created_at, updated_at FROM jobs WHERE id = $1`,
+		jobID).Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &cancelRequestedAt, &createdAt, &updatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -129,6 +142,9 @@ func (s *JobStorePg) Get(ctx context.Context, jobID string) (*Job, error) {
 	if sessionID != nil {
 		j.SessionID = *sessionID
 	}
+	if cancelRequestedAt != nil {
+		j.CancelRequestedAt = *cancelRequestedAt
+	}
 	j.RetryCount = retryCount
 	j.CreatedAt = createdAt
 	j.UpdatedAt = updatedAt
@@ -137,7 +153,7 @@ func (s *JobStorePg) Get(ctx context.Context, jobID string) (*Job, error) {
 
 func (s *JobStorePg) ListByAgent(ctx context.Context, agentID string) ([]*Job, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, agent_id, goal, status, cursor, retry_count, session_id, created_at, updated_at FROM jobs WHERE agent_id = $1 ORDER BY created_at DESC`,
+		`SELECT id, agent_id, goal, status, cursor, retry_count, session_id, cancel_requested_at, created_at, updated_at FROM jobs WHERE agent_id = $1 ORDER BY created_at DESC`,
 		agentID)
 	if err != nil {
 		return nil, err
@@ -149,8 +165,9 @@ func (s *JobStorePg) ListByAgent(ctx context.Context, agentID string) ([]*Job, e
 		var status int
 		var cursor, sessionID *string
 		var retryCount int
+		var cancelRequestedAt *time.Time
 		var createdAt, updatedAt time.Time
-		if err := rows.Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &cancelRequestedAt, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		j.Status = pgToStatus(status)
@@ -159,6 +176,9 @@ func (s *JobStorePg) ListByAgent(ctx context.Context, agentID string) ([]*Job, e
 		}
 		if sessionID != nil {
 			j.SessionID = *sessionID
+		}
+		if cancelRequestedAt != nil {
+			j.CancelRequestedAt = *cancelRequestedAt
 		}
 		j.RetryCount = retryCount
 		j.CreatedAt = createdAt
@@ -226,5 +246,12 @@ func (s *JobStorePg) Requeue(ctx context.Context, j *Job) error {
 	_, err := s.pool.Exec(ctx,
 		`UPDATE jobs SET status = $1, retry_count = $2, updated_at = now() WHERE id = $3`,
 		pgStatusPending, j.RetryCount+1, j.ID)
+	return err
+}
+
+func (s *JobStorePg) RequestCancel(ctx context.Context, jobID string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE jobs SET cancel_requested_at = now(), updated_at = now() WHERE id = $1`,
+		jobID)
 	return err
 }

@@ -10,6 +10,7 @@ const (
 	StatusRunning
 	StatusCompleted
 	StatusFailed
+	StatusCancelled
 )
 
 func (s JobStatus) String() string {
@@ -22,6 +23,8 @@ func (s JobStatus) String() string {
 		return "completed"
 	case StatusFailed:
 		return "failed"
+	case StatusCancelled:
+		return "cancelled"
 	default:
 		return "unknown"
 	}
@@ -41,4 +44,6 @@ type Job struct {
 	RetryCount int
 	// SessionID 关联会话，Worker 恢复时 LoadAgentState(AgentID, SessionID)；空时用 AgentID 作为 sessionID
 	SessionID string
+	// CancelRequestedAt 非零表示已请求取消，Worker 应取消 runCtx 并将状态置为 Cancelled
+	CancelRequestedAt time.Time
 }

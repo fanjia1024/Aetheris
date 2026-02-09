@@ -118,7 +118,8 @@ func TestJobStoreMem_Get_NotFound(t *testing.T) {
 
 func TestJobStatus_String(t *testing.T) {
 	if StatusPending.String() != "pending" || StatusRunning.String() != "running" ||
-		StatusCompleted.String() != "completed" || StatusFailed.String() != "failed" {
+		StatusCompleted.String() != "completed" || StatusFailed.String() != "failed" ||
+		StatusCancelled.String() != "cancelled" {
 		t.Errorf("JobStatus.String mismatch")
 	}
 }

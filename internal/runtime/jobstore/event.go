@@ -6,14 +6,15 @@ import "time"
 type EventType string
 
 const (
-	JobCreated    EventType = "job_created"
-	PlanGenerated EventType = "plan_generated"
-	NodeStarted   EventType = "node_started"
-	NodeFinished  EventType = "node_finished"
-	ToolCalled    EventType = "tool_called"
-	ToolReturned  EventType = "tool_returned"
-	JobCompleted  EventType = "job_completed"
-	JobFailed     EventType = "job_failed"
+	JobCreated     EventType = "job_created"
+	PlanGenerated  EventType = "plan_generated"
+	NodeStarted    EventType = "node_started"
+	NodeFinished   EventType = "node_finished"
+	ToolCalled     EventType = "tool_called"
+	ToolReturned   EventType = "tool_returned"
+	JobCompleted   EventType = "job_completed"
+	JobFailed      EventType = "job_failed"
+	JobCancelled   EventType = "job_cancelled"
 )
 
 // JobEvent 单条不可变事件；Job 的真实形态是事件流

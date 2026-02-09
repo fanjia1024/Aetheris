@@ -1,7 +1,72 @@
-# 占位 docker-compose（设计 struct.md 5）
-# 后续可添加 api、worker、redis 等服务
+# CoRag API + 2 Workers + Postgres（v1.0 可部署验收）
+# 从仓库根目录执行: docker compose -f deployments/compose/docker-compose.yml up -d
+# 或进入本目录: docker compose up -d（context 需包含 ../..）
 version: "3.8"
+
 services:
-  placeholder:
-    image: alpine:3.18
-    command: ["echo", "replace with real services"]
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: corag
+      POSTGRES_PASSWORD: corag
+      POSTGRES_DB: corag
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../../internal/runtime/jobstore/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U corag -d corag"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: ../..
+      dockerfile: deployments/compose/Dockerfile
+    command: ["/usr/local/bin/api"]
+    working_dir: /app
+    environment:
+      JOBSTORE_TYPE: postgres
+      JOBSTORE_DSN: "postgres://corag:corag@postgres:5432/corag?sslmode=disable"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker1:
+    build:
+      context: ../..
+      dockerfile: deployments/compose/Dockerfile
+    command: ["/usr/local/bin/worker"]
+    working_dir: /app
+    environment:
+      WORKER_ID: worker-1
+      JOBSTORE_TYPE: postgres
+      JOBSTORE_DSN: "postgres://corag:corag@postgres:5432/corag?sslmode=disable"
+      STORAGE_METADATA_TYPE: memory
+      STORAGE_VECTOR_TYPE: memory
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker2:
+    build:
+      context: ../..
+      dockerfile: deployments/compose/Dockerfile
+    command: ["/usr/local/bin/worker"]
+    working_dir: /app
+    environment:
+      WORKER_ID: worker-2
+      JOBSTORE_TYPE: postgres
+      JOBSTORE_DSN: "postgres://corag:corag@postgres:5432/corag?sslmode=disable"
+      STORAGE_METADATA_TYPE: memory
+      STORAGE_VECTOR_TYPE: memory
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data: {}

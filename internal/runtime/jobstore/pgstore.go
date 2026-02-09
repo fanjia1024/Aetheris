@@ -118,7 +118,7 @@ func (s *pgStore) Append(ctx context.Context, jobID string, expectedVersion int,
 func (s *pgStore) Claim(ctx context.Context, workerID string) (string, int, error) {
 	now := time.Now()
 	expires := now.Add(s.leaseDur)
-	terminal1, terminal2 := string(JobCompleted), string(JobFailed)
+	terminal1, terminal2, terminal3 := string(JobCompleted), string(JobFailed), string(JobCancelled)
 
 	// 在事务中：找一条「可执行」的 job（最后事件非 terminal，且无有效租约），锁定该行后插入/更新 claim
 	tx, err := s.pool.Begin(ctx)
@@ -127,7 +127,7 @@ func (s *pgStore) Claim(ctx context.Context, workerID string) (string, int, erro
 	}
 	defer tx.Rollback(ctx)
 
-	// 选出一个 claimable 的 (job_id, version)：最后事件类型非 completed/failed，且无未过期 claim
+	// 选出一个 claimable 的 (job_id, version)：最后事件类型非 completed/failed/cancelled，且无未过期 claim
 	var claimedID string
 	var claimedVersion int
 	err = tx.QueryRow(ctx, `
@@ -135,14 +135,14 @@ func (s *pgStore) Claim(ctx context.Context, workerID string) (string, int, erro
 		INNER JOIN (
 			SELECT job_id, MAX(version) AS v FROM job_events GROUP BY job_id
 		) m ON e.job_id = m.job_id AND e.version = m.v
-		WHERE e.type NOT IN ($1, $2)
+		WHERE e.type NOT IN ($1, $2, $3)
 		AND NOT EXISTS (
-			SELECT 1 FROM job_claims c WHERE c.job_id = e.job_id AND c.expires_at > $3
+			SELECT 1 FROM job_claims c WHERE c.job_id = e.job_id AND c.expires_at > $4
 		)
 		ORDER BY e.created_at
 		LIMIT 1
 		FOR UPDATE OF e SKIP LOCKED
-	`, terminal1, terminal2, now).Scan(&claimedID, &claimedVersion)
+	`, terminal1, terminal2, terminal3, now).Scan(&claimedID, &claimedVersion)
 	if err != nil {
 		if errNoRows(err) {
 			return "", 0, ErrNoJob
@@ -175,6 +175,25 @@ func (s *pgStore) Heartbeat(ctx context.Context, workerID string, jobID string) 
 		return ErrClaimNotFound
 	}
 	return nil
+}
+
+// ListActiveWorkerIDs 返回当前有未过期租约的 worker_id 列表（供运维 CLI / API 展示）
+func (s *pgStore) ListActiveWorkerIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT DISTINCT worker_id FROM job_claims WHERE expires_at > now() ORDER BY worker_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func (s *pgStore) Watch(ctx context.Context, jobID string) (<-chan JobEvent, error) {

@@ -1,6 +1,7 @@
 package http
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
+	"github.com/prometheus/common/expfmt"
 
 	"rag-platform/internal/agent"
 	"rag-platform/internal/agent/job"
@@ -21,6 +23,7 @@ import (
 	"rag-platform/internal/runtime/eino"
 	"rag-platform/internal/runtime/jobstore"
 	"rag-platform/internal/runtime/session"
+	"rag-platform/pkg/metrics"
 )
 
 // AgentRunner 可选的 Agent 入口（供 POST /api/agent/run 使用）；优先使用 RunWithSession
@@ -348,18 +351,41 @@ func (h *Handler) SystemStatus(ctx context.Context, c *app.RequestContext) {
 	c.JSON(consts.StatusOK, status)
 }
 
-// SystemMetrics 系统指标
+// SystemMetrics 系统指标（Prometheus 文本格式，供 /metrics 抓取）
 func (h *Handler) SystemMetrics(ctx context.Context, c *app.RequestContext) {
-	metrics := map[string]interface{}{
-		"requests_total":  1000,
-		"errors_total":    10,
-		"latency_avg":     50,
-		"documents_count": 1000,
-		"index_size":      "100MB",
-		"timestamp":       time.Now(),
+	var buf bytes.Buffer
+	if err := metrics.WritePrometheus(&buf); err != nil {
+		hlog.CtxErrorf(ctx, "WritePrometheus: %v", err)
+		c.AbortWithStatus(consts.StatusInternalServerError)
+		return
 	}
+	c.Header("Content-Type", string(expfmt.FmtText))
+	c.Write(buf.Bytes())
+}
 
-	c.JSON(consts.StatusOK, metrics)
+// workersLister 可选接口：事件存储为 Postgres 时支持列出活跃 Worker
+type workersLister interface {
+	ListActiveWorkerIDs(ctx context.Context) ([]string, error)
+}
+
+// SystemWorkers 返回当前有未过期租约的 Worker 列表（GET /api/system/workers，供 CLI corag workers）
+func (h *Handler) SystemWorkers(ctx context.Context, c *app.RequestContext) {
+	if h.jobEventStore == nil {
+		c.JSON(consts.StatusOK, map[string]interface{}{"workers": []string{}, "total": 0})
+		return
+	}
+	wl, ok := h.jobEventStore.(workersLister)
+	if !ok {
+		c.JSON(consts.StatusOK, map[string]interface{}{"workers": []string{}, "total": 0, "message": "事件存储不支持列出 Worker"})
+		return
+	}
+	ids, err := wl.ListActiveWorkerIDs(ctx)
+	if err != nil {
+		hlog.CtxErrorf(ctx, "ListActiveWorkerIDs: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取 Worker 列表失败"})
+		return
+	}
+	c.JSON(consts.StatusOK, map[string]interface{}{"workers": ids, "total": len(ids)})
 }
 
 // AgentRunRequest POST /api/agent/run 请求体
@@ -745,6 +771,34 @@ func (h *Handler) GetJob(ctx context.Context, c *app.RequestContext) {
 		"retry_count": j.RetryCount,
 		"created_at":  j.CreatedAt,
 		"updated_at":  j.UpdatedAt,
+	})
+}
+
+// JobStop 请求取消执行中的 Job（POST /api/jobs/:id/stop）；Worker 轮询到后取消 runCtx，Job 进入 CANCELLED
+func (h *Handler) JobStop(ctx context.Context, c *app.RequestContext) {
+	if h.jobStore == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "Job 未启用"})
+		return
+	}
+	jobID := c.Param("id")
+	j, err := h.jobStore.Get(ctx, jobID)
+	if err != nil || j == nil {
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+		return
+	}
+	if j.Status == job.StatusCompleted || j.Status == job.StatusFailed || j.Status == job.StatusCancelled {
+		c.JSON(consts.StatusBadRequest, map[string]string{"error": "任务已结束，无法取消"})
+		return
+	}
+	if err := h.jobStore.RequestCancel(ctx, jobID); err != nil {
+		hlog.CtxErrorf(ctx, "RequestCancel 失败: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "取消失败"})
+		return
+	}
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"job_id":  jobID,
+		"status":  "cancelling",
+		"message": "已请求取消，Worker 将中断执行",
 	})
 }
 

@@ -20,6 +20,8 @@ type JobStore interface {
 	ClaimNextPending(ctx context.Context) (*Job, error)
 	// Requeue 将 Job 重新入队为 Pending（用于重试；会递增 RetryCount）
 	Requeue(ctx context.Context, job *Job) error
+	// RequestCancel 请求取消执行中的 Job；Worker 轮询 Get 时发现 CancelRequestedAt 非零则取消 runCtx
+	RequestCancel(ctx context.Context, jobID string) error
 }
 
 // JobStoreMem 内存实现：map + Pending 队列，Create 时入队，ClaimNextPending 取队首并置 Running
@@ -140,6 +142,18 @@ func (s *JobStoreMem) Requeue(ctx context.Context, job *Job) error {
 	j.UpdatedAt = time.Now()
 	s.pending = append(s.pending, job.ID)
 	s.cond.Signal()
+	return nil
+}
+
+func (s *JobStoreMem) RequestCancel(ctx context.Context, jobID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	j, ok := s.byID[jobID]
+	if !ok {
+		return nil
+	}
+	j.CancelRequestedAt = time.Now()
+	j.UpdatedAt = j.CancelRequestedAt
 	return nil
 }
 
