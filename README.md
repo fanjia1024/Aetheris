@@ -112,10 +112,15 @@ Aetheris is an attempt to provide the missing layer:
 
 ---
 
-## Contributing
-
-Contributions are welcome. Please see [CONTRIBUTING.md](CONTRIBUTING.md) for how to get started.
-
 ## License
 
 Aetheris is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
+
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to get started.
+
+## Code of Conduct
+
+Please note that this project is governed by a [Code of Conduct](CODE_OF_CONDUCT.md).
+By participating, you are expected to uphold this code.
