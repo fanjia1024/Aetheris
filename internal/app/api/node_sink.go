@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 
 	"rag-platform/internal/agent/replay"
 	agentexec "rag-platform/internal/agent/runtime/executor"
@@ -28,7 +29,13 @@ func (s *nodeEventSinkImpl) AppendNodeStarted(ctx context.Context, jobID string,
 	if err != nil {
 		return err
 	}
-	payload, err := json.Marshal(map[string]string{"node_id": nodeID})
+	stepIndex := ver + 1
+	payload, err := json.Marshal(map[string]interface{}{
+		"node_id":         nodeID,
+		"trace_span_id":   nodeID,
+		"parent_span_id":  "plan",
+		"step_index":      stepIndex,
+	})
 	if err != nil {
 		return err
 	}
@@ -47,9 +54,13 @@ func (s *nodeEventSinkImpl) AppendNodeFinished(ctx context.Context, jobID string
 	if err != nil {
 		return err
 	}
+	stepIndex := ver + 1
 	payload, err := json.Marshal(map[string]interface{}{
 		"node_id":          nodeID,
 		"payload_results": json.RawMessage(payloadResults),
+		"trace_span_id":   nodeID,
+		"parent_span_id":  "plan",
+		"step_index":      stepIndex,
 	})
 	if err != nil {
 		return err
@@ -69,10 +80,15 @@ func (s *nodeEventSinkImpl) AppendToolCalled(ctx context.Context, jobID string, 
 	if err != nil {
 		return err
 	}
+	stepIndex := ver + 1
+	traceSpanID := nodeID + ":tool:" + toolName + ":" + strconv.Itoa(stepIndex)
 	payload, err := json.Marshal(map[string]interface{}{
-		"node_id":   nodeID,
-		"tool_name": toolName,
-		"input":     json.RawMessage(input),
+		"node_id":         nodeID,
+		"tool_name":       toolName,
+		"input":           json.RawMessage(input),
+		"trace_span_id":   traceSpanID,
+		"parent_span_id":  nodeID,
+		"step_index":      stepIndex,
 	})
 	if err != nil {
 		return err
@@ -92,9 +108,12 @@ func (s *nodeEventSinkImpl) AppendToolReturned(ctx context.Context, jobID string
 	if err != nil {
 		return err
 	}
+	stepIndex := ver + 1
 	payload, err := json.Marshal(map[string]interface{}{
-		"node_id": nodeID,
-		"output":  json.RawMessage(output),
+		"node_id":        nodeID,
+		"output":         json.RawMessage(output),
+		"parent_span_id": nodeID,
+		"step_index":     stepIndex,
 	})
 	if err != nil {
 		return err

@@ -957,10 +957,12 @@ func (h *Handler) GetJobTrace(ctx context.Context, c *app.RequestContext) {
 		}
 		timeline = append(timeline, entry)
 	}
+	executionTree := BuildExecutionTree(events)
 	c.JSON(consts.StatusOK, map[string]interface{}{
 		"job_id":          jobID,
 		"timeline":        timeline,
-		"node_durations": nodeDurations,
+		"node_durations":  nodeDurations,
+		"execution_tree":  executionTree,
 	})
 }
 
@@ -1033,6 +1035,10 @@ func buildTraceHTML(jobID string, j *job.Job, events []jobstore.JobEvent) string
 	s += "<h1>Job: " + jobID + "</h1>"
 	s += "<p><b>Goal:</b> " + goal + "</p>"
 	s += "<p><b>Status:</b> " + status + "</p>"
+	tree := BuildExecutionTree(events)
+	s += "<h2>Execution Tree (User → Plan → Node → Tool)</h2><ul>"
+	s += ExecutionTreeToHTML(tree)
+	s += "</ul>"
 	s += "<h2>Timeline</h2><ul>"
 	for _, e := range events {
 		s += "<li><code>" + string(e.Type) + "</code> " + e.CreatedAt.Format("15:04:05") + " <pre>" + string(e.Payload) + "</pre></li>"
