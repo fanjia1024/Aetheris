@@ -1,8 +1,9 @@
 -- JobStore PostgreSQL schema for event stream and claims.
 -- Run against your Postgres DB before using jobstore.type=postgres.
+-- job_events.id 使用 BIGSERIAL，无需任何扩展，兼容 Alpine 等精简镜像。
 
 CREATE TABLE IF NOT EXISTS job_events (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id          BIGSERIAL PRIMARY KEY,
     job_id      TEXT NOT NULL,
     version     INT  NOT NULL,
     type        TEXT NOT NULL,

@@ -20,15 +20,21 @@ type OpenAIClient struct {
 	client   *resty.Client
 }
 
-// NewOpenAIClient 创建新的 OpenAI 客户端
+// NewOpenAIClient 创建新的 OpenAI 客户端（base 优先用 OPENAI_BASE_URL 环境变量）
 func NewOpenAIClient(model, apiKey string) (*OpenAIClient, error) {
+	return NewOpenAIClientWithBaseURL(model, apiKey, "")
+}
+
+// NewOpenAIClientWithBaseURL 创建 OpenAI 兼容客户端；baseURL 为空时用默认或 OPENAI_BASE_URL
+func NewOpenAIClientWithBaseURL(model, apiKey, baseURL string) (*OpenAIClient, error) {
 	if model == "" {
 		model = "gpt-3.5-turbo"
 	}
-
-	baseURL := "https://api.openai.com/v1"
-	if envURL := os.Getenv("OPENAI_BASE_URL"); envURL != "" {
-		baseURL = envURL
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"
+		if envURL := os.Getenv("OPENAI_BASE_URL"); envURL != "" {
+			baseURL = envURL
+		}
 	}
 
 	client := resty.New()

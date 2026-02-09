@@ -3,6 +3,7 @@ package jobstore
 import (
 	"context"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -55,13 +56,16 @@ func (s *pgStore) ListEvents(ctx context.Context, jobID string) ([]JobEvent, int
 	var events []JobEvent
 	for rows.Next() {
 		var e JobEvent
+		var id int64
+		var version int
 		var typeStr string
 		var payload []byte
-		if err := rows.Scan(&e.ID, &e.JobID, &typeStr, &payload, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&id, &e.JobID, &version, &typeStr, &payload, &e.CreatedAt); err != nil {
 			return nil, 0, err
 		}
+		e.ID = strconv.FormatInt(id, 10)
 		e.Type = EventType(typeStr)
-		// version 由 ORDER BY version 隐含，最后一条的 index+1 即为 version
+		_ = version // 已按 version 排序，返回值用 len(events)
 		if len(payload) > 0 {
 			e.Payload = make([]byte, len(payload))
 			copy(e.Payload, payload)

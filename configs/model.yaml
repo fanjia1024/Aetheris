@@ -1,8 +1,21 @@
-# 模型配置
+# 模型配置（Qwen 需设置环境变量 DASHSCOPE_API_KEY，阿里云 DashScope 控制台获取）
 model:
   # LLM 模型配置
   llm:
     providers:
+      # 通义千问（DashScope OpenAI 兼容接口）
+      qwen:
+        api_key: "sk-810e9c55ef5948f58837c90eed07b8bc"
+        base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        models:
+          qwen3_max:
+            name: "qwen3-max"
+            context_window: 8192
+            temperature: 0.1
+          qwen3_plus:
+            name: "qwen3-plus"
+            context_window: 32768
+            temperature: 0.1
       openai:
         api_key: "${OPENAI_API_KEY}"
         base_url: "https://api.openai.com/v1"
@@ -27,6 +40,14 @@ model:
   # Embedding 模型配置
   embedding:
     providers:
+      qwen:
+        api_key: "sk-810e9c55ef5948f58837c90eed07b8bc"
+        base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        models:
+          text_embedding_v2:
+            name: "text-embedding-v2"
+            dimension: 1536
+            input_limit: 8192
       openai:
         api_key: "${OPENAI_API_KEY}"
         base_url: "https://api.openai.com/v1"
@@ -47,6 +68,14 @@ model:
   # Vision 模型配置（可选）
   vision:
     providers:
+      qwen:
+        api_key: "sk-810e9c55ef5948f58837c90eed07b8bc"
+        base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        models:
+          qwen_vl_plus:
+            name: "qwen-vl-plus"
+            max_tokens: 4096
+            temperature: 0.1
       openai:
         api_key: "${OPENAI_API_KEY}"
         base_url: "https://api.openai.com/v1"
@@ -56,8 +85,8 @@ model:
             max_tokens: 4096
             temperature: 0.1
 
-# 默认模型选择
-defaults:
-  llm: "openai.gpt_35_turbo"
-  embedding: "openai.text_embedding_ada_002"
-  vision: "openai.gpt_4_vision"
+  # 默认模型选择（LLM/Embedding/Vision 默认 Qwen；未配置 DASHSCOPE_API_KEY 时可改为 openai 对应项）
+  defaults:
+    llm: "qwen.qwen3_max"
+    embedding: "qwen.text_embedding_v2"
+    vision: "qwen.qwen_vl_plus"

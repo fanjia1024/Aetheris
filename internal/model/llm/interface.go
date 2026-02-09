@@ -40,17 +40,18 @@ type Message struct {
 	Content string `json:"content"`
 }
 
-// NewClient 创建新的 LLM 客户端
-func NewClient(provider, model, apiKey string) (Client, error) {
-	// 根据提供商创建对应的客户端
+// NewClient 创建新的 LLM 客户端；baseURL 用于 OpenAI 兼容端点（如 Qwen/DashScope），空则用默认或环境变量
+func NewClient(provider, model, apiKey string, baseURL string) (Client, error) {
 	switch provider {
 	case "openai":
-		return NewOpenAIClient(model, apiKey)
+		return NewOpenAIClientWithBaseURL(model, apiKey, baseURL)
+	case "qwen":
+		return NewOpenAIClientWithBaseURL(model, apiKey, baseURL)
 	case "claude":
 		return NewClaudeClient(model, apiKey)
 	case "gemini":
 		return NewGeminiClient(model, apiKey)
 	default:
-		return NewOpenAIClient(model, apiKey)
+		return NewOpenAIClientWithBaseURL(model, apiKey, baseURL)
 	}
 }

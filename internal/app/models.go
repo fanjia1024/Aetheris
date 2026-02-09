@@ -30,7 +30,8 @@ func NewLLMClientFromConfig(cfg *config.Config) (llm.Client, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("LLM provider %q 的 api_key 未配置", provider)
 	}
-	return llm.NewClient(provider, mi.Name, apiKey)
+	baseURL := pc.BaseURL
+	return llm.NewClient(provider, mi.Name, apiKey, baseURL)
 }
 
 // NewQueryEmbedderFromConfig 根据 config.Model 的 defaults.embedding 创建用于 query 向量化的 Embedder

@@ -13,8 +13,8 @@ import (
 )
 
 func main() {
-	// 加载配置
-	cfg, err := config.LoadWorkerConfig()
+	// 加载配置（合并 configs/model.yaml，需 LLM 时请从项目根启动并确保 configs/model.yaml 存在；修改代码后需重新编译并重启 Worker）
+	cfg, err := config.LoadWorkerConfigWithModel()
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}

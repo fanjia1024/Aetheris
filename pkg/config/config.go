@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -273,9 +275,29 @@ func LoadAPIConfigWithModel() (*Config, error) {
 	return cfg, nil
 }
 
-// LoadWorkerConfig 加载 Worker 配置
+// LoadWorkerConfig 加载 Worker 配置（仅 configs/worker.yaml）
 func LoadWorkerConfig() (*Config, error) {
 	return LoadConfig("configs/worker.yaml")
+}
+
+// LoadWorkerConfigWithModel 加载 Worker 配置并合并 model 配置，便于 Worker 执行 Agent Job 时使用 LLM/Embedding。
+// model 路径解析为与 worker 配置同目录（configs/），避免 cwd 导致 model.yaml 未加载。
+func LoadWorkerConfigWithModel() (*Config, error) {
+	cfg, err := LoadConfig("configs/worker.yaml")
+	if err != nil {
+		return nil, err
+	}
+	modelPath := "configs/model.yaml"
+	if absWorker, errAbs := filepath.Abs("configs/worker.yaml"); errAbs == nil {
+		modelPath = filepath.Join(filepath.Dir(absWorker), "model.yaml")
+	}
+	modelCfg, err := LoadConfig(modelPath)
+	if err == nil {
+		cfg.Model = modelCfg.Model
+	} else {
+		log.Printf("[config] 未加载 model 配置 %q，Worker 将无 LLM 配置: %v", modelPath, err)
+	}
+	return cfg, nil
 }
 
 // LoadModelConfig 加载模型配置

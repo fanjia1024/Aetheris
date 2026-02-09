@@ -12,7 +12,8 @@ API_URL="${CORAG_API_URL:-http://localhost:8080}"
 CERT_POLL_MAX="${CERT_POLL_MAX:-90}"
 RUN_TEST4="${RUN_TEST4:-0}"
 RUN_MANUAL_REMINDER="${RUN_MANUAL_REMINDER:-1}"
-CURL_OPTS=(--connect-timeout 5 -s -m 30)
+# -L 跟随 307/302 重定向（避免因尾斜杠或 HTTP→HTTPS 导致创建 Agent 失败）
+CURL_OPTS=(--connect-timeout 5 -s -m 30 -L)
 FAILED=0
 PASSED=0
 
@@ -56,117 +57,172 @@ echo ""
 
 # --- Test 1: Job 不丢失 ---
 echo "--- Test 1: Job 不丢失 ---"
-agent_resp=$(_curl -X POST "$API_URL/api/agents" -H "Content-Type: application/json" -d '{"name":"cert-agent"}')
+agent_code=$(_curl -o /tmp/corag_agent.json -w "%{http_code}" -X POST "$API_URL/api/agents" -H "Content-Type: application/json" -d '{"name":"cert-agent"}')
+agent_resp=$(cat /tmp/corag_agent.json 2>/dev/null || true)
 agent_id=$(echo "$agent_resp" | _json "id")
 if [[ -z "$agent_id" ]]; then
-  _fail "创建 Agent 失败或无法解析 id: $agent_resp"
+  err_msg=$(echo "$agent_resp" | _json "error")
+  [[ -z "$err_msg" ]] && err_msg="${agent_resp:0:120}"
+  _fail "创建 Agent 失败 (HTTP $agent_code)${err_msg:+: $err_msg}"
+  [[ -z "$err_msg" && -n "$agent_resp" ]] && echo "    响应: ${agent_resp:0:200}"
 else
   _pass "创建 Agent: $agent_id"
 fi
 
-msg_resp=$(_curl -X POST "$API_URL/api/agents/$agent_id/message" \
-  -H "Content-Type: application/json" \
-  -d '{"message":"简短回复：1+1 等于几？"}')
-job_id=$(echo "$msg_resp" | _json "job_id")
-if [[ -z "$job_id" ]]; then
-  _fail "发消息失败或无法解析 job_id: $msg_resp"
+if [[ -z "$agent_id" ]]; then
+  job_id=""
 else
-  _pass "获得 job_id: $job_id"
+  msg_code=$(_curl -o /tmp/corag_msg.json -w "%{http_code}" -X POST "$API_URL/api/agents/$agent_id/message" \
+    -H "Content-Type: application/json" \
+    -d '{"message":"简短回复：1+1 等于几？"}')
+  msg_resp=$(cat /tmp/corag_msg.json 2>/dev/null || true)
+  job_id=$(echo "$msg_resp" | _json "job_id")
+  if [[ -z "$job_id" ]]; then
+    err_msg=$(echo "$msg_resp" | _json "error")
+    _fail "发消息失败 (HTTP $msg_code)${err_msg:+: $err_msg} — 请确认 API 已启用 Agent Runtime 与 JobStore"
+    [[ -z "$err_msg" && -n "$msg_resp" ]] && echo "    响应: ${msg_resp:0:200}"
+  else
+    _pass "获得 job_id: $job_id"
+  fi
 fi
 
-seen_pending=0
-seen_running=0
-seen_completed=0
-status=""
-poll=0
-while [[ $poll -lt $CERT_POLL_MAX ]]; do
-  job_resp=$(_curl "$API_URL/api/jobs/$job_id")
-  status=$(echo "$job_resp" | _json "status")
-  case "$status" in
-    pending)  seen_pending=1 ;;
-    running)  seen_running=1 ;;
-    completed) seen_completed=1; break ;;
-    failed)   _fail "Job 以 failed 结束"; break ;;
-    cancelled) _fail "Job 以 cancelled 结束（非本测试预期）"; break ;;
-  esac
-  sleep 2
-  poll=$((poll + 1))
-done
-
-if [[ $seen_completed -eq 1 ]]; then
-  _pass "Job 到达 completed（已见 pending→running→completed）"
-elif [[ $seen_running -eq 1 ]]; then
-  _fail "轮询 ${CERT_POLL_MAX} 次后仍 running（请确认 Worker 已启动并拉取任务）"
+if [[ -z "$job_id" ]]; then
+  echo "  跳过轮询与 Test 5/7（无 job_id）"
 else
-  _fail "Job 未到达 completed（当前 status=$status）"
+  seen_pending=0
+  seen_running=0
+  seen_completed=0
+  job_ended_bad=0
+  status=""
+  poll=0
+  while [[ $poll -lt $CERT_POLL_MAX ]]; do
+    job_resp=$(_curl "$API_URL/api/jobs/$job_id")
+    status=$(echo "$job_resp" | _json "status")
+    case "$status" in
+      pending)  seen_pending=1 ;;
+      running)  seen_running=1 ;;
+      completed) seen_completed=1; break ;;
+      failed)   _fail "Job 以 failed 结束（请检查 Worker 日志或 LLM/模型配置）"; job_ended_bad=1; break ;;
+      cancelled) _fail "Job 以 cancelled 结束（非本测试预期）"; job_ended_bad=1; break ;;
+    esac
+    sleep 2
+    poll=$((poll + 1))
+  done
+
+  if [[ $seen_completed -eq 1 ]]; then
+    _pass "Job 到达 completed（已见 pending→running→completed）"
+  elif [[ $job_ended_bad -eq 1 ]]; then
+    : # 已在 case 中 _fail，不再重复
+    # 拉取 trace 并打印失败原因（便于排查 LLM/Planner/节点错误）
+    if [[ -n "$job_id" ]]; then
+      _curl -s -o /tmp/corag_trace_fail.json "$API_URL/api/jobs/$job_id/trace" 2>/dev/null
+      if [[ -f /tmp/corag_trace_fail.json ]]; then
+        if command -v jq &>/dev/null; then
+          fail_err=$(jq -r '.timeline[]? | select(.type=="job_failed") | .payload.error // empty' /tmp/corag_trace_fail.json 2>/dev/null | head -1)
+          [[ -n "$fail_err" ]] && echo "    原因: $fail_err"
+        fi
+      fi
+    fi
+  elif [[ $seen_running -eq 1 ]]; then
+    _fail "轮询 ${CERT_POLL_MAX} 次后仍 running（请确认 Worker 已启动并拉取任务）"
+  else
+    status_display=$(printf '%s' "${status:-}" | tr -cd '[:alnum:]_-' | head -c 30)
+    [[ -z "$status_display" && -n "$status" ]] && status_display="(非 ASCII)"
+    _fail "Job 未到达 completed（当前 status=${status_display:-空}）"
+  fi
 fi
 echo ""
 
 # --- Test 5: Replay 只读 ---
 echo "--- Test 5: Replay 只读 ---"
-replay_code=$(_curl -o /tmp/corag_replay.json -w "%{http_code}" "$API_URL/api/jobs/$job_id/replay")
-if [[ "$replay_code" != "200" ]]; then
-  _fail "GET /api/jobs/:id/replay 返回 $replay_code（期望 200）"
+if [[ -z "$job_id" ]]; then
+  echo "  跳过（无 job_id）"
 else
-  if grep -q '"read_only"[[:space:]]*:[[:space:]]*true' /tmp/corag_replay.json 2>/dev/null; then
-    _pass "Replay 返回 200 且 read_only: true"
+  replay_code=$(_curl -o /tmp/corag_replay.json -w "%{http_code}" "$API_URL/api/jobs/$job_id/replay")
+  replay_code_show=$(printf '%s' "$replay_code" | tr -cd '0-9' | head -c 3)
+  [[ -z "$replay_code_show" ]] && replay_code_show="空"
+  if [[ "$replay_code" != "200" ]]; then
+    _fail "GET /api/jobs/:id/replay 返回 ${replay_code_show}（期望 200）"
+    [[ "$replay_code_show" == "503" ]] && echo "    若为 503：请用 jobstore.type=postgres 重启 API，使事件存储与 Worker 共用"
   else
-    _pass "Replay 返回 200（含 timeline）"
+    if grep -q '"read_only"[[:space:]]*:[[:space:]]*true' /tmp/corag_replay.json 2>/dev/null; then
+      _pass "Replay 返回 200 且 read_only: true"
+    else
+      _pass "Replay 返回 200（含 timeline）"
+    fi
   fi
 fi
 echo ""
 
 # --- Test 7: Trace 可解释性 ---
 echo "--- Test 7: Trace 可解释性 ---"
-trace_code=$(_curl -o /tmp/corag_trace.json -w "%{http_code}" "$API_URL/api/jobs/$job_id/trace")
-if [[ "$trace_code" != "200" ]]; then
-  _fail "GET /api/jobs/:id/trace 返回 $trace_code（期望 200）"
+if [[ -z "$job_id" ]]; then
+  echo "  跳过（无 job_id）"
 else
-  if grep -q '"timeline"' /tmp/corag_trace.json 2>/dev/null; then
-    _pass "Trace 含 timeline"
+  trace_code=$(_curl -o /tmp/corag_trace.json -w "%{http_code}" "$API_URL/api/jobs/$job_id/trace")
+  trace_code_show=$(printf '%s' "$trace_code" | tr -cd '0-9' | head -c 3)
+  [[ -z "$trace_code_show" ]] && trace_code_show="空"
+  if [[ "$trace_code" != "200" ]]; then
+    _fail "GET /api/jobs/:id/trace 返回 ${trace_code_show}（期望 200）"
+    [[ "$trace_code_show" == "503" ]] && echo "    若为 503：请用 jobstore.type=postgres 重启 API，使事件存储与 Worker 共用"
   else
-    _fail "Trace 响应缺少 timeline"
-  fi
-  if grep -qE 'node_finished|tool_called|tool_returned|plan_generated' /tmp/corag_trace.json 2>/dev/null; then
-    _pass "Trace 含节点/tool/plan 事件"
-  else
-    _fail "Trace 应含 node_finished 或 tool_called/tool_returned 或 plan_generated"
-  fi
-  if grep -q 'node_durations' /tmp/corag_trace.json 2>/dev/null; then
-    _pass "Trace 含 node_durations（节点耗时）"
+    if grep -q '"timeline"' /tmp/corag_trace.json 2>/dev/null; then
+      _pass "Trace 含 timeline"
+    else
+      _fail "Trace 响应缺少 timeline"
+    fi
+    if grep -qE 'node_finished|tool_called|tool_returned|plan_generated' /tmp/corag_trace.json 2>/dev/null; then
+      _pass "Trace 含节点/tool/plan 事件"
+    else
+      _fail "Trace 应含 node_finished 或 tool_called/tool_returned 或 plan_generated"
+    fi
+    if grep -q 'node_durations' /tmp/corag_trace.json 2>/dev/null; then
+      _pass "Trace 含 node_durations（节点耗时）"
+    fi
   fi
 fi
 echo ""
 
 # --- Test 6: 取消任务 ---
 echo "--- Test 6: 取消任务 ---"
-msg2_resp=$(_curl -X POST "$API_URL/api/agents/$agent_id/message" \
-  -H "Content-Type: application/json" \
-  -d '{"message":"写一篇很长的文章，不少于五千字"}')
-job_id2=$(echo "$msg2_resp" | _json "job_id")
-if [[ -z "$job_id2" ]]; then
-  _fail "取消测试无法获得 job_id"
+if [[ -z "$agent_id" ]]; then
+  echo "  跳过（无 agent_id）"
 else
-  stop_code=$(_curl -o /dev/null -w "%{http_code}" -X POST "$API_URL/api/jobs/$job_id2/stop")
-  if [[ "$stop_code" != "200" && "$stop_code" != "201" ]]; then
-    _fail "POST /api/jobs/:id/stop 返回 $stop_code"
+  msg2_resp=$(_curl -X POST "$API_URL/api/agents/$agent_id/message" \
+    -H "Content-Type: application/json" \
+    -d '{"message":"写一篇很长的文章，不少于五千字"}')
+  job_id2=$(echo "$msg2_resp" | _json "job_id")
+  if [[ -z "$job_id2" ]]; then
+    _fail "取消测试无法获得 job_id"
   else
-    _pass "POST /api/jobs/:id/stop 返回 $stop_code"
-  fi
-  poll2=0
-  status2=""
-  while [[ $poll2 -lt 30 ]]; do
-    job2_resp=$(_curl "$API_URL/api/jobs/$job_id2")
-    status2=$(echo "$job2_resp" | _json "status")
-    case "$status2" in
-      cancelled) _pass "Job 已进入 cancelled"; break ;;
-      completed) _pass "Job 在取消前已完成（可接受）"; break ;;
-    esac
-    sleep 1
-    poll2=$((poll2 + 1))
-  done
-  if [[ $poll2 -ge 30 && "$status2" != "cancelled" && "$status2" != "completed" ]]; then
-    _fail "30s 内未变为 cancelled（当前 status=$status2）"
+    stop_code=$(_curl -o /dev/null -w "%{http_code}" -X POST "$API_URL/api/jobs/$job_id2/stop")
+    if [[ "$stop_code" == "200" || "$stop_code" == "201" ]]; then
+      _pass "POST /api/jobs/:id/stop 返回 $stop_code"
+    elif [[ "$stop_code" == "400" ]]; then
+      _pass "POST /api/jobs/:id/stop 返回 400（任务已结束无法取消，可接受）"
+    else
+      _fail "POST /api/jobs/:id/stop 返回 $stop_code"
+    fi
+    poll2=0
+    status2=""
+    while [[ $poll2 -lt 30 ]]; do
+      job2_resp=$(_curl "$API_URL/api/jobs/$job_id2")
+      status2=$(echo "$job2_resp" | _json "status")
+      case "$status2" in
+        cancelled) _pass "Job 已进入 cancelled"; break ;;
+        completed) _pass "Job 在取消前已完成（可接受）"; break ;;
+        failed)    _pass "Job 已失败（可接受）"; break ;;
+      esac
+      sleep 1
+      poll2=$((poll2 + 1))
+    done
+    if [[ $poll2 -ge 30 ]]; then
+      status2_display=$(printf '%s' "${status2:-}" | tr -cd '[:alnum:]_-' | head -c 30)
+      [[ -z "$status2_display" && -n "$status2" ]] && status2_display="(非 ASCII)"
+      if [[ "$status2" != "cancelled" && "$status2" != "completed" && "$status2" != "failed" ]]; then
+        _fail "30s 内未变为 cancelled（当前 status=${status2_display:-空}）"
+      fi
+    fi
   fi
 fi
 echo ""

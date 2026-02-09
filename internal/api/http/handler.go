@@ -839,7 +839,7 @@ func (h *Handler) GetJobReplay(ctx context.Context, c *app.RequestContext) {
 	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取 Replay 失败"})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取 Replay 失败: " + err.Error()})
 		return
 	}
 	timeline := make([]map[string]interface{}, 0, len(events))
@@ -918,7 +918,7 @@ func (h *Handler) GetJobTrace(ctx context.Context, c *app.RequestContext) {
 	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取时间线失败"})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取时间线失败: " + err.Error()})
 		return
 	}
 	timeline := make([]map[string]interface{}, 0, len(events))

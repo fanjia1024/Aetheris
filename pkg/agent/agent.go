@@ -64,7 +64,7 @@ func NewAgent(opts ...Option) *Agent {
 		apiKey := os.Getenv("OPENAI_API_KEY")
 		if apiKey != "" {
 			var err error
-			llmClient, err = llm.NewClient("openai", "gpt-3.5-turbo", apiKey)
+			llmClient, err = llm.NewClient("openai", "gpt-3.5-turbo", apiKey, "")
 			if err != nil {
 				// 忽略错误时内部 Planner 会返回“未配置”提示
 				llmClient = nil

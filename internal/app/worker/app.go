@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/prometheus/common/expfmt"
@@ -194,8 +195,14 @@ func (a *App) Start() error {
 		a.agentJobRunner.Start(ctx)
 	}
 
-	// 可选：Prometheus /metrics 端点
+	// 可选：Prometheus /metrics 端点；多 Worker 时可用 CORAG_WORKER_METRICS_PORT 指定不同端口避免冲突
 	if a.config != nil && a.config.Monitoring.Prometheus.Enable && a.config.Monitoring.Prometheus.Port > 0 {
+		port := a.config.Monitoring.Prometheus.Port
+		if envPort := os.Getenv("CORAG_WORKER_METRICS_PORT"); envPort != "" {
+			if p, err := strconv.Atoi(envPort); err == nil && p > 0 {
+				port = p
+			}
+		}
 		mux := http.NewServeMux()
 		mux.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
 			var buf bytes.Buffer
@@ -206,7 +213,7 @@ func (a *App) Start() error {
 			w.Header().Set("Content-Type", string(expfmt.FmtText))
 			_, _ = w.Write(buf.Bytes())
 		})
-		addr := fmt.Sprintf(":%d", a.config.Monitoring.Prometheus.Port)
+		addr := fmt.Sprintf(":%d", port)
 		go func() {
 			if err := http.ListenAndServe(addr, mux); err != nil && err != http.ErrServerClosed {
 				a.logger.Error("metrics 服务异常", "error", err)
