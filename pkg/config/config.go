@@ -26,20 +26,20 @@ import (
 
 // Config 应用配置结构体
 type Config struct {
-	API      APIConfig      `mapstructure:"api"`
-	Agent    AgentConfig    `mapstructure:"agent"`
-	JobStore JobStoreConfig `mapstructure:"jobstore"`
-	Worker   WorkerConfig   `mapstructure:"worker"`
-	Model    ModelConfig    `mapstructure:"model"`
-	Storage  StorageConfig  `mapstructure:"storage"`
-	Log      LogConfig      `mapstructure:"log"`
+	API        APIConfig        `mapstructure:"api"`
+	Agent      AgentConfig      `mapstructure:"agent"`
+	JobStore   JobStoreConfig   `mapstructure:"jobstore"`
+	Worker     WorkerConfig     `mapstructure:"worker"`
+	Model      ModelConfig      `mapstructure:"model"`
+	Storage    StorageConfig    `mapstructure:"storage"`
+	Log        LogConfig        `mapstructure:"log"`
 	Monitoring MonitoringConfig `mapstructure:"monitoring"`
 }
 
 // JobStoreConfig 任务事件存储配置（事件流 + 租约）
 type JobStoreConfig struct {
-	Type          string `mapstructure:"type"`            // memory | postgres
-	DSN           string `mapstructure:"dsn"`             // Postgres 连接串，type=postgres 时必填
+	Type          string `mapstructure:"type"`           // memory | postgres
+	DSN           string `mapstructure:"dsn"`            // Postgres 连接串，type=postgres 时必填
 	LeaseDuration string `mapstructure:"lease_duration"` // 租约时长，如 "30s"，空则默认 30s
 }
 
@@ -59,12 +59,12 @@ type JobSchedulerConfig struct {
 
 // APIConfig API 服务配置
 type APIConfig struct {
-	Port      int          `mapstructure:"port"`
-	Host      string       `mapstructure:"host"`
-	Timeout   string       `mapstructure:"timeout"`
-	CORS      CORSConfig   `mapstructure:"cors"`
+	Port       int              `mapstructure:"port"`
+	Host       string           `mapstructure:"host"`
+	Timeout    string           `mapstructure:"timeout"`
+	CORS       CORSConfig       `mapstructure:"cors"`
 	Middleware MiddlewareConfig `mapstructure:"middleware"`
-	Grpc      GrpcConfig   `mapstructure:"grpc"`
+	Grpc       GrpcConfig       `mapstructure:"grpc"`
 }
 
 // GrpcConfig gRPC 服务配置
@@ -75,7 +75,7 @@ type GrpcConfig struct {
 
 // CORSConfig CORS 配置
 type CORSConfig struct {
-	Enable      bool     `mapstructure:"enable"`
+	Enable       bool     `mapstructure:"enable"`
 	AllowOrigins []string `mapstructure:"allow_origins"`
 }
 
@@ -85,19 +85,19 @@ type MiddlewareConfig struct {
 	RateLimit     bool   `mapstructure:"rate_limit"`
 	RateLimitRPS  int    `mapstructure:"rate_limit_rps"`
 	JWTKey        string `mapstructure:"jwt_key"`
-	JWTTimeout    string `mapstructure:"jwt_timeout"`    // 如 "1h"
+	JWTTimeout    string `mapstructure:"jwt_timeout"`     // 如 "1h"
 	JWTMaxRefresh string `mapstructure:"jwt_max_refresh"` // 如 "1h"
 }
 
 // WorkerConfig Worker 服务配置
 type WorkerConfig struct {
-	Concurrency   int    `mapstructure:"concurrency"`
-	QueueSize     int    `mapstructure:"queue_size"`
-	RetryCount    int    `mapstructure:"retry_count"`
-	RetryDelay    string `mapstructure:"retry_delay"`
-	Timeout       string `mapstructure:"timeout"`
-	PollInterval  string `mapstructure:"poll_interval"` // Agent Job Claim 轮询间隔，如 "2s"
-	MaxAttempts   int    `mapstructure:"max_attempts"`  // Agent Job 最大执行次数（含首次），达此后标记 Failed 不再调度；<=0 时默认 3
+	Concurrency  int    `mapstructure:"concurrency"`
+	QueueSize    int    `mapstructure:"queue_size"`
+	RetryCount   int    `mapstructure:"retry_count"`
+	RetryDelay   string `mapstructure:"retry_delay"`
+	Timeout      string `mapstructure:"timeout"`
+	PollInterval string `mapstructure:"poll_interval"` // Agent Job Claim 轮询间隔，如 "2s"
+	MaxAttempts  int    `mapstructure:"max_attempts"`  // Agent Job 最大执行次数（含首次），达此后标记 Failed 不再调度；<=0 时默认 3
 }
 
 // ModelConfig 模型配置
@@ -125,19 +125,19 @@ type VisionConfig struct {
 
 // ProviderConfig 模型提供商配置
 type ProviderConfig struct {
-	APIKey  string            `mapstructure:"api_key"`
-	BaseURL string            `mapstructure:"base_url"`
+	APIKey  string               `mapstructure:"api_key"`
+	BaseURL string               `mapstructure:"base_url"`
 	Models  map[string]ModelInfo `mapstructure:"models"`
 }
 
 // ModelInfo 模型信息
 type ModelInfo struct {
-	Name           string  `mapstructure:"name"`
-	ContextWindow  int     `mapstructure:"context_window"`
-	Temperature    float64 `mapstructure:"temperature"`
-	Dimension      int     `mapstructure:"dimension"`
-	InputLimit     int     `mapstructure:"input_limit"`
-	MaxTokens      int     `mapstructure:"max_tokens"`
+	Name          string  `mapstructure:"name"`
+	ContextWindow int     `mapstructure:"context_window"`
+	Temperature   float64 `mapstructure:"temperature"`
+	Dimension     int     `mapstructure:"dimension"`
+	InputLimit    int     `mapstructure:"input_limit"`
+	MaxTokens     int     `mapstructure:"max_tokens"`
 }
 
 // DefaultsConfig 默认模型配置

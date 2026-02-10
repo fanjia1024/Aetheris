@@ -172,9 +172,9 @@ func (s *StructuralSplitter) splitLongParagraph(paragraph string, startIndex, ch
 // createChunk 创建切片
 func (s *StructuralSplitter) createChunk(content string, index int) common.Chunk {
 	return common.Chunk{
-		ID:         uuid.New().String(),
-		Content:    content,
-		Metadata:   map[string]interface{}{
+		ID:      uuid.New().String(),
+		Content: content,
+		Metadata: map[string]interface{}{
 			"splitter": "structural",
 			"type":     "paragraph",
 		},

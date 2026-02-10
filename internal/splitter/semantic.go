@@ -161,9 +161,9 @@ func (s *SemanticSplitter) mergeBySemantics(sentences []string, chunkSize, chunk
 // createChunk 创建切片
 func (s *SemanticSplitter) createChunk(content string, index int) common.Chunk {
 	return common.Chunk{
-		ID:         uuid.New().String(),
-		Content:    content,
-		Metadata:   map[string]interface{}{
+		ID:      uuid.New().String(),
+		Content: content,
+		Metadata: map[string]interface{}{
 			"splitter": "semantic",
 			"type":     "semantic",
 		},

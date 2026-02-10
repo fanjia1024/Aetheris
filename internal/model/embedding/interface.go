@@ -20,8 +20,8 @@ import (
 
 // Embedder 向量化接口（占位：后续由 adapter 实现）
 type Embedder struct {
-	client   interface{}
-	model    string
+	client    interface{}
+	model     string
 	dimension int
 }
 

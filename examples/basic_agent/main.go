@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino-ext/components/model/openai"
+	"github.com/cloudwego/eino/adk"
 )
 
 func main() {

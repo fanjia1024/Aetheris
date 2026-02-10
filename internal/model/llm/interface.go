@@ -40,17 +40,17 @@ type Client interface {
 
 // GenerateOptions 生成选项
 type GenerateOptions struct {
-	Temperature      float64 `json:"temperature"`
-	MaxTokens        int     `json:"max_tokens"`
-	TopP             float64 `json:"top_p"`
-	FrequencyPenalty float64 `json:"frequency_penalty"`
-	PresencePenalty  float64 `json:"presence_penalty"`
+	Temperature      float64  `json:"temperature"`
+	MaxTokens        int      `json:"max_tokens"`
+	TopP             float64  `json:"top_p"`
+	FrequencyPenalty float64  `json:"frequency_penalty"`
+	PresencePenalty  float64  `json:"presence_penalty"`
 	Stop             []string `json:"stop"`
 }
 
 // Message 聊天消息
 type Message struct {
-	Role    string `json:"role"`    // system, user, assistant
+	Role    string `json:"role"` // system, user, assistant
 	Content string `json:"content"`
 }
 

@@ -21,7 +21,7 @@ import (
 
 // MemoryItem 单条记忆：类型、内容、时间等
 type MemoryItem struct {
-	Type     string         `json:"type"`     // working / episodic / semantic
+	Type     string         `json:"type"` // working / episodic / semantic
 	Content  string         `json:"content"`
 	Metadata map[string]any `json:"metadata,omitempty"`
 	At       time.Time      `json:"at"`

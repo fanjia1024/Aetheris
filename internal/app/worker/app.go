@@ -29,8 +29,8 @@ import (
 	"rag-platform/internal/agent/job"
 	"rag-platform/internal/agent/planner"
 	"rag-platform/internal/agent/runtime"
-	"rag-platform/internal/agent/tools"
 	agentexec "rag-platform/internal/agent/runtime/executor"
+	"rag-platform/internal/agent/tools"
 	"rag-platform/internal/app"
 	"rag-platform/internal/app/api"
 	"rag-platform/internal/runtime/eino"
@@ -44,14 +44,14 @@ import (
 
 // App Worker 应用（Pipeline 由 eino 调度；JobStore=postgres 时拉取 Agent Job 执行）
 type App struct {
-	config          *config.Config
-	logger          *log.Logger
-	engine          *eino.Engine
-	metadataStore   metadata.Store
-	vectorStore     vector.Store
-	shutdown        chan struct{}
-	agentJobRunner  *AgentJobRunner
-	agentJobCancel  context.CancelFunc
+	config         *config.Config
+	logger         *log.Logger
+	engine         *eino.Engine
+	metadataStore  metadata.Store
+	vectorStore    vector.Store
+	shutdown       chan struct{}
+	agentJobRunner *AgentJobRunner
+	agentJobCancel context.CancelFunc
 }
 
 // NewApp 创建新的 Worker 应用
@@ -287,4 +287,3 @@ func (a *App) startWorkerQueue() error {
 	// 暂无实际队列实现时仅返回成功
 	return nil
 }
-

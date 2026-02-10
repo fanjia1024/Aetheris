@@ -27,11 +27,11 @@ import (
 
 // DocumentIndexer 文档索引器
 type DocumentIndexer struct {
-	name           string
-	vectorStore    vector.Store
-	metadataStore  metadata.Store
-	concurrency    int
-	batchSize      int
+	name          string
+	vectorStore   vector.Store
+	metadataStore metadata.Store
+	concurrency   int
+	batchSize     int
 }
 
 // NewDocumentIndexer 创建新的文档索引器

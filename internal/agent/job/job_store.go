@@ -42,16 +42,16 @@ type JobStore interface {
 
 // JobStoreMem 内存实现：map + Pending 队列，Create 时入队，ClaimNextPending 取队首并置 Running
 type JobStoreMem struct {
-	mu     sync.Mutex
-	byID   map[string]*Job
+	mu      sync.Mutex
+	byID    map[string]*Job
 	pending []string
-	cond   *sync.Cond
+	cond    *sync.Cond
 }
 
 // NewJobStoreMem 创建内存 JobStore
 func NewJobStoreMem() *JobStoreMem {
 	j := &JobStoreMem{
-		byID:   make(map[string]*Job),
+		byID:    make(map[string]*Job),
 		pending: nil,
 	}
 	j.cond = sync.NewCond(&j.mu)

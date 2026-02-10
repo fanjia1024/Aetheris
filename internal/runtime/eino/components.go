@@ -20,7 +20,7 @@ import "context"
 type Chunk struct {
 	ID         string                 `json:"id"`
 	Content    string                 `json:"content"`
-	DocumentID string                `json:"document_id"`
+	DocumentID string                 `json:"document_id"`
 	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 

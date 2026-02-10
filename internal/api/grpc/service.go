@@ -24,8 +24,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	appcore "rag-platform/internal/app"
 	"rag-platform/internal/api/grpc/pb"
+	appcore "rag-platform/internal/app"
 	"rag-platform/internal/pipeline/common"
 	"rag-platform/internal/runtime/eino"
 )
@@ -34,14 +34,14 @@ import (
 type Server struct {
 	pb.UnimplementedDocumentServiceServer
 	pb.UnimplementedQueryServiceServer
-	engine    *eino.Engine
+	engine     *eino.Engine
 	docService appcore.DocumentService
 }
 
 // NewServer 根据注入的 Engine 与 DocumentService 创建 gRPC Server
 func NewServer(engine *eino.Engine, docService appcore.DocumentService) *Server {
 	return &Server{
-		engine:    engine,
+		engine:     engine,
 		docService: docService,
 	}
 }

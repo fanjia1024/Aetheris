@@ -23,8 +23,8 @@ import (
 
 // DocumentParser 文档解析器
 type DocumentParser struct {
-	name        string
-	parsers     map[string]Parser
+	name    string
+	parsers map[string]Parser
 }
 
 // Parser 解析器接口
@@ -155,7 +155,7 @@ func (p *DocumentParser) AddParser(contentType string, parser Parser) {
 }
 
 // TextParser 文本解析器
-type TextParser struct {}
+type TextParser struct{}
 
 // Parse 解析文本
 func (p *TextParser) Parse(content string, metadata map[string]interface{}) (string, error) {
@@ -169,7 +169,7 @@ func (p *TextParser) Supports(contentType string) bool {
 }
 
 // MarkdownParser Markdown 解析器
-type MarkdownParser struct {}
+type MarkdownParser struct{}
 
 // Parse 解析 Markdown
 func (p *MarkdownParser) Parse(content string, metadata map[string]interface{}) (string, error) {
@@ -184,7 +184,7 @@ func (p *MarkdownParser) Supports(contentType string) bool {
 }
 
 // HTMLParser HTML 解析器
-type HTMLParser struct {}
+type HTMLParser struct{}
 
 // Parse 解析 HTML
 func (p *HTMLParser) Parse(content string, metadata map[string]interface{}) (string, error) {
@@ -199,7 +199,7 @@ func (p *HTMLParser) Supports(contentType string) bool {
 }
 
 // JSONParser JSON 解析器
-type JSONParser struct {}
+type JSONParser struct{}
 
 // Parse 解析 JSON
 func (p *JSONParser) Parse(content string, metadata map[string]interface{}) (string, error) {

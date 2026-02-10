@@ -95,10 +95,10 @@ func NewAgent(id, name string, session *Session, memory MemoryProvider, planner 
 		Name:      name,
 		CreatedAt: now,
 		Session:   session,
-		Memory:   memory,
-		Planner:  planner,
-		Tools:    tools,
-		Status:   StatusIdle,
+		Memory:    memory,
+		Planner:   planner,
+		Tools:     tools,
+		Status:    StatusIdle,
 	}
 }
 

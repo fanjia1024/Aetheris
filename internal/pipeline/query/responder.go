@@ -81,11 +81,11 @@ func (r *Responder) ProcessQuery(query *common.Query) (*common.Query, error) {
 
 // Response 响应结构体
 type Response struct {
-	Answer      string            `json:"answer"`
-	References  []string          `json:"references"`
+	Answer      string                 `json:"answer"`
+	References  []string               `json:"references"`
 	Metadata    map[string]interface{} `json:"metadata"`
-	ProcessTime time.Duration     `json:"process_time"`
-	Timestamp   time.Time         `json:"timestamp"`
+	ProcessTime time.Duration          `json:"process_time"`
+	Timestamp   time.Time              `json:"timestamp"`
 }
 
 // buildResponse 构建响应

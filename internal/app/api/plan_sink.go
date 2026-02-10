@@ -43,11 +43,11 @@ func (s *PlanGeneratedSinkImpl) AppendPlanGenerated(ctx context.Context, jobID s
 	}
 	stepIndex := ver + 1
 	payload, err := json.Marshal(map[string]interface{}{
-		"task_graph":      json.RawMessage(taskGraphJSON),
-		"goal":            goal,
-		"trace_span_id":   "plan",
-		"parent_span_id":  "root",
-		"step_index":      stepIndex,
+		"task_graph":     json.RawMessage(taskGraphJSON),
+		"goal":           goal,
+		"trace_span_id":  "plan",
+		"parent_span_id": "root",
+		"step_index":     stepIndex,
 	})
 	if err != nil {
 		return err

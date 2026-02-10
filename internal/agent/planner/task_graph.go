@@ -59,8 +59,8 @@ func (g *TaskGraph) Unmarshal(data []byte) error {
 
 // TaskResult 单节点执行结果（供 Executor 写回）
 type TaskResult struct {
-	NodeID  string
-	Output  string
-	Err     string
-	At      time.Time
+	NodeID string
+	Output string
+	Err    string
+	At     time.Time
 }

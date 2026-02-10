@@ -40,10 +40,10 @@ type Store interface {
 
 // Index 向量索引
 type Index struct {
-	Name      string `json:"name"`      // 索引名称
-	Dimension int    `json:"dimension"` // 向量维度
-	Distance  string `json:"distance"`  // 距离度量方式
-	Metadata  map[string]string `json:"metadata"` // 索引元数据
+	Name      string            `json:"name"`      // 索引名称
+	Dimension int               `json:"dimension"` // 向量维度
+	Distance  string            `json:"distance"`  // 距离度量方式
+	Metadata  map[string]string `json:"metadata"`  // 索引元数据
 }
 
 // Vector 向量数据
@@ -55,16 +55,16 @@ type Vector struct {
 
 // SearchOptions 搜索选项
 type SearchOptions struct {
-	TopK         int               `json:"top_k"`         // 返回前 K 个结果
-	Filter       map[string]string `json:"filter"`        // 元数据过滤
-	Threshold    float64           `json:"threshold"`     // 相似度阈值
-	IncludeVectors bool             `json:"include_vectors"` // 是否包含向量值
+	TopK           int               `json:"top_k"`           // 返回前 K 个结果
+	Filter         map[string]string `json:"filter"`          // 元数据过滤
+	Threshold      float64           `json:"threshold"`       // 相似度阈值
+	IncludeVectors bool              `json:"include_vectors"` // 是否包含向量值
 }
 
 // SearchResult 搜索结果
 type SearchResult struct {
-	ID       string            `json:"id"`       // 向量唯一标识
-	Score    float64           `json:"score"`     // 相似度得分
-	Metadata map[string]string `json:"metadata"` // 向量元数据
+	ID       string            `json:"id"`               // 向量唯一标识
+	Score    float64           `json:"score"`            // 相似度得分
+	Metadata map[string]string `json:"metadata"`         // 向量元数据
 	Values   []float64         `json:"values,omitempty"` // 向量值（可选）
 }

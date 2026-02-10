@@ -43,7 +43,7 @@ func TestTokenSplitter_Split_WithOptions(t *testing.T) {
 	s := NewTokenSplitter()
 	// 3 words per chunk max -> multiple chunks for 10 words
 	options := map[string]interface{}{
-		"max_tokens":   3,
+		"max_tokens":    3,
 		"chunk_overlap": 1,
 	}
 	content := "a b c d e f g h i j"

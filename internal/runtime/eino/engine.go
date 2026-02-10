@@ -31,11 +31,11 @@ import (
 
 // Engine eino 引擎实例
 type Engine struct {
-	runners   map[string]*adk.Runner
-	workflows  map[string]WorkflowExecutor
-	config     *config.Config
-	logger     *log.Logger
-	mu         sync.RWMutex
+	runners     map[string]*adk.Runner
+	workflows   map[string]WorkflowExecutor
+	config      *config.Config
+	logger      *log.Logger
+	mu          sync.RWMutex
 	workflowsMu sync.RWMutex
 
 	// 可选组件（由 app 注入后工具链对接真实实现）
@@ -53,9 +53,9 @@ func NewEngine(cfg *config.Config, logger *log.Logger) (*Engine, error) {
 	// 创建引擎实例
 	engine := &Engine{
 		runners:   make(map[string]*adk.Runner),
-		workflows:  make(map[string]WorkflowExecutor),
-		config:     cfg,
-		logger:     logger,
+		workflows: make(map[string]WorkflowExecutor),
+		config:    cfg,
+		logger:    logger,
 	}
 
 	// 启动引擎

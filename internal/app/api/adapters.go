@@ -31,9 +31,9 @@ type Embedder interface {
 
 // retrieverAdapter 将 query.Retriever + Embedder 适配为 eino.Retriever
 type retrieverAdapter struct {
-	embedder     Embedder
-	vectorStore  vector.Store
-	scoreThresh  float64
+	embedder    Embedder
+	vectorStore vector.Store
+	scoreThresh float64
 }
 
 // NewRetrieverAdapter 创建检索适配器（每次 Retrieve 使用传入的 collection/topK 创建临时 Retriever）

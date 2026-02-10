@@ -22,6 +22,7 @@ import (
 
 // agentContextKey 用于在 context 中传递 *runtime.Agent（ToolExec 等可从 ctx 取 agent）
 type agentContextKey struct{}
+
 // jobIDContextKey 用于在 context 中传递 jobID，供 Tool 节点写入 ToolCalled/ToolReturned
 type jobIDContextKey struct{}
 

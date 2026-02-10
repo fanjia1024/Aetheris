@@ -219,7 +219,7 @@ func (e *queryWorkflowExecutor) Execute(ctx context.Context, params map[string]i
 
 	// Generator
 	genInput := map[string]interface{}{
-		"query":           q,
+		"query":            q,
 		"retrieval_result": retrievalResult,
 	}
 	out, err = e.generator.Execute(pipeCtx, genInput)
@@ -232,10 +232,10 @@ func (e *queryWorkflowExecutor) Execute(ctx context.Context, params map[string]i
 	}
 
 	return map[string]interface{}{
-		"status":   "success",
-		"query_id": q.ID,
-		"answer":   genResult.Answer,
-		"references": genResult.References,
+		"status":          "success",
+		"query_id":        q.ID,
+		"answer":          genResult.Answer,
+		"references":      genResult.References,
 		"process_time_ms": genResult.ProcessTime.Milliseconds(),
 	}, nil
 }

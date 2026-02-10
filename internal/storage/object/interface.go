@@ -39,8 +39,8 @@ type Store interface {
 
 // ObjectInfo 对象信息
 type ObjectInfo struct {
-	Path     string            `json:"path"`     // 对象路径
-	Size     int64             `json:"size"`     // 对象大小
-	Metadata map[string]string `json:"metadata"` // 对象元数据
-	CreatedAt int64            `json:"created_at"` // 创建时间
+	Path      string            `json:"path"`       // 对象路径
+	Size      int64             `json:"size"`       // 对象大小
+	Metadata  map[string]string `json:"metadata"`   // 对象元数据
+	CreatedAt int64             `json:"created_at"` // 创建时间
 }

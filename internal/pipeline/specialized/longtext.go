@@ -34,9 +34,9 @@ const (
 
 // LongTextPipeline 长文本/长 PDF 专用 Pipeline：分段后输出 []*common.Document 供 ingest 入库
 type LongTextPipeline struct {
-	name             string
-	maxSegmentChars  int
-	overlapChars     int
+	name            string
+	maxSegmentChars int
+	overlapChars    int
 }
 
 // NewLongTextPipeline 创建长文本 Pipeline
@@ -106,8 +106,8 @@ func (p *LongTextPipeline) ProcessSpecialized(input interface{}) (interface{}, e
 			ID:      uuid.New().String(),
 			Content: seg,
 			Metadata: map[string]interface{}{
-				"segment_index": i + 1,
-				"total_segments": len(segments),
+				"segment_index":     i + 1,
+				"total_segments":    len(segments),
 				"longtext_pipeline": p.name,
 			},
 			CreatedAt: time.Now(),

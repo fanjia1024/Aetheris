@@ -19,11 +19,11 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/compose"
-	"github.com/cloudwego/eino-ext/components/model/openai"
 )
 
 func main() {

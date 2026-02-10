@@ -45,10 +45,10 @@ func (s *nodeEventSinkImpl) AppendNodeStarted(ctx context.Context, jobID string,
 	}
 	stepIndex := ver + 1
 	payload, err := json.Marshal(map[string]interface{}{
-		"node_id":         nodeID,
-		"trace_span_id":   nodeID,
-		"parent_span_id":  "plan",
-		"step_index":      stepIndex,
+		"node_id":        nodeID,
+		"trace_span_id":  nodeID,
+		"parent_span_id": "plan",
+		"step_index":     stepIndex,
 	})
 	if err != nil {
 		return err
@@ -70,7 +70,7 @@ func (s *nodeEventSinkImpl) AppendNodeFinished(ctx context.Context, jobID string
 	}
 	stepIndex := ver + 1
 	payload, err := json.Marshal(map[string]interface{}{
-		"node_id":          nodeID,
+		"node_id":         nodeID,
 		"payload_results": json.RawMessage(payloadResults),
 		"trace_span_id":   nodeID,
 		"parent_span_id":  "plan",
@@ -97,12 +97,12 @@ func (s *nodeEventSinkImpl) AppendToolCalled(ctx context.Context, jobID string, 
 	stepIndex := ver + 1
 	traceSpanID := nodeID + ":tool:" + toolName + ":" + strconv.Itoa(stepIndex)
 	payload, err := json.Marshal(map[string]interface{}{
-		"node_id":         nodeID,
-		"tool_name":       toolName,
-		"input":           json.RawMessage(input),
-		"trace_span_id":   traceSpanID,
-		"parent_span_id":  nodeID,
-		"step_index":      stepIndex,
+		"node_id":        nodeID,
+		"tool_name":      toolName,
+		"input":          json.RawMessage(input),
+		"trace_span_id":  traceSpanID,
+		"parent_span_id": nodeID,
+		"step_index":     stepIndex,
 	})
 	if err != nil {
 		return err
@@ -149,11 +149,11 @@ func (s *nodeEventSinkImpl) AppendCommandEmitted(ctx context.Context, jobID stri
 	}
 	stepIndex := ver + 1
 	payload, err := json.Marshal(map[string]interface{}{
-		"node_id":       nodeID,
-		"command_id":   commandID,
-		"kind":         kind,
-		"input":        json.RawMessage(input),
-		"step_index":   stepIndex,
+		"node_id":    nodeID,
+		"command_id": commandID,
+		"kind":       kind,
+		"input":      json.RawMessage(input),
+		"step_index": stepIndex,
 	})
 	if err != nil {
 		return err
@@ -175,10 +175,10 @@ func (s *nodeEventSinkImpl) AppendCommandCommitted(ctx context.Context, jobID st
 	}
 	stepIndex := ver + 1
 	payload, err := json.Marshal(map[string]interface{}{
-		"node_id":     nodeID,
-		"command_id":  commandID,
-		"result":      json.RawMessage(result),
-		"step_index":  stepIndex,
+		"node_id":    nodeID,
+		"command_id": commandID,
+		"result":     json.RawMessage(result),
+		"step_index": stepIndex,
 	})
 	if err != nil {
 		return err

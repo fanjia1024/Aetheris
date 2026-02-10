@@ -31,9 +31,9 @@ type MemoryStore struct {
 
 // object 内存对象实现
 type object struct {
-	path     string
-	data     []byte
-	metadata map[string]string
+	path      string
+	data      []byte
+	metadata  map[string]string
 	createdAt int64
 }
 
@@ -62,9 +62,9 @@ func (s *MemoryStore) Put(ctx context.Context, path string, data io.Reader, size
 
 	// 存储对象
 	s.objects[path] = &object{
-		path:     path,
-		data:     buffer.Bytes(),
-		metadata: metadata,
+		path:      path,
+		data:      buffer.Bytes(),
+		metadata:  metadata,
 		createdAt: time.Now().Unix(),
 	}
 
@@ -108,9 +108,9 @@ func (s *MemoryStore) List(ctx context.Context, prefix string) ([]*ObjectInfo, e
 	for path, obj := range s.objects {
 		if prefix == "" || len(path) >= len(prefix) && path[:len(prefix)] == prefix {
 			results = append(results, &ObjectInfo{
-				Path:     path,
-				Size:     int64(len(obj.data)),
-				Metadata: obj.metadata,
+				Path:      path,
+				Size:      int64(len(obj.data)),
+				Metadata:  obj.metadata,
 				CreatedAt: obj.createdAt,
 			})
 		}

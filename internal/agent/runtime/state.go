@@ -109,7 +109,7 @@ func ApplyAgentState(s *Session, state *AgentState) {
 
 // agentStateStoreMem 内存实现
 type agentStateStoreMem struct {
-	mu   sync.RWMutex
+	mu    sync.RWMutex
 	byKey map[string]*AgentState // key = agentID + "\x00" + sessionID
 }
 

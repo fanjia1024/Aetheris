@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"rag-platform/internal/pipeline/common"
 	"rag-platform/internal/model/llm"
+	"rag-platform/internal/pipeline/common"
 )
 
 // Generator 生成器
@@ -127,9 +127,9 @@ func (g *Generator) generate(query *common.Query, result *common.RetrievalResult
 
 	// 调用 LLM 生成回答
 	response, err := g.llmClient.Generate(prompt, llm.GenerateOptions{
-		Temperature:    g.temperature,
-		MaxTokens:      1024,
-		TopP:           0.9,
+		Temperature:      g.temperature,
+		MaxTokens:        1024,
+		TopP:             0.9,
 		FrequencyPenalty: 0.0,
 		PresencePenalty:  0.0,
 	})

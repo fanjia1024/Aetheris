@@ -69,10 +69,10 @@ func (c *ClaudeClient) Generate(prompt string, options GenerateOptions) (string,
 func (c *ClaudeClient) GenerateWithContext(ctx context.Context, prompt string, options GenerateOptions) (string, error) {
 	// 构建请求
 	request := map[string]interface{}{
-		"model":       c.model,
-		"messages":    []map[string]string{{"role": "user", "content": prompt}},
-		"temperature": options.Temperature,
-		"max_tokens":  options.MaxTokens,
+		"model":          c.model,
+		"messages":       []map[string]string{{"role": "user", "content": prompt}},
+		"temperature":    options.Temperature,
+		"max_tokens":     options.MaxTokens,
 		"stop_sequences": options.Stop,
 	}
 

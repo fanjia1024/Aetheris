@@ -91,8 +91,8 @@ func NewAgent(opts ...Option) *Agent {
 	inner := coreagent.New(pl, exec, registry, coreagent.WithMaxSteps(cfg.maxSteps))
 	return &Agent{
 		registry:    registry,
-		inner:      inner,
-		sessions:   make(map[string]*session.Session),
+		inner:       inner,
+		sessions:    make(map[string]*session.Session),
 		defaultSess: session.New(""),
 	}
 }

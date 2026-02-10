@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"sync"
 
-	"rag-platform/internal/pipeline/common"
 	"rag-platform/internal/model/embedding"
+	"rag-platform/internal/pipeline/common"
 )
 
 // DocumentEmbedding 文档向量化器
@@ -142,7 +142,7 @@ func (e *DocumentEmbedding) embedChunks(doc *common.Document) error {
 				}
 				chunk.Metadata["embedded"] = true
 			}
-			}()
+		}()
 	}
 
 	// 分发任务

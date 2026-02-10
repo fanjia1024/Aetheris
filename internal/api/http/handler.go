@@ -31,8 +31,8 @@ import (
 	"rag-platform/internal/agent"
 	"rag-platform/internal/agent/job"
 	"rag-platform/internal/agent/planner"
-	"rag-platform/internal/agent/tools"
 	agentruntime "rag-platform/internal/agent/runtime"
+	"rag-platform/internal/agent/tools"
 	appcore "rag-platform/internal/app"
 	"rag-platform/internal/model/llm"
 	"rag-platform/internal/pipeline/common"
@@ -66,9 +66,9 @@ type Handler struct {
 	sessionManager SessionManager
 
 	// v1 Agent Runtime
-	agentManager   *agentruntime.Manager
-	agentScheduler *agentruntime.Scheduler
-	agentCreator   AgentCreator
+	agentManager    *agentruntime.Manager
+	agentScheduler  *agentruntime.Scheduler
+	agentCreator    AgentCreator
 	jobStore        job.JobStore
 	jobEventStore   jobstore.JobStore
 	toolsRegistry   *tools.Registry
@@ -354,7 +354,7 @@ func (h *Handler) BatchQuery(ctx context.Context, c *app.RequestContext) {
 	}
 
 	c.JSON(consts.StatusOK, map[string]interface{}{
-		"status": "success",
+		"status":  "success",
 		"results": results,
 		"total":   len(results),
 	})
@@ -363,12 +363,12 @@ func (h *Handler) BatchQuery(ctx context.Context, c *app.RequestContext) {
 // SystemStatus 系统状态
 func (h *Handler) SystemStatus(ctx context.Context, c *app.RequestContext) {
 	status := map[string]interface{}{
-		"api_service":    "running",
-		"agent_service":  "running",
-		"index_service":  "running",
-		"workflows":      h.engine.GetWorkflows(),
-		"agents":         h.engine.GetAgents(),
-		"timestamp":      time.Now(),
+		"api_service":   "running",
+		"agent_service": "running",
+		"index_service": "running",
+		"workflows":     h.engine.GetWorkflows(),
+		"agents":        h.engine.GetAgents(),
+		"timestamp":     time.Now(),
 	}
 
 	c.JSON(consts.StatusOK, status)
@@ -413,8 +413,8 @@ func (h *Handler) SystemWorkers(ctx context.Context, c *app.RequestContext) {
 
 // AgentRunRequest POST /api/agent/run 请求体
 type AgentRunRequest struct {
-	Query     string         `json:"query" binding:"required"`
-	SessionID string         `json:"session_id"`
+	Query     string        `json:"query" binding:"required"`
+	SessionID string        `json:"session_id"`
 	History   []llm.Message `json:"history"`
 }
 
@@ -626,8 +626,8 @@ func (h *Handler) AgentState(ctx context.Context, c *app.RequestContext) {
 	}
 	sess := agent.Session
 	c.JSON(consts.StatusOK, map[string]interface{}{
-		"agent_id":         agent.ID,
-		"status":           agent.GetStatus().String(),
+		"agent_id":        agent.ID,
+		"status":          agent.GetStatus().String(),
 		"current_task":    sess.GetCurrentTask(),
 		"last_checkpoint": sess.GetLastCheckpoint(),
 		"updated_at":      sess.GetUpdatedAt(),
@@ -974,7 +974,7 @@ func (h *Handler) GetJobTrace(ctx context.Context, c *app.RequestContext) {
 					if startAt, ok := nodeStarted[nodeID]; ok {
 						durMs := e.CreatedAt.Sub(startAt).Milliseconds()
 						nodeDurations = append(nodeDurations, map[string]interface{}{
-							"node_id":      nodeID,
+							"node_id":     nodeID,
 							"started_at":  startAt,
 							"finished_at": e.CreatedAt,
 							"duration_ms": durMs,
@@ -987,10 +987,10 @@ func (h *Handler) GetJobTrace(ctx context.Context, c *app.RequestContext) {
 	}
 	executionTree := BuildExecutionTree(events)
 	c.JSON(consts.StatusOK, map[string]interface{}{
-		"job_id":          jobID,
-		"timeline":        timeline,
-		"node_durations":  nodeDurations,
-		"execution_tree":  executionTree,
+		"job_id":         jobID,
+		"timeline":       timeline,
+		"node_durations": nodeDurations,
+		"execution_tree": executionTree,
 	})
 }
 
@@ -1029,7 +1029,7 @@ func (h *Handler) GetJobNode(ctx context.Context, c *app.RequestContext) {
 		})
 	}
 	c.JSON(consts.StatusOK, map[string]interface{}{
-		"job_id": jobID,
+		"job_id":  jobID,
 		"node_id": nodeID,
 		"events":  nodeEvents,
 	})

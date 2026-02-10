@@ -23,15 +23,15 @@ import (
 
 // Message Agent 思考轨迹（working memory 的一条）
 type Message struct {
-	Role    string    `json:"role"`    // user / assistant / tool / system
+	Role    string    `json:"role"` // user / assistant / tool / system
 	Content string    `json:"content"`
 	Time    time.Time `json:"time"`
 }
 
 // Session v1：归属某 Agent，承载当前对话与任务状态
 type Session struct {
-	ID        string
-	AgentID   string
+	ID      string
+	AgentID string
 
 	Messages   []Message
 	Variables  map[string]any

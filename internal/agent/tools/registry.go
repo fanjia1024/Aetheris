@@ -60,7 +60,7 @@ func (r *Registry) List() []Tool {
 type ToolSchemaForLLM struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
-	Parameters  map[string]any  `json:"parameters"`
+	Parameters  map[string]any `json:"parameters"`
 }
 
 // ToolManifest 工具能力声明（可发现、可版本化）

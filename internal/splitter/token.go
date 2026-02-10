@@ -109,9 +109,9 @@ func (s *TokenSplitter) detokenize(tokens []string) string {
 // createChunk 创建切片
 func (s *TokenSplitter) createChunk(content string, index int) common.Chunk {
 	return common.Chunk{
-		ID:         uuid.New().String(),
-		Content:    content,
-		Metadata:   map[string]interface{}{
+		ID:      uuid.New().String(),
+		Content: content,
+		Metadata: map[string]interface{}{
 			"splitter": "token",
 			"type":     "token",
 		},

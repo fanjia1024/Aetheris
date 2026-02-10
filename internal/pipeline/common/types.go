@@ -21,13 +21,13 @@ import (
 
 // PipelineContext Pipeline 执行上下文
 type PipelineContext struct {
-	Context    context.Context
-	ID         string
-	Metadata   map[string]interface{}
-	StartTime  time.Time
-	EndTime    time.Time
-	Status     string
-	Error      error
+	Context   context.Context
+	ID        string
+	Metadata  map[string]interface{}
+	StartTime time.Time
+	EndTime   time.Time
+	Status    string
+	Error     error
 }
 
 // NewPipelineContext 创建新的 Pipeline 上下文
@@ -43,48 +43,48 @@ func NewPipelineContext(ctx context.Context, id string) *PipelineContext {
 
 // Document 文档结构体
 type Document struct {
-	ID          string            `json:"id"`
-	Content     string            `json:"content"`
-	Metadata    map[string]interface{} `json:"metadata"`
-	Embedding   []float64         `json:"embedding,omitempty"`
-	Chunks      []Chunk           `json:"chunks,omitempty"`
-	CreatedAt   time.Time         `json:"created_at"`
-	UpdatedAt   time.Time         `json:"updated_at"`
+	ID        string                 `json:"id"`
+	Content   string                 `json:"content"`
+	Metadata  map[string]interface{} `json:"metadata"`
+	Embedding []float64              `json:"embedding,omitempty"`
+	Chunks    []Chunk                `json:"chunks,omitempty"`
+	CreatedAt time.Time              `json:"created_at"`
+	UpdatedAt time.Time              `json:"updated_at"`
 }
 
 // Chunk 文档切片
 type Chunk struct {
-	ID          string            `json:"id"`
-	Content     string            `json:"content"`
-	Metadata    map[string]interface{} `json:"metadata"`
-	Embedding   []float64         `json:"embedding,omitempty"`
-	DocumentID  string            `json:"document_id"`
-	Index       int               `json:"index"`
-	TokenCount  int               `json:"token_count"`
+	ID         string                 `json:"id"`
+	Content    string                 `json:"content"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	Embedding  []float64              `json:"embedding,omitempty"`
+	DocumentID string                 `json:"document_id"`
+	Index      int                    `json:"index"`
+	TokenCount int                    `json:"token_count"`
 }
 
 // Query 查询结构体
 type Query struct {
-	ID          string            `json:"id"`
-	Text        string            `json:"text"`
-	Metadata    map[string]interface{} `json:"metadata"`
-	Embedding   []float64         `json:"embedding,omitempty"`
-	CreatedAt   time.Time         `json:"created_at"`
+	ID        string                 `json:"id"`
+	Text      string                 `json:"text"`
+	Metadata  map[string]interface{} `json:"metadata"`
+	Embedding []float64              `json:"embedding,omitempty"`
+	CreatedAt time.Time              `json:"created_at"`
 }
 
 // RetrievalResult 检索结果
 type RetrievalResult struct {
-	Chunks      []Chunk           `json:"chunks"`
-	Scores      []float64         `json:"scores"`
-	TotalCount  int               `json:"total_count"`
-	ProcessTime time.Duration     `json:"process_time"`
+	Chunks      []Chunk       `json:"chunks"`
+	Scores      []float64     `json:"scores"`
+	TotalCount  int           `json:"total_count"`
+	ProcessTime time.Duration `json:"process_time"`
 }
 
 // GenerationResult 生成结果
 type GenerationResult struct {
-	Answer      string            `json:"answer"`
-	References  []string          `json:"references"`
-	ProcessTime time.Duration     `json:"process_time"`
+	Answer      string        `json:"answer"`
+	References  []string      `json:"references"`
+	ProcessTime time.Duration `json:"process_time"`
 }
 
 // PipelineStage Pipeline 阶段

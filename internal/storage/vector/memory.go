@@ -30,9 +30,9 @@ type MemoryStore struct {
 
 // index 内存索引实现
 type index struct {
-	index      *Index
-	vectors    map[string]*Vector
-	dimension  int
+	index     *Index
+	vectors   map[string]*Vector
+	dimension int
 }
 
 // NewMemoryStore 创建新的内存向量存储
@@ -52,9 +52,9 @@ func (s *MemoryStore) Create(ctx context.Context, idx *Index) error {
 	}
 
 	s.indexes[idx.Name] = &index{
-		index:      idx,
-		vectors:    make(map[string]*Vector),
-		dimension:  idx.Dimension,
+		index:     idx,
+		vectors:   make(map[string]*Vector),
+		dimension: idx.Dimension,
 	}
 
 	return nil

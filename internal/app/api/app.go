@@ -26,18 +26,18 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"google.golang.org/grpc"
 
-	apigrpc "rag-platform/internal/api/grpc"
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 	hertzslog "github.com/hertz-contrib/logger/slog"
 	"github.com/hertz-contrib/obs-opentelemetry/provider"
 	hertztracing "github.com/hertz-contrib/obs-opentelemetry/tracing"
+	apigrpc "rag-platform/internal/api/grpc"
 
 	"rag-platform/internal/agent"
-	agentexec "rag-platform/internal/agent/runtime/executor"
 	"rag-platform/internal/agent/executor"
 	"rag-platform/internal/agent/job"
 	"rag-platform/internal/agent/planner"
 	"rag-platform/internal/agent/runtime"
+	agentexec "rag-platform/internal/agent/runtime/executor"
 	"rag-platform/internal/agent/tools"
 	"rag-platform/internal/api/http"
 	"rag-platform/internal/api/http/middleware"
@@ -190,7 +190,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	})
 	agentCreator := NewAgentCreator(agentRuntimeManager, v1Planner, toolsReg)
 	handler.SetAgentRuntime(agentRuntimeManager, agentScheduler, agentCreator)
-		// v0.8 Job System：message -> create Job -> Scheduler（并发/重试）-> Worker -> Executor；Checkpoint 支持恢复
+	// v0.8 Job System：message -> create Job -> Scheduler（并发/重试）-> Worker -> Executor；Checkpoint 支持恢复
 	// Job 元数据存储：postgres 时与 Worker 共享 jobs 表，否则内存（仅 API 进程内）
 	var jobStore job.JobStore
 	var jobEventStore jobstore.JobStore
@@ -305,11 +305,11 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	}
 
 	appObj := &App{
-		config:     bootstrap,
-		engine:     engine,
-		docService: docService,
-		router:     router,
-		hertz:      nil,
+		config:       bootstrap,
+		engine:       engine,
+		docService:   docService,
+		router:       router,
+		hertz:        nil,
 		jobScheduler: jobScheduler,
 	}
 	if bootstrap.Config != nil && bootstrap.Config.API.Grpc.Enable && bootstrap.Config.API.Grpc.Port > 0 {

@@ -56,10 +56,10 @@ func (e *Engine) Name() string {
 func (e *Engine) registerSplitters() {
 	// 注册结构切片器
 	e.splitters["structural"] = NewStructuralSplitter()
-	
+
 	// 注册语义切片器（注入 embedder 时启用真实语义相似度）
 	e.splitters["semantic"] = NewSemanticSplitter(e.embedder)
-	
+
 	// 注册 Token 切片器
 	e.splitters["token"] = NewTokenSplitter()
 }

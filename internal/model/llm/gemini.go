@@ -74,10 +74,10 @@ func (c *GeminiClient) GenerateWithContext(ctx context.Context, prompt string, o
 				"text": prompt,
 			}},
 		}},
-		"temperature": options.Temperature,
+		"temperature":       options.Temperature,
 		"max_output_tokens": options.MaxTokens,
-		"top_p": options.TopP,
-		"stop_sequences": options.Stop,
+		"top_p":             options.TopP,
+		"stop_sequences":    options.Stop,
 	}
 
 	// 发送请求
@@ -142,11 +142,11 @@ func (c *GeminiClient) ChatWithContext(ctx context.Context, messages []Message, 
 
 	// 构建请求
 	request := map[string]interface{}{
-		"contents": contents,
-		"temperature": options.Temperature,
+		"contents":          contents,
+		"temperature":       options.Temperature,
 		"max_output_tokens": options.MaxTokens,
-		"top_p": options.TopP,
-		"stop_sequences": options.Stop,
+		"top_p":             options.TopP,
+		"stop_sequences":    options.Stop,
 	}
 
 	// 发送请求

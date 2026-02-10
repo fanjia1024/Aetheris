@@ -21,8 +21,8 @@ import (
 	"time"
 
 	"rag-platform/internal/pipeline/common"
-	"rag-platform/internal/tool"
 	"rag-platform/internal/runtime/eino"
+	"rag-platform/internal/tool"
 )
 
 // RAGSearchTool 实现 knowledge.search：调用 query_pipeline

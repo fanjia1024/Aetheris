@@ -61,7 +61,7 @@ type WorkflowExec interface {
 
 // LLMNodeAdapter 将 llm 型 TaskNode 转为 DAG 节点
 type LLMNodeAdapter struct {
-	LLM             LLMGen
+	LLM              LLMGen
 	CommandEventSink CommandEventSink // 可选；执行成功后立即写 command_committed，保证副作用安全
 }
 

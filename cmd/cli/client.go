@@ -34,7 +34,7 @@ func apiBaseURL() string {
 func newClient() *resty.Client {
 	return resty.New().
 		SetBaseURL(apiBaseURL()).
-		SetTimeout(30 * time.Second).
+		SetTimeout(30*time.Second).
 		SetHeader("Content-Type", "application/json")
 }
 

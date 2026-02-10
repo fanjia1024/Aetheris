@@ -29,9 +29,9 @@ import (
 
 // DocumentLoader 文档加载器
 type DocumentLoader struct {
-	name        string
+	name           string
 	supportedTypes []string
-	maxSize     int64
+	maxSize        int64
 }
 
 // NewDocumentLoader 创建新的文档加载器
@@ -206,8 +206,8 @@ func (l *DocumentLoader) loadFromFile(ctx *common.PipelineContext, fileHeader *m
 func (l *DocumentLoader) loadFromBytes(ctx *common.PipelineContext, data []byte) (*common.Document, error) {
 	// 创建文档
 	doc := &common.Document{
-		ID:        uuid.New().String(),
-		Content:   string(data),
+		ID:      uuid.New().String(),
+		Content: string(data),
 		Metadata: map[string]interface{}{
 			"file_size":    len(data),
 			"content_type": "text/plain",
