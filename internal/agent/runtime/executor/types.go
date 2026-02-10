@@ -36,10 +36,14 @@ type replayContextKey struct{}
 // stateChangesByStepContextKey 用于在 context 中传递 Replay 的「按 step 的 state_changed」列表，供 Confirmation Replay 校验
 type stateChangesByStepContextKey struct{}
 
+// pendingToolInvocationsContextKey 用于在 context 中传递事件流「已 started 无 finished」的 idempotency_key 集合（Activity Log Barrier），禁止再次执行
+type pendingToolInvocationsContextKey struct{}
+
 var theAgentContextKey = agentContextKey{}
 var theJobIDContextKey = jobIDContextKey{}
 var theReplayContextKey = replayContextKey{}
 var theStateChangesByStepContextKey = stateChangesByStepContextKey{}
+var thePendingToolInvocationsContextKey = pendingToolInvocationsContextKey{}
 
 // WithAgent 将 agent 放入 ctx，供 Runner.Invoke 时传入节点
 func WithAgent(ctx context.Context, agent *runtime.Agent) context.Context {
@@ -83,6 +87,21 @@ func CompletedToolInvocationsFromContext(ctx context.Context) map[string][]byte 
 		return nil
 	}
 	m, _ := v.(map[string][]byte)
+	return m
+}
+
+// WithPendingToolInvocations 将 Replay 得到的「已 started 无 finished」的 idempotency_key 集合放入 ctx（Activity Log Barrier），供 Tool 节点禁止再次执行
+func WithPendingToolInvocations(ctx context.Context, pending map[string]struct{}) context.Context {
+	return context.WithValue(ctx, thePendingToolInvocationsContextKey, pending)
+}
+
+// PendingToolInvocationsFromContext 从 context 取出 pending 集合
+func PendingToolInvocationsFromContext(ctx context.Context) map[string]struct{} {
+	v := ctx.Value(thePendingToolInvocationsContextKey)
+	if v == nil {
+		return nil
+	}
+	m, _ := v.(map[string]struct{})
 	return m
 }
 

@@ -151,11 +151,77 @@ func (a *ToolNodeAdapter) runConfirmation(ctx context.Context, jobID, taskID str
 	return nil
 }
 
+// writeCatchUpFinished 恢复路径：向事件流追加 tool_invocation_finished 与 command_committed（catch-up），使事件流与已提交结果一致（Activity Log Barrier）
+func (a *ToolNodeAdapter) writeCatchUpFinished(ctx context.Context, jobID, taskID, idempotencyKey, argsHash string, resultBytes []byte) error {
+	invocationID := "catchup-" + idempotencyKey
+	finishedAt := time.Now().UTC()
+	if a.ToolEventSink != nil {
+		if err := a.ToolEventSink.AppendToolInvocationFinished(ctx, jobID, taskID, &ToolInvocationFinishedPayload{
+			InvocationID:   invocationID,
+			IdempotencyKey: idempotencyKey,
+			Outcome:        ToolInvocationOutcomeSuccess,
+			Result:         resultBytes,
+			FinishedAt:     FormatStartedAt(finishedAt),
+		}); err != nil {
+			return err
+		}
+	}
+	if a.CommandEventSink != nil {
+		if err := a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, resultBytes, argsHash); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, cfg map[string]any, agent *runtime.Agent, p *AgentDAGPayload) (*AgentDAGPayload, error) {
 	jobID := JobIDFromContext(ctx)
 	idempotencyKey := IdempotencyKey(jobID, taskID, toolName, cfg)
 	argsHash := ArgumentsHash(cfg)
 	stepChanges := StateChangesByStepFromContext(ctx)[taskID]
+
+	// Activity Log Barrier：事件流中已 started 无 finished 时禁止再次执行，仅恢复或失败（design/effect-system.md）
+	if pending := PendingToolInvocationsFromContext(ctx); pending != nil {
+		if _, isPending := pending[idempotencyKey]; isPending {
+			var resultBytes []byte
+			if a.InvocationLedger != nil && jobID != "" {
+				var exists bool
+				resultBytes, exists = a.InvocationLedger.Recover(ctx, jobID, idempotencyKey)
+				if !exists {
+					resultBytes = nil
+				}
+			}
+			if len(resultBytes) == 0 && a.InvocationStore != nil && jobID != "" {
+				rec, _ := a.InvocationStore.GetByJobAndIdempotencyKey(ctx, jobID, idempotencyKey)
+				if rec != nil && rec.Committed && len(rec.Result) > 0 {
+					resultBytes = rec.Result
+				}
+			}
+			if len(resultBytes) > 0 {
+				if err := a.runConfirmation(ctx, jobID, taskID, stepChanges); err != nil {
+					return nil, err
+				}
+				if err := a.writeCatchUpFinished(ctx, jobID, taskID, idempotencyKey, argsHash, resultBytes); err != nil {
+					return nil, err
+				}
+				var nodeResult map[string]any
+				_ = json.Unmarshal(resultBytes, &nodeResult)
+				if nodeResult == nil {
+					nodeResult = make(map[string]any)
+				}
+				if p.Results == nil {
+					p.Results = make(map[string]any)
+				}
+				p.Results[taskID] = nodeResult
+				return p, nil
+			}
+			return nil, &StepFailure{
+				Type:   StepResultPermanentFailure,
+				Inner:  fmt.Errorf("invocation in flight or lost, idempotency_key=%s", idempotencyKey),
+				NodeID: taskID,
+			}
+		}
+	}
 
 	// Ledger 为仲裁：先申请执行许可，禁止在 ReturnRecordedResult 时调用 tool
 	if a.InvocationLedger != nil && jobID != "" {

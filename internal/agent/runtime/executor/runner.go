@@ -378,6 +378,9 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 	if replayCtx != nil && len(replayCtx.CompletedToolInvocations) > 0 {
 		ctx = WithCompletedToolInvocations(ctx, replayCtx.CompletedToolInvocations)
 	}
+	if replayCtx != nil && len(replayCtx.PendingToolInvocations) > 0 {
+		ctx = WithPendingToolInvocations(ctx, replayCtx.PendingToolInvocations)
+	}
 	if replayCtx != nil && len(replayCtx.StateChangesByStep) > 0 {
 		m := make(map[string][]StateChangeForVerify)
 		for nodeID, recs := range replayCtx.StateChangesByStep {
@@ -684,6 +687,9 @@ runLoop:
 		ctx = WithAgent(ctx, agent)
 		if replayCtx != nil && len(replayCtx.CompletedToolInvocations) > 0 {
 			ctx = WithCompletedToolInvocations(ctx, replayCtx.CompletedToolInvocations)
+		}
+		if replayCtx != nil && len(replayCtx.PendingToolInvocations) > 0 {
+			ctx = WithPendingToolInvocations(ctx, replayCtx.PendingToolInvocations)
 		}
 		if replayCtx != nil && len(replayCtx.StateChangesByStep) > 0 {
 			m := make(map[string][]StateChangeForVerify)

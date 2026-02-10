@@ -44,6 +44,7 @@ type ReplayContext struct {
 	CompletedCommandIDs      map[string]struct{}            // 所有已出现 command_committed 的 command_id，已提交命令永不重放
 	CommandResults           map[string][]byte              // command_id -> 该命令的 result JSON，Replay 时注入 payload
 	CompletedToolInvocations map[string][]byte              // idempotency_key -> 成功完成的工具调用 result JSON，Replay 时跳过执行并注入
+	PendingToolInvocations   map[string]struct{}            // 事件流中「有 tool_invocation_started 无对应 tool_invocation_finished」的 idempotency_key，禁止再次执行（Activity Log Barrier）
 	StateChangesByStep       map[string][]StateChangeRecord // node_id -> 该步的 state_changed 列表，供 Confirmation Replay
 	// Phase 由事件流推导的执行阶段（plan 3.4），用于观测与「Agent 即长期进程」表述
 	Phase ExecutionPhase
@@ -107,12 +108,21 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 		CompletedCommandIDs:      make(map[string]struct{}),
 		CommandResults:           make(map[string][]byte),
 		CompletedToolInvocations: make(map[string][]byte),
+		PendingToolInvocations:   make(map[string]struct{}),
 		StateChangesByStep:       make(map[string][]StateChangeRecord),
 	}
 	var lastType jobstore.EventType
 	for _, e := range events {
 		lastType = e.Type
 		switch e.Type {
+		case jobstore.ToolInvocationStarted:
+			var pl struct {
+				IdempotencyKey string `json:"idempotency_key"`
+			}
+			if err := json.Unmarshal(e.Payload, &pl); err != nil || pl.IdempotencyKey == "" {
+				continue
+			}
+			out.PendingToolInvocations[pl.IdempotencyKey] = struct{}{}
 		case jobstore.PlanGenerated:
 			var payload struct {
 				TaskGraph json.RawMessage `json:"task_graph"`
@@ -168,6 +178,9 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 			}
 			if err := json.Unmarshal(e.Payload, &pl); err != nil {
 				continue
+			}
+			if pl.IdempotencyKey != "" {
+				delete(out.PendingToolInvocations, pl.IdempotencyKey)
 			}
 			if pl.Outcome != "success" || pl.IdempotencyKey == "" {
 				continue

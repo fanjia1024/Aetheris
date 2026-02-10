@@ -8,6 +8,7 @@
 
 - **可重放**：无副作用的计算（Pure）；Replay 时从事件流注入已记录结果，或按策略允许重算。
 - **只记录、禁止重放**：LLM 调用、Tool 调用、外部 IO、时间/随机数依赖。Replay 时**禁止**真实调用，只读事件流中的 `command_committed`、`tool_invocation_finished`、`PlanGenerated`、`NodeFinished` 等注入结果。详见 [effect-system.md](effect-system.md)。
+- **Tool 执行以事件流声明为屏障**：事件流中若存在某 idempotency_key 的 `tool_invocation_started` 且无对应 `tool_invocation_finished`（Pending），则**禁止再次执行**该 Tool；仅可从 Ledger/tool_invocations 恢复结果并写回 Finished（catch-up），或确定性地失败该 step。见 [effect-system.md](effect-system.md) 副作用屏障。
 
 Reclaim 后再次 Claim 的 Job 会走 Replay；**安全前提**是 Effect 边界成立，否则会出现重复执行副作用（如发 2 封邮件、扣 2 次款）。
 

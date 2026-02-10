@@ -35,15 +35,19 @@ Agent execution = **Deterministic State Machine + Recorded Effects**。本文档
 - **NodeFinished**：CompletedNodeIDs、PayloadResults，用于恢复游标与累积状态。
 - （若实现）**TimerFired**、**RandomRecorded**：Replay 时仅从事件注入时间/种子到 context。
 
+### 副作用屏障（Activity Log Barrier）
+
+对 **Tool 调用**：须先将本次调用的声明（`tool_invocation_started`）成功追加到事件流后，才允许执行 `Tools.Execute`。Replay 时若事件流中存在该调用的 started 且无对应 finished，**不得再次执行**，仅可：从 Ledger/tool_invocations 恢复已提交结果并写回 `tool_invocation_finished`（catch-up），或确定性地失败该 step（invocation in flight or lost）。这样可消除「Execute 成功、持久化 Finished 前崩溃」导致的二次执行风险。
+
 ### 写入顺序（与 execution-state-machine 一致）
 
 对会产生副作用的节点，写入顺序必须为：
 
-1. 执行完成后 **立即** 写 `command_committed`（或 `tool_invocation_finished`）；
+1. **先** 写 `tool_invocation_started`（声明），再执行 Tool；执行完成后 **立即** 写 `command_committed`（或 `tool_invocation_finished`）；
 2. 再写 `node_finished`；
 3. 再 checkpoint / UpdateCursor。
 
-这样 Replay 以事件流为权威时，已提交命令永不重放。
+这样 Replay 以事件流为权威时，已提交命令永不重放；且「已 started 无 finished」时禁止再执行，仅恢复或失败。
 
 ## 与现有事件类型映射
 
@@ -60,7 +64,7 @@ Agent execution = **Deterministic State Machine + Recorded Effects**。本文档
 - **Replay 构建**：[internal/agent/replay/replay.go](internal/agent/replay/replay.go) — `BuildFromEvents` 解析 PlanGenerated、NodeFinished、CommandCommitted、ToolInvocationFinished。
 - **Replay 决策**：[internal/agent/replay/sandbox/policy.go](internal/agent/replay/sandbox/policy.go) — `ReplayPolicy.Decide` 对 llm/tool/workflow 返回 SideEffect，有记录则 Inject。
 - **Runner**：[internal/agent/runtime/executor/runner.go](internal/agent/runtime/executor/runner.go) — 无 Cursor 时优先从事件流重建；runLoop 内 command_id ∈ CompletedCommandIDs 时只注入、不调用 step.Run。
-- **Adapter**：[internal/agent/runtime/executor/node_adapter.go](internal/agent/runtime/executor/node_adapter.go) — Ledger 路径下仅 `AllowExecute` 才执行 tool；Replay 注入时不调用 tool。
+- **Adapter**：[internal/agent/runtime/executor/node_adapter.go](internal/agent/runtime/executor/node_adapter.go) — Ledger 路径下仅 `AllowExecute` 才执行 tool；Replay 注入时不调用 tool。**Activity Log Barrier**：若 idempotency_key ∈ PendingToolInvocations（事件流已 started 无 finished），禁止执行，仅 Recover 后 catch-up 写 Finished 或返回永久失败。
 
 ## 断言与测试
 
