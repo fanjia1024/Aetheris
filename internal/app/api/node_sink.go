@@ -386,8 +386,8 @@ func (s *nodeEventSinkImpl) AppendStateChanged(ctx context.Context, jobID string
 	return err
 }
 
-// AppendJobWaiting 实现 NodeEventSink；写入 job_waiting 事件（design/job-state-machine.md）
-func (s *nodeEventSinkImpl) AppendJobWaiting(ctx context.Context, jobID string, nodeID string, waitKind, reason string, expiresAt time.Time) error {
+// AppendJobWaiting 实现 NodeEventSink；写入 job_waiting 事件，payload 含 correlation_key、wait_type（design/runtime-contract.md）
+func (s *nodeEventSinkImpl) AppendJobWaiting(ctx context.Context, jobID string, nodeID string, waitKind, reason string, expiresAt time.Time, correlationKey string) error {
 	if s.store == nil {
 		return nil
 	}
@@ -395,11 +395,17 @@ func (s *nodeEventSinkImpl) AppendJobWaiting(ctx context.Context, jobID string, 
 	if err != nil {
 		return err
 	}
-	pl := map[string]interface{}{
-		"node_id":    nodeID,
-		"wait_kind":  waitKind,
-		"reason":     reason,
-		"expires_at": expiresAt.Format(time.RFC3339),
+	waitType := waitKind
+	if waitType != "webhook" && waitType != "human" && waitType != "timer" && waitType != "signal" {
+		waitType = "signal"
+	}
+	pl := jobstore.JobWaitingPayload{
+		NodeID:           nodeID,
+		WaitType:         waitType,
+		CorrelationKey:   correlationKey,
+		WaitKind:         waitKind,
+		Reason:           reason,
+		ExpiresAtRFC3339: expiresAt.Format(time.RFC3339),
 	}
 	payload, err := json.Marshal(pl)
 	if err != nil {

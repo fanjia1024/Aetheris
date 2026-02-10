@@ -14,7 +14,10 @@
 
 package jobstore
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // EventType 任务事件类型（事件流语义，用于重放与审计）
 type EventType string
@@ -35,9 +38,10 @@ const (
 	JobCancelled           EventType = "job_cancelled"
 
 	// Job 状态机事件（见 design/job-state-machine.md）：驱动状态迁移，写入后应更新 metadata status
-	JobQueued     EventType = "job_queued"
-	JobLeased     EventType = "job_leased"
-	JobRunning    EventType = "job_running"
+	JobQueued  EventType = "job_queued"
+	JobLeased  EventType = "job_leased"
+	JobRunning EventType = "job_running"
+	// JobWaiting 表示 Job 在 Wait 节点挂起；payload 必须含 correlation_key、wait_type（design/runtime-contract.md）
 	JobWaiting    EventType = "job_waiting"
 	JobRequeued   EventType = "job_requeued"
 	WaitCompleted EventType = "wait_completed"
@@ -59,6 +63,25 @@ const (
 	// ReasoningSnapshot 推理快照：每步完成后的决策上下文，供因果调试（哪个计划步骤、哪次 LLM 输出导致该步）
 	ReasoningSnapshot EventType = "reasoning_snapshot"
 )
+
+// JobWaitingPayload job_waiting 事件 payload 契约；只有携带相同 correlation_key 的 signal 才能解除该 block（design/runtime-contract.md）
+type JobWaitingPayload struct {
+	NodeID           string `json:"node_id"`
+	WaitType         string `json:"wait_type"`       // webhook | human | timer | signal
+	CorrelationKey   string `json:"correlation_key"` // 唯一标识此次等待，signal 必须匹配
+	WaitKind         string `json:"wait_kind"`
+	Reason           string `json:"reason"`
+	ExpiresAtRFC3339 string `json:"expires_at"`
+}
+
+// ParseJobWaitingPayload 解析 job_waiting 事件的 payload；若缺少 correlation_key 返回空字符串
+func ParseJobWaitingPayload(payload []byte) (p JobWaitingPayload, err error) {
+	if len(payload) == 0 {
+		return p, nil
+	}
+	err = json.Unmarshal(payload, &p)
+	return p, err
+}
 
 // JobEvent 单条不可变事件；Job 的真实形态是事件流
 type JobEvent struct {

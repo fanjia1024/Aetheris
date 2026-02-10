@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -97,6 +98,14 @@ func (s *pgStore) Append(ctx context.Context, jobID string, expectedVersion int,
 	if jobID == "" {
 		return 0, ErrVersionMismatch
 	}
+	attemptID := AttemptIDFromContext(ctx)
+	if attemptID != "" {
+		var claimAttemptID string
+		err := s.pool.QueryRow(ctx, `SELECT attempt_id FROM job_claims WHERE job_id = $1 AND expires_at > now()`, jobID).Scan(&claimAttemptID)
+		if err != nil || claimAttemptID != attemptID {
+			return 0, ErrStaleAttempt
+		}
+	}
 	newVersion := expectedVersion + 1
 	event.JobID = jobID
 	if event.CreatedAt.IsZero() {
@@ -133,19 +142,18 @@ func (s *pgStore) Append(ctx context.Context, jobID string, expectedVersion int,
 	return newVersion, nil
 }
 
-func (s *pgStore) Claim(ctx context.Context, workerID string) (string, int, error) {
+func (s *pgStore) Claim(ctx context.Context, workerID string) (string, int, string, error) {
 	now := time.Now()
 	expires := now.Add(s.leaseDur)
+	attemptID := "attempt-" + uuid.New().String()
 	terminal1, terminal2, terminal3 := string(JobCompleted), string(JobFailed), string(JobCancelled)
 
-	// 在事务中：找一条「可执行」的 job（最后事件非 terminal，且无有效租约），锁定该行后插入/更新 claim
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 	defer tx.Rollback(ctx)
 
-	// 选出一个 claimable 的 (job_id, version)：最后事件类型非 completed/failed/cancelled，且无未过期 claim
 	var claimedID string
 	var claimedVersion int
 	err = tx.QueryRow(ctx, `
@@ -163,27 +171,28 @@ func (s *pgStore) Claim(ctx context.Context, workerID string) (string, int, erro
 	`, terminal1, terminal2, terminal3, now).Scan(&claimedID, &claimedVersion)
 	if err != nil {
 		if errNoRows(err) {
-			return "", 0, ErrNoJob
+			return "", 0, "", ErrNoJob
 		}
-		return "", 0, err
+		return "", 0, "", err
 	}
 
 	_, err = tx.Exec(ctx,
-		`INSERT INTO job_claims (job_id, worker_id, expires_at) VALUES ($1, $2, $3)
-		 ON CONFLICT (job_id) DO UPDATE SET worker_id = $2, expires_at = $3`,
-		claimedID, workerID, expires)
+		`INSERT INTO job_claims (job_id, worker_id, expires_at, attempt_id) VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (job_id) DO UPDATE SET worker_id = $2, expires_at = $3, attempt_id = $4`,
+		claimedID, workerID, expires, attemptID)
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
-	return claimedID, claimedVersion, nil
+	return claimedID, claimedVersion, attemptID, nil
 }
 
-func (s *pgStore) ClaimJob(ctx context.Context, workerID string, jobID string) (int, error) {
+func (s *pgStore) ClaimJob(ctx context.Context, workerID string, jobID string) (int, string, error) {
 	now := time.Now()
 	expires := now.Add(s.leaseDur)
+	attemptID := "attempt-" + uuid.New().String()
 	terminal1, terminal2, terminal3 := string(JobCompleted), string(JobFailed), string(JobCancelled)
 
 	var version int
@@ -195,19 +204,19 @@ func (s *pgStore) ClaimJob(ctx context.Context, workerID string, jobID string) (
 	`, jobID, terminal1, terminal2, terminal3, now).Scan(&version)
 	if err != nil {
 		if errNoRows(err) {
-			return 0, ErrNoJob
+			return 0, "", ErrNoJob
 		}
-		return 0, err
+		return 0, "", err
 	}
 
 	_, err = s.pool.Exec(ctx,
-		`INSERT INTO job_claims (job_id, worker_id, expires_at) VALUES ($1, $2, $3)
-		 ON CONFLICT (job_id) DO UPDATE SET worker_id = $2, expires_at = $3`,
-		jobID, workerID, expires)
+		`INSERT INTO job_claims (job_id, worker_id, expires_at, attempt_id) VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (job_id) DO UPDATE SET worker_id = $2, expires_at = $3, attempt_id = $4`,
+		jobID, workerID, expires, attemptID)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
-	return version, nil
+	return version, attemptID, nil
 }
 
 func (s *pgStore) Heartbeat(ctx context.Context, workerID string, jobID string) error {

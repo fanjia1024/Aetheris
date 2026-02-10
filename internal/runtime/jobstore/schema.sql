@@ -18,10 +18,14 @@ CREATE INDEX IF NOT EXISTS idx_job_events_created_at ON job_events (created_at);
 CREATE TABLE IF NOT EXISTS job_claims (
     job_id      TEXT PRIMARY KEY,
     worker_id   TEXT NOT NULL,
-    expires_at  TIMESTAMPTZ NOT NULL
+    expires_at  TIMESTAMPTZ NOT NULL,
+    attempt_id  TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_job_claims_expires_at ON job_claims (expires_at);
+
+-- 升级已有库：为 job_claims 添加 attempt_id（design/runtime-contract.md §3.2）
+ALTER TABLE job_claims ADD COLUMN IF NOT EXISTS attempt_id TEXT NOT NULL DEFAULT '';
 
 -- Job 元数据表（API 与 Worker 共享；与 internal/agent/job 语义一致）
 CREATE TABLE IF NOT EXISTS jobs (

@@ -92,8 +92,8 @@ func (r *AgentJobRunner) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case r.limiter <- struct{}{}:
-				// 孤儿回收：将 metadata 中 Running 且超过租约时长的 Job 置回 Pending，供本 Worker 或其他 Worker 认领
-				if reclaimed, err := r.jobStore.ReclaimOrphanedJobs(ctx, r.leaseDuration); err == nil && reclaimed > 0 {
+				// 孤儿回收（design/runtime-contract.md §2）：以 event store 租约过期为准，且不回收 Blocked(JobWaiting) 的 Job
+				if reclaimed, err := job.ReclaimOrphanedFromEventStore(ctx, r.jobStore, r.jobEventStore); err == nil && reclaimed > 0 {
 					r.logger.Info("回收孤儿 Job", "reclaimed", reclaimed)
 				}
 				var jobID string
@@ -111,7 +111,7 @@ func (r *AgentJobRunner) Start(ctx context.Context) {
 						}
 						continue
 					}
-					_, errEvent := r.jobEventStore.ClaimJob(ctx, r.workerID, j.ID)
+					_, attemptID, errEvent := r.jobEventStore.ClaimJob(ctx, r.workerID, j.ID)
 					if errEvent != nil {
 						_ = r.jobStore.Requeue(ctx, j)
 						<-r.limiter
@@ -122,9 +122,16 @@ func (r *AgentJobRunner) Start(ctx context.Context) {
 						continue
 					}
 					jobID = j.ID
-				} else {
-					var err error
-					jobID, _, err = r.jobEventStore.Claim(ctx, r.workerID)
+					r.wg.Add(1)
+					go func(claimedJobID, aid string) {
+						defer r.wg.Done()
+						defer func() { <-r.limiter }()
+						r.executeJob(ctx, claimedJobID, aid)
+					}(jobID, attemptID)
+					continue
+				}
+				{
+					claimedJobID, _, attemptID, err := r.jobEventStore.Claim(ctx, r.workerID)
 					if err != nil {
 						<-r.limiter
 						if err == jobstore.ErrNoJob {
@@ -141,13 +148,13 @@ func (r *AgentJobRunner) Start(ctx context.Context) {
 						time.Sleep(r.pollInterval)
 						continue
 					}
+					r.wg.Add(1)
+					go func(claimedJobID, aid string) {
+						defer r.wg.Done()
+						defer func() { <-r.limiter }()
+						r.executeJob(ctx, claimedJobID, aid)
+					}(claimedJobID, attemptID)
 				}
-				r.wg.Add(1)
-				go func(claimedJobID string) {
-					defer r.wg.Done()
-					defer func() { <-r.limiter }()
-					r.executeJob(ctx, claimedJobID)
-				}(jobID)
 			}
 		}
 	}()
@@ -161,7 +168,7 @@ func (r *AgentJobRunner) Stop() {
 
 const cancelPollInterval = 500 * time.Millisecond
 
-func (r *AgentJobRunner) executeJob(ctx context.Context, jobID string) {
+func (r *AgentJobRunner) executeJob(ctx context.Context, jobID string, attemptID string) {
 	j, err := r.jobStore.Get(ctx, jobID)
 	if err != nil || j == nil {
 		r.logger.Warn("Get Job 失败或不存在，跳过", "job_id", jobID, "error", err)
@@ -178,6 +185,7 @@ func (r *AgentJobRunner) executeJob(ctx context.Context, jobID string) {
 	_ = r.jobStore.UpdateStatus(ctx, jobID, job.StatusRunning)
 	r.logger.Info("开始执行 Job", "job_id", jobID, "agent_id", j.AgentID, "goal", j.Goal)
 	runCtx, cancel := context.WithCancel(ctx)
+	runCtx = jobstore.WithAttemptID(runCtx, attemptID)
 	defer cancel()
 	// 后台 Heartbeat
 	heartbeatDone := make(chan struct{})
@@ -221,7 +229,7 @@ func (r *AgentJobRunner) executeJob(ctx context.Context, jobID string) {
 		metrics.JobFailTotal.WithLabelValues("cancelled").Inc()
 		_, ver, _ := r.jobEventStore.ListEvents(ctx, jobID)
 		payload, _ := json.Marshal(map[string]interface{}{"goal": j.Goal})
-		_, _ = r.jobEventStore.Append(ctx, jobID, ver, jobstore.JobEvent{JobID: jobID, Type: jobstore.JobCancelled, Payload: payload})
+		_, _ = r.jobEventStore.Append(runCtx, jobID, ver, jobstore.JobEvent{JobID: jobID, Type: jobstore.JobCancelled, Payload: payload})
 		_ = r.jobStore.UpdateStatus(ctx, jobID, job.StatusCancelled)
 		return
 	}
@@ -240,7 +248,7 @@ func (r *AgentJobRunner) executeJob(ctx context.Context, jobID string) {
 				pl["reason"] = err.Error()
 			}
 			payload, _ := json.Marshal(pl)
-			_, _ = r.jobEventStore.Append(ctx, jobID, ver, jobstore.JobEvent{JobID: jobID, Type: jobstore.JobFailed, Payload: payload})
+			_, _ = r.jobEventStore.Append(runCtx, jobID, ver, jobstore.JobEvent{JobID: jobID, Type: jobstore.JobFailed, Payload: payload})
 		}
 		return
 	}

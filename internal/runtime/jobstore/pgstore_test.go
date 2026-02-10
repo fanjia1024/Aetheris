@@ -116,7 +116,7 @@ func TestPgStore_Claim_Heartbeat(t *testing.T) {
 	jobID := "job-1"
 	_, _ = store.Append(ctx, jobID, 0, JobEvent{JobID: jobID, Type: JobCreated})
 
-	claimedID, ver, err := store.Claim(ctx, "worker-1")
+	claimedID, ver, _, err := store.Claim(ctx, "worker-1")
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestPgStore_Claim_Heartbeat(t *testing.T) {
 		t.Errorf("Claim: got jobID=%s version=%d", claimedID, ver)
 	}
 
-	_, _, err = store.Claim(ctx, "worker-2")
+	_, _, _, err = store.Claim(ctx, "worker-2")
 	if err != ErrNoJob {
 		t.Errorf("expected ErrNoJob when job already claimed, got %v", err)
 	}
@@ -144,7 +144,7 @@ func TestPgStore_Claim_NoJob(t *testing.T) {
 	ctx := context.Background()
 	store, cleanup := newTestPgStore(t, ctx)
 	defer cleanup()
-	_, _, err := store.Claim(ctx, "worker-1")
+	_, _, _, err := store.Claim(ctx, "worker-1")
 	if err != ErrNoJob {
 		t.Errorf("expected ErrNoJob, got %v", err)
 	}
@@ -158,7 +158,7 @@ func TestPgStore_Claim_SkipsCompleted(t *testing.T) {
 	_, _ = store.Append(ctx, jobID, 0, JobEvent{JobID: jobID, Type: JobCreated})
 	_, _ = store.Append(ctx, jobID, 1, JobEvent{JobID: jobID, Type: JobCompleted})
 
-	_, _, err := store.Claim(ctx, "worker-1")
+	_, _, _, err := store.Claim(ctx, "worker-1")
 	if err != ErrNoJob {
 		t.Errorf("expected ErrNoJob for completed job, got %v", err)
 	}

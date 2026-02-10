@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"rag-platform/internal/agent/planner"
 	"rag-platform/internal/agent/replay"
 	replaysandbox "rag-platform/internal/agent/replay/sandbox"
@@ -118,7 +119,7 @@ type NodeEventSink interface {
 	// AppendNodeFinished 写入 node_finished；stepID 为空时用 nodeID；inputHash 非空时写入 payload 供 Replay 确定性判定（plan 3.3）
 	AppendNodeFinished(ctx context.Context, jobID string, nodeID string, payloadResults []byte, durationMs int64, state string, attempt int, resultType StepResultType, reason string, stepID string, inputHash string) error
 	AppendStateCheckpointed(ctx context.Context, jobID string, nodeID string, stateBefore, stateAfter []byte, opts *StateCheckpointOpts) error
-	AppendJobWaiting(ctx context.Context, jobID string, nodeID string, waitKind, reason string, expiresAt time.Time) error
+	AppendJobWaiting(ctx context.Context, jobID string, nodeID string, waitKind, reason string, expiresAt time.Time, correlationKey string) error
 	// AppendReasoningSnapshot 写入 reasoning_snapshot 事件，供因果调试（design：Causal Debugging）
 	AppendReasoningSnapshot(ctx context.Context, jobID string, payload []byte) error
 }
@@ -547,37 +548,9 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 				}
 			}
 		}
-		// 1.0：API 在 Job 创建时已写 PlanGenerated，上段 Replay 应命中；此处仅兼容无 Plan 的旧 Job
-		if agent.Planner == nil {
-			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
-			return fmt.Errorf("executor: agent.Planner 未配置")
-		}
-		planOut, planErr := agent.Planner.Plan(ctx, j.Goal, agent.Memory)
-		if planErr != nil {
-			agent.SetStatus(runtime.StatusFailed)
-			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
-			return fmt.Errorf("executor: Plan 失败: %w", planErr)
-		}
-		var ok bool
-		taskGraph, ok = planOut.(*planner.TaskGraph)
-		if !ok || taskGraph == nil {
-			agent.SetStatus(runtime.StatusFailed)
-			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
-			return fmt.Errorf("executor: Planner 未返回 *TaskGraph")
-		}
-		// 规划事件化：写入 PlanGenerated 便于 Trace/Replay 确定复现
-		if r.planGeneratedSink != nil {
-			graphBytes, _ := taskGraph.Marshal()
-			_ = r.planGeneratedSink.AppendPlanGenerated(ctx, j.ID, graphBytes, j.Goal)
-		}
-		var compErr error
-		steps, compErr = r.compiler.CompileSteppable(ctx, taskGraph, agent)
-		if compErr != nil {
-			agent.SetStatus(runtime.StatusFailed)
-			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
-			return fmt.Errorf("executor: CompileSteppable 失败: %w", compErr)
-		}
-		payload = NewAgentDAGPayload(j.Goal, agent.ID, sessionID)
+		// design/runtime-contract.md §4：决策来源可追溯 — 事件流中必须存在 PlanGenerated 才执行；禁止无记录时重新规划
+		_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
+		return fmt.Errorf("executor: 事件流中无 PlanGenerated，禁止执行（design/runtime-contract.md）")
 	}
 
 runLoop:
@@ -701,7 +674,8 @@ runLoop:
 				expiresAt = time.Now().Add(24 * time.Hour)
 			}
 			if r.nodeEventSink != nil {
-				_ = r.nodeEventSink.AppendJobWaiting(ctx, j.ID, step.NodeID, waitKind, reason, expiresAt)
+				correlationKey := "wait-" + uuid.New().String()
+				_ = r.nodeEventSink.AppendJobWaiting(ctx, j.ID, step.NodeID, waitKind, reason, expiresAt, correlationKey)
 			}
 			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusWaiting)
 			return ErrJobWaiting

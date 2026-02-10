@@ -89,16 +89,16 @@ func TestMemoryStore_Claim_Heartbeat(t *testing.T) {
 	_, _ = s.Append(ctx, jobID, 0, JobEvent{JobID: jobID, Type: JobCreated})
 
 	// Claim 应返回该 job
-	claimedID, ver, err := s.Claim(ctx, "worker-1")
+	claimedID, ver, attemptID, err := s.Claim(ctx, "worker-1")
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
-	if claimedID != jobID || ver != 1 {
-		t.Errorf("Claim: got jobID=%s version=%d", claimedID, ver)
+	if claimedID != jobID || ver != 1 || attemptID == "" {
+		t.Errorf("Claim: got jobID=%s version=%d attemptID=%s", claimedID, ver, attemptID)
 	}
 
 	// 同一 job 不应再被其他 worker 抢占（租约未过期）
-	_, _, err = s.Claim(ctx, "worker-2")
+	_, _, _, err = s.Claim(ctx, "worker-2")
 	if err != ErrNoJob {
 		t.Errorf("expected ErrNoJob when job already claimed, got %v", err)
 	}
@@ -119,7 +119,7 @@ func TestMemoryStore_Claim_Heartbeat(t *testing.T) {
 func TestMemoryStore_Claim_NoJob(t *testing.T) {
 	ctx := context.Background()
 	s := NewMemoryStore()
-	_, _, err := s.Claim(ctx, "worker-1")
+	_, _, _, err := s.Claim(ctx, "worker-1")
 	if err != ErrNoJob {
 		t.Errorf("expected ErrNoJob, got %v", err)
 	}
@@ -132,7 +132,7 @@ func TestMemoryStore_Claim_SkipsCompleted(t *testing.T) {
 	_, _ = s.Append(ctx, jobID, 0, JobEvent{JobID: jobID, Type: JobCreated})
 	_, _ = s.Append(ctx, jobID, 1, JobEvent{JobID: jobID, Type: JobCompleted})
 
-	_, _, err := s.Claim(ctx, "worker-1")
+	_, _, _, err := s.Claim(ctx, "worker-1")
 	if err != ErrNoJob {
 		t.Errorf("expected ErrNoJob for completed job, got %v", err)
 	}
@@ -144,7 +144,7 @@ func TestMemoryStore_ClaimJob(t *testing.T) {
 	jobID := "job-1"
 	_, _ = s.Append(ctx, jobID, 0, JobEvent{JobID: jobID, Type: JobCreated})
 
-	ver, err := s.ClaimJob(ctx, "worker-1", jobID)
+	ver, _, err := s.ClaimJob(ctx, "worker-1", jobID)
 	if err != nil {
 		t.Fatalf("ClaimJob: %v", err)
 	}
@@ -153,13 +153,13 @@ func TestMemoryStore_ClaimJob(t *testing.T) {
 	}
 
 	// 同一 job 再次 ClaimJob 应失败（已占用）
-	_, err = s.ClaimJob(ctx, "worker-2", jobID)
+	_, _, err = s.ClaimJob(ctx, "worker-2", jobID)
 	if err != ErrClaimNotFound {
 		t.Errorf("expected ErrClaimNotFound when job already claimed, got %v", err)
 	}
 
 	// 不存在的 job
-	_, err = s.ClaimJob(ctx, "worker-1", "nonexistent")
+	_, _, err = s.ClaimJob(ctx, "worker-1", "nonexistent")
 	if err != ErrNoJob {
 		t.Errorf("expected ErrNoJob for nonexistent job, got %v", err)
 	}
@@ -168,7 +168,7 @@ func TestMemoryStore_ClaimJob(t *testing.T) {
 	jobID2 := "job-2"
 	_, _ = s.Append(ctx, jobID2, 0, JobEvent{JobID: jobID2, Type: JobCreated})
 	_, _ = s.Append(ctx, jobID2, 1, JobEvent{JobID: jobID2, Type: JobCompleted})
-	_, err = s.ClaimJob(ctx, "worker-2", jobID2)
+	_, _, err = s.ClaimJob(ctx, "worker-2", jobID2)
 	if err != ErrNoJob {
 		t.Errorf("expected ErrNoJob for completed job, got %v", err)
 	}
@@ -203,5 +203,31 @@ func TestMemoryStore_Watch(t *testing.T) {
 
 	if len(received) < 2 {
 		t.Errorf("expected at least 2 events from Watch, got %d", len(received))
+	}
+}
+
+// TestMemoryStore_Append_StaleAttempt 校验 design/runtime-contract.md §5：仅当前 attempt 可写事件
+func TestMemoryStore_Append_StaleAttempt(t *testing.T) {
+	ctx := context.Background()
+	s := NewMemoryStore()
+	jobID := "job-1"
+	_, _ = s.Append(ctx, jobID, 0, JobEvent{JobID: jobID, Type: JobCreated})
+
+	_, _, attemptID, err := s.Claim(ctx, "worker-1")
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	ctxOK := WithAttemptID(ctx, attemptID)
+	ctxBad := WithAttemptID(ctx, "wrong-attempt-id")
+
+	// 正确 attempt_id 可追加
+	_, err = s.Append(ctxOK, jobID, 1, JobEvent{JobID: jobID, Type: PlanGenerated})
+	if err != nil {
+		t.Errorf("Append with correct attempt_id: %v", err)
+	}
+	// 错误 attempt_id 拒绝
+	_, err = s.Append(ctxBad, jobID, 2, JobEvent{JobID: jobID, Type: NodeStarted})
+	if err != ErrStaleAttempt {
+		t.Errorf("expected ErrStaleAttempt, got %v", err)
 	}
 }

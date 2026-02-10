@@ -52,3 +52,28 @@ func TestDeriveStatusFromEvents(t *testing.T) {
 		})
 	}
 }
+
+func TestIsJobBlocked(t *testing.T) {
+	now := time.Now()
+	ev := func(typ jobstore.EventType) jobstore.JobEvent {
+		return jobstore.JobEvent{JobID: "j1", Type: typ, CreatedAt: now}
+	}
+	tests := []struct {
+		name   string
+		events []jobstore.JobEvent
+		want   bool
+	}{
+		{"empty", nil, false},
+		{"job_running", []jobstore.JobEvent{ev(jobstore.JobRunning)}, false},
+		{"job_waiting", []jobstore.JobEvent{ev(jobstore.JobRunning), ev(jobstore.JobWaiting)}, true},
+		{"wait_completed after waiting", []jobstore.JobEvent{ev(jobstore.JobWaiting), ev(jobstore.WaitCompleted)}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsJobBlocked(tt.events)
+			if got != tt.want {
+				t.Errorf("IsJobBlocked() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

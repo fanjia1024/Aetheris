@@ -26,18 +26,43 @@ var (
 	ErrVersionMismatch = errors.New("jobstore: version mismatch on append")
 	// ErrClaimNotFound 或租约已过期，Heartbeat 无法续租
 	ErrClaimNotFound = errors.New("jobstore: claim not found or expired")
+	// ErrStaleAttempt Append 时 context 中的 attempt_id 与当前租约的 attempt_id 不一致（design/runtime-contract.md §3.2）
+	ErrStaleAttempt = errors.New("jobstore: stale attempt, cannot append")
 )
 
-// JobStore 任务事件存储：事件流 + 调度语义（版本化追加、Claim 租约、Heartbeat、Watch）
+type contextKey string
+
+const attemptIDContextKey contextKey = "jobstore.attempt_id"
+
+// WithAttemptID 将当前执行 attempt 的 ID 放入 context；Worker Claim 后注入，Append 时校验（design/runtime-contract.md）
+func WithAttemptID(ctx context.Context, attemptID string) context.Context {
+	return context.WithValue(ctx, attemptIDContextKey, attemptID)
+}
+
+// AttemptIDFromContext 从 context 读取 attempt_id；无则返回空字符串
+func AttemptIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	v := ctx.Value(attemptIDContextKey)
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
+// JobStore 任务事件存储：事件流 + 调度语义（版本化追加、Claim 租约、Heartbeat、Watch）。
+// 语义见 design/runtime-contract.md（租约 §3、attempt_id §5、Append 校验）。
 type JobStore interface {
 	// ListEvents 返回该 job 的完整事件列表（按序）及当前 version（事件条数；0 表示尚无事件）
 	ListEvents(ctx context.Context, jobID string) ([]JobEvent, int, error)
-	// Append 仅当 expectedVersion 等于当前 version 时追加，返回 newVersion；否则返回 ErrVersionMismatch
+	// Append 仅当 expectedVersion 等于当前 version 时追加，返回 newVersion；否则返回 ErrVersionMismatch。
+	// 若 ctx 带 attempt_id（WithAttemptID），则校验与当前 claim 的 attempt_id 一致，否则返回 ErrStaleAttempt（design/runtime-contract.md §5）。
 	Append(ctx context.Context, jobID string, expectedVersion int, event JobEvent) (newVersion int, err error)
-	// Claim 尝试占用一个可执行的 job，成功返回 jobID 与当前 version；无可用 job 返回 ErrNoJob
-	Claim(ctx context.Context, workerID string) (jobID string, version int, err error)
-	// ClaimJob 占用指定 jobID（用于能力调度：先由 metadata store 按能力选出 Job，再在此占租约）；若该 job 已终止或已被占用则返回错误
-	ClaimJob(ctx context.Context, workerID string, jobID string) (version int, err error)
+	// Claim 尝试占用一个可执行的 job，成功返回 jobID、当前 version 与 attemptID；无可用 job 返回 ErrNoJob（design/runtime-contract.md §3.2）
+	Claim(ctx context.Context, workerID string) (jobID string, version int, attemptID string, err error)
+	// ClaimJob 占用指定 jobID（用于能力调度）；成功返回 version 与 attemptID；若该 job 已终止或已被占用则返回错误
+	ClaimJob(ctx context.Context, workerID string, jobID string) (version int, attemptID string, err error)
 	// Heartbeat 续租；仅当该 job 被同一 workerID 占用时延长过期时间
 	Heartbeat(ctx context.Context, workerID string, jobID string) error
 	// Watch 订阅该 job 的新事件；实现层在每次对该 job 成功 Append 后向返回的 channel 发送新事件

@@ -1124,7 +1124,7 @@ func (h *Handler) ListAgents(ctx context.Context, c *app.RequestContext) {
 	})
 }
 
-// GetJob 按 job_id 返回 Job 元数据（供 Trace 等使用）
+// GetJob 按 job_id 返回 Job 元数据（供 Trace 等使用）；若 status 为 waiting 则附带 wait_correlation_key 供 JobSignal 使用（design/runtime-contract.md）
 func (h *Handler) GetJob(ctx context.Context, c *app.RequestContext) {
 	if h.jobStore == nil || h.jobEventStore == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "Job 未启用"})
@@ -1136,7 +1136,7 @@ func (h *Handler) GetJob(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
 		return
 	}
-	c.JSON(consts.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"id":          j.ID,
 		"agent_id":    j.AgentID,
 		"goal":        j.Goal,
@@ -1145,7 +1145,21 @@ func (h *Handler) GetJob(ctx context.Context, c *app.RequestContext) {
 		"retry_count": j.RetryCount,
 		"created_at":  j.CreatedAt,
 		"updated_at":  j.UpdatedAt,
-	})
+	}
+	if j.Status == job.StatusWaiting && h.jobEventStore != nil {
+		events, _, _ := h.jobEventStore.ListEvents(ctx, jobID)
+		for i := len(events) - 1; i >= 0; i-- {
+			if events[i].Type == jobstore.JobWaiting {
+				p, _ := jobstore.ParseJobWaitingPayload(events[i].Payload)
+				if p.CorrelationKey != "" {
+					resp["wait_correlation_key"] = p.CorrelationKey
+					resp["wait_node_id"] = p.NodeID
+				}
+				break
+			}
+		}
+	}
+	c.JSON(consts.StatusOK, resp)
 }
 
 // JobStop 请求取消执行中的 Job（POST /api/jobs/:id/stop）；Worker 轮询到后取消 runCtx，Job 进入 CANCELLED
@@ -1176,9 +1190,10 @@ func (h *Handler) JobStop(ctx context.Context, c *app.RequestContext) {
 	})
 }
 
-// JobSignalRequest POST /api/jobs/:id/signal 请求体；唤醒在 Wait 节点挂起的 Job（design/job-state-machine.md）
+// JobSignalRequest POST /api/jobs/:id/signal 请求体；correlation_key 必须与当前 job_waiting 事件的 correlation_key 一致（design/runtime-contract.md）
 type JobSignalRequest struct {
-	Payload map[string]interface{} `json:"payload"`
+	CorrelationKey string                 `json:"correlation_key" binding:"required"`
+	Payload        map[string]interface{} `json:"payload"`
 }
 
 // JobSignal 向挂起的 Job 发送 signal，写入 wait_completed 事件并将 Job 置回 Pending 供 Worker 认领继续
@@ -1203,29 +1218,30 @@ func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件失败"})
 		return
 	}
-	var nodeID string
+	var waitPayload jobstore.JobWaitingPayload
 	for i := len(events) - 1; i >= 0; i-- {
 		if events[i].Type == jobstore.JobWaiting {
-			var pl struct {
-				NodeID string `json:"node_id"`
-			}
-			if _ = json.Unmarshal(events[i].Payload, &pl); pl.NodeID != "" {
-				nodeID = pl.NodeID
-				break
-			}
+			waitPayload, _ = jobstore.ParseJobWaitingPayload(events[i].Payload)
+			break
 		}
 	}
-	if nodeID == "" {
-		c.JSON(consts.StatusBadRequest, map[string]string{"error": "未找到 job_waiting 节点"})
+	if waitPayload.CorrelationKey == "" {
+		c.JSON(consts.StatusBadRequest, map[string]string{"error": "未找到有效的 job_waiting（缺少 correlation_key）"})
 		return
 	}
 	var req JobSignalRequest
 	if err := c.BindJSON(&req); err != nil {
-		req.Payload = nil
+		c.JSON(consts.StatusBadRequest, map[string]string{"error": "请求体需包含 correlation_key"})
+		return
+	}
+	if req.CorrelationKey != waitPayload.CorrelationKey {
+		c.JSON(consts.StatusBadRequest, map[string]string{"error": "correlation_key 与当前等待不匹配"})
+		return
 	}
 	if req.Payload == nil {
 		req.Payload = make(map[string]interface{})
 	}
+	nodeID := waitPayload.NodeID
 	payloadBytes, _ := json.Marshal(req.Payload)
 	evPayload, _ := json.Marshal(map[string]interface{}{
 		"node_id": nodeID,

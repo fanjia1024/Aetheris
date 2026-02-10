@@ -28,6 +28,7 @@ const watchChanBuffer = 16
 type claimRecord struct {
 	WorkerID  string
 	ExpiresAt time.Time
+	AttemptID string
 }
 
 // memoryStore 内存实现：事件流 + 版本 + 租约 + Watch
@@ -70,6 +71,15 @@ func (s *memoryStore) ListEvents(ctx context.Context, jobID string) ([]JobEvent,
 func (s *memoryStore) Append(ctx context.Context, jobID string, expectedVersion int, event JobEvent) (int, error) {
 	if jobID == "" {
 		return 0, ErrVersionMismatch
+	}
+	attemptID := AttemptIDFromContext(ctx)
+	if attemptID != "" {
+		s.mu.RLock()
+		claim, ok := s.claims[jobID]
+		s.mu.RUnlock()
+		if !ok || claim.ExpiresAt.Before(time.Now()) || claim.AttemptID != attemptID {
+			return 0, ErrStaleAttempt
+		}
 	}
 	if event.ID == "" {
 		event.ID = "ev-" + uuid.New().String()
@@ -118,10 +128,11 @@ func (s *memoryStore) notifyWatchersLocked(jobID string, event JobEvent) {
 	s.watchers[jobID] = still
 }
 
-func (s *memoryStore) Claim(ctx context.Context, workerID string) (string, int, error) {
+func (s *memoryStore) Claim(ctx context.Context, workerID string) (string, int, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
+	attemptID := "attempt-" + uuid.New().String()
 	for jobID, events := range s.byJob {
 		if len(events) == 0 {
 			continue
@@ -134,29 +145,30 @@ func (s *memoryStore) Claim(ctx context.Context, workerID string) (string, int, 
 		if ok && claim.ExpiresAt.After(now) {
 			continue
 		}
-		s.claims[jobID] = claimRecord{WorkerID: workerID, ExpiresAt: now.Add(leaseDuration)}
-		return jobID, len(events), nil
+		s.claims[jobID] = claimRecord{WorkerID: workerID, ExpiresAt: now.Add(leaseDuration), AttemptID: attemptID}
+		return jobID, len(events), attemptID, nil
 	}
-	return "", 0, ErrNoJob
+	return "", 0, "", ErrNoJob
 }
 
-func (s *memoryStore) ClaimJob(ctx context.Context, workerID string, jobID string) (int, error) {
+func (s *memoryStore) ClaimJob(ctx context.Context, workerID string, jobID string) (int, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	events, ok := s.byJob[jobID]
 	if !ok || len(events) == 0 {
-		return 0, ErrNoJob
+		return 0, "", ErrNoJob
 	}
 	last := events[len(events)-1].Type
 	if last == JobCompleted || last == JobFailed || last == JobCancelled {
-		return 0, ErrNoJob
+		return 0, "", ErrNoJob
 	}
 	now := time.Now()
 	if claim, ok := s.claims[jobID]; ok && claim.ExpiresAt.After(now) {
-		return 0, ErrClaimNotFound
+		return 0, "", ErrClaimNotFound
 	}
-	s.claims[jobID] = claimRecord{WorkerID: workerID, ExpiresAt: now.Add(leaseDuration)}
-	return len(events), nil
+	attemptID := "attempt-" + uuid.New().String()
+	s.claims[jobID] = claimRecord{WorkerID: workerID, ExpiresAt: now.Add(leaseDuration), AttemptID: attemptID}
+	return len(events), attemptID, nil
 }
 
 func (s *memoryStore) Heartbeat(ctx context.Context, workerID string, jobID string) error {

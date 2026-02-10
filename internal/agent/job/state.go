@@ -48,3 +48,23 @@ func DeriveStatusFromEvents(events []jobstore.JobEvent) JobStatus {
 	}
 	return status
 }
+
+// IsJobBlocked 判断事件流是否表示 Job 处于阻塞（等待 signal）；最后一条状态相关事件为 JobWaiting 时返回 true。
+// Reclaim 不得回收 Blocked Job（design/runtime-contract.md §2）。
+func IsJobBlocked(events []jobstore.JobEvent) bool {
+	if len(events) == 0 {
+		return false
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		switch events[i].Type {
+		case jobstore.JobWaiting:
+			return true
+		case jobstore.JobCreated, jobstore.JobQueued, jobstore.JobRequeued, jobstore.JobLeased, jobstore.JobRunning,
+			jobstore.WaitCompleted, jobstore.JobCompleted, jobstore.JobFailed, jobstore.JobCancelled:
+			return false
+		default:
+			// 其他事件不改变“是否阻塞”的结论，继续往前
+		}
+	}
+	return false
+}
