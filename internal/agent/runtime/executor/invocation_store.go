@@ -16,12 +16,12 @@ package executor
 
 import "context"
 
-// ToolInvocationStatus 持久化记录状态
+// ToolInvocationStatus 持久化记录状态（与常见命名对应：pending→started, running→started, succeeded→success, failed→failure）
 const (
-	ToolInvocationStatusStarted   = "started"
-	ToolInvocationStatusSuccess   = "success"
-	ToolInvocationStatusFailure   = "failure"
-	ToolInvocationStatusTimeout   = "timeout"
+	ToolInvocationStatusStarted   = "started"   // 执行前创建，等价 pending/running
+	ToolInvocationStatusSuccess   = "success"   // 执行成功并已持久化，等价 succeeded
+	ToolInvocationStatusFailure   = "failure"   // 执行失败，等价 failed
+	ToolInvocationStatusTimeout   = "timeout"   // 执行超时
 	ToolInvocationStatusConfirmed = "confirmed" // 已通过 ResourceVerifier 校验，可选策略下后续 replay 可跳过校验
 )
 
@@ -33,8 +33,8 @@ type ToolInvocationRecord struct {
 	ToolName       string
 	ArgsHash       string
 	IdempotencyKey string
-	Status         string // started | success | failure | timeout
-	Result         []byte // 成功时的 result JSON
+	Status         string // started | success | failure | timeout | confirmed
+	Result         []byte // 成功时的 result JSON（result_snapshot）
 	Committed      bool   // true 仅当已执行且结果已持久化，跨进程权威
 }
 

@@ -72,10 +72,14 @@ CREATE TABLE IF NOT EXISTS tool_invocations (
     committed       BOOLEAN NOT NULL DEFAULT false,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    confirmed_at    TIMESTAMPTZ,
     PRIMARY KEY (job_id, idempotency_key)
 );
 
 CREATE INDEX IF NOT EXISTS idx_tool_invocations_job_id ON tool_invocations (job_id);
+
+-- 升级已有库时如缺少 confirmed_at 可执行：
+-- ALTER TABLE tool_invocations ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
 
 -- 入库任务队列（API 入队、Worker 认领执行 ingest_pipeline）
 CREATE TABLE IF NOT EXISTS ingest_tasks (

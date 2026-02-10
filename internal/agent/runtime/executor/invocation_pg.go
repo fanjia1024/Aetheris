@@ -71,8 +71,16 @@ func (s *ToolInvocationStorePg) SetStarted(ctx context.Context, r *ToolInvocatio
 	return err
 }
 
-// SetFinished 实现 ToolInvocationStore；按 idempotency_key 更新（同一 key 仅一行，因 key 含 job_id 哈希）
+// SetFinished 实现 ToolInvocationStore；按 idempotency_key 更新（同一 key 仅一行，因 key 含 job_id 哈希）；status=confirmed 时同时写入 confirmed_at
 func (s *ToolInvocationStorePg) SetFinished(ctx context.Context, idempotencyKey string, status string, result []byte, committed bool) error {
+	if status == ToolInvocationStatusConfirmed {
+		_, err := s.pool.Exec(ctx,
+			`UPDATE tool_invocations SET status = $1, result = $2, committed = $3, updated_at = now(), confirmed_at = now()
+			 WHERE idempotency_key = $4`,
+			status, result, committed, idempotencyKey,
+		)
+		return err
+	}
 	_, err := s.pool.Exec(ctx,
 		`UPDATE tool_invocations SET status = $1, result = $2, committed = $3, updated_at = now()
 		 WHERE idempotency_key = $4`,

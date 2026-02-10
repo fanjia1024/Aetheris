@@ -132,6 +132,13 @@ Aetheris is an attempt to provide the missing layer:
 > Kubernetes manages containers.
 > Aetheris manages agents.
 
+That claim holds only when the runtime can **prove** that agent steps do not repeat external side effects. Aetheris 1.0 provides:
+
+* **At-most-once tool execution** — Every tool invocation is a persistent fact (Tool Invocation Ledger). On replay, the runner looks up the ledger and restores results instead of calling the tool again.
+* **World-consistent replay** — Replay is not “run the step again”; it is “verify the external world still matches the event stream, then restore memory and skip execution” (Confirmation Replay). If verification fails, the job fails rather than silently re-executing.
+
+So: **external side effects are executed at most once**. See [design/1.0-runtime-semantics.md](design/1.0-runtime-semantics.md) for the three mechanisms (Tool Invocation Ledger, StepOutcome world semantics, Confirmation Replay) and where they live in the codebase.
+
 ---
 
 ## License
