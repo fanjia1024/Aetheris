@@ -39,6 +39,7 @@ Reclaim 后再次 Claim 的 Job 会走 Replay；**安全前提**是 Effect 边�
 
 - **契约**：任意执行路径（含 Replay、恢复、首次运行）在**未**从事件流中读到 `PlanGenerated`（或等价规划记录）时，**不得**调用 Planner.Plan；若没有则应**失败**（Job 置为 Failed），而不是重新 Plan。
 - Replay 禁止调用 Planner；执行仅允许在「已有该 Job 的 PlanGenerated 记录」的前提下进行。运维如需「重新规划」应通过显式 API 写入新的 Plan 事件。
+- **Workflow 确定性边界**：执行与 Replay 仅依赖**已记录的决策**（当前即 PlanGenerated）；不在 Replay 中调用任何 Planner/LLM 决定执行路径。即「LLM 提议，Runtime 决定」— 见 [workflow-decision-record.md](workflow-decision-record.md)。
 
 **接口**：见 [internal/agent/runtime/executor/runner.go](../internal/agent/runtime/executor/runner.go)（无 PlanGenerated 则返回错误并置 Failed）、[effect-system.md](effect-system.md)。
 
@@ -51,6 +52,13 @@ Reclaim 后再次 Claim 的 Job 会走 Replay；**安全前提**是 Effect 边�
 - 非 Worker 路径（如 API 创建 Job、写入 PlanGenerated、JobSignal 写入 wait_completed）不传 `attempt_id`，Append 不校验 attempt，允许写入。
 
 **接口**：见 [internal/runtime/jobstore/store.go](../internal/runtime/jobstore/store.go)（WithAttemptID、AttemptIDFromContext、ErrStaleAttempt）、Claim/ClaimJob 返回 attemptID；pg/memory Store 的 Append 校验 context 中的 attempt_id。
+
+---
+
+## 六、Scheduler 正确性（P2）
+
+- **当前**：Job 级租约、attempt_id、Reclaim 以 event store 为准、Append 校验已实现；见 §3、§5。
+- **P2 目标**：Execution ownership 强化 — lease fencing、step heartbeat（可选）、worker epoch / stale worker 检测与文档化。详见 [scheduler-correctness.md](scheduler-correctness.md)。
 
 ---
 

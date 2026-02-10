@@ -294,7 +294,10 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 	step := steps[startIndex]
 	commandID := step.NodeID
 	graphBytes, _ := taskGraph.Marshal()
+	decisionID := PlanDecisionID(graphBytes)
+	effectiveStepID := DeterministicStepID(jobID, decisionID, startIndex, step.NodeType)
 	ctx = WithJobID(ctx, jobID)
+	ctx = WithExecutionStepID(ctx, effectiveStepID)
 
 	// 命令级跳过与注入（同 runLoop）
 	if replayCtx != nil {
@@ -309,12 +312,12 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 					payload.Results[step.NodeID] = nodeResult
 				}
 				payloadResults, _ := json.Marshal(payload.Results)
-				if _, done := completedSet[step.NodeID]; !done && r.nodeEventSink != nil {
+				if _, done := completedSet[effectiveStepID]; !done && r.nodeEventSink != nil {
 					rt := StepResultPure
 					if step.NodeType == "tool" {
 						rt = StepResultSideEffectCommitted
 					}
-					_ = r.nodeEventSink.AppendNodeFinished(ctx, jobID, step.NodeID, payloadResults, 0, "", 0, rt, "", step.NodeID, "")
+					_ = r.nodeEventSink.AppendNodeFinished(ctx, jobID, step.NodeID, payloadResults, 0, "", 0, rt, "", effectiveStepID, "")
 				}
 				cp := runtime.NewNodeCheckpoint(agent.ID, sessionID, jobID, step.NodeID, graphBytes, payloadResults, nil)
 				cpID, saveErr := r.checkpointStore.Save(ctx, cp)
@@ -344,12 +347,12 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 					}
 				}
 				payloadResults, _ := json.Marshal(payload.Results)
-				if _, done := completedSet[step.NodeID]; !done && r.nodeEventSink != nil {
+				if _, done := completedSet[effectiveStepID]; !done && r.nodeEventSink != nil {
 					rt := StepResultPure
 					if step.NodeType == "tool" {
 						rt = StepResultSideEffectCommitted
 					}
-					_ = r.nodeEventSink.AppendNodeFinished(ctx, jobID, step.NodeID, payloadResults, 0, "", 0, rt, "", step.NodeID, "")
+					_ = r.nodeEventSink.AppendNodeFinished(ctx, jobID, step.NodeID, payloadResults, 0, "", 0, rt, "", effectiveStepID, "")
 				}
 				cp := runtime.NewNodeCheckpoint(agent.ID, sessionID, jobID, step.NodeID, graphBytes, payloadResults, nil)
 				cpID, saveErr := r.checkpointStore.Save(ctx, cp)
@@ -365,7 +368,7 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 			}
 		}
 	}
-	if _, done := completedSet[step.NodeID]; done {
+	if _, done := completedSet[effectiveStepID]; done {
 		return false, nil
 	}
 	// 执行一步
@@ -410,7 +413,7 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 		if resultType != StepResultSuccess && resultType != StepResultPure && resultType != StepResultSideEffectCommitted && resultType != StepResultCompensated {
 			stateStr = string(resultType)
 		}
-		_ = r.nodeEventSink.AppendNodeFinished(ctx, jobID, step.NodeID, payloadResults, durationMs, stateStr, 1, resultType, reason, step.NodeID, "")
+		_ = r.nodeEventSink.AppendNodeFinished(ctx, jobID, step.NodeID, payloadResults, durationMs, stateStr, 1, resultType, reason, effectiveStepID, "")
 	}
 	if isStepFailure(resultType) {
 		_ = r.jobStore.UpdateStatus(ctx, jobID, statusFailed)
@@ -487,6 +490,13 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 				break
 			}
 		}
+		// 确定性步身份：completedSet 同时按 execution_step_id 登记，供 runLoop 用 effectiveStepID 检查（design/step-identity.md）
+		decisionID := PlanDecisionID(cp.TaskGraphState)
+		for idx := 0; idx < startIndex && idx < len(steps); idx++ {
+			s := steps[idx]
+			effectiveStepID := DeterministicStepID(j.ID, decisionID, idx, s.NodeType)
+			completedSet[effectiveStepID] = struct{}{}
+		}
 		payload = NewAgentDAGPayload(j.Goal, agent.ID, sessionID)
 		if len(cp.PayloadResults) > 0 {
 			if err := json.Unmarshal(cp.PayloadResults, &payload.Results); err != nil {
@@ -562,8 +572,11 @@ runLoop:
 	const statusCompleted = 2 // 对应 job.StatusCompleted
 	const statusWaiting = 5   // 对应 job.StatusWaiting（design/job-state-machine.md）
 	graphBytes, _ := taskGraph.Marshal()
+	runLoopDecisionID := PlanDecisionID(graphBytes)
 	for i := startIndex; i < len(steps); i++ {
 		step := steps[i]
+		effectiveStepID := DeterministicStepID(j.ID, runLoopDecisionID, i, step.NodeType)
+		ctx = WithExecutionStepID(ctx, effectiveStepID)
 		commandID := step.NodeID // 单命令每节点
 		// 命令级跳过（design/effect-system.md）：事件流中已 command_committed 的永不重放，仅注入结果并推进游标（或按 ReplayPolicy 决策）
 		if replayCtx != nil {
@@ -579,15 +592,15 @@ runLoop:
 					}
 					payloadResults, _ := json.Marshal(payload.Results)
 					if completedSet != nil {
-						if _, done := completedSet[step.NodeID]; !done {
+						if _, done := completedSet[effectiveStepID]; !done {
 							rt := StepResultPure
 							if step.NodeType == "tool" {
 								rt = StepResultSideEffectCommitted
 							}
 							if r.nodeEventSink != nil {
-								_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, 0, "", 0, rt, "", step.NodeID, "")
+								_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, 0, "", 0, rt, "", effectiveStepID, "")
 							}
-							completedSet[step.NodeID] = struct{}{}
+							completedSet[effectiveStepID] = struct{}{}
 						}
 					}
 					cp := runtime.NewNodeCheckpoint(agent.ID, sessionID, j.ID, step.NodeID, graphBytes, payloadResults, nil)
@@ -619,15 +632,15 @@ runLoop:
 					}
 					payloadResults, _ := json.Marshal(payload.Results)
 					if completedSet != nil {
-						if _, done := completedSet[step.NodeID]; !done {
+						if _, done := completedSet[effectiveStepID]; !done {
 							rt := StepResultPure
 							if step.NodeType == "tool" {
 								rt = StepResultSideEffectCommitted
 							}
 							if r.nodeEventSink != nil {
-								_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, 0, "", 0, rt, "", step.NodeID, "")
+								_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, 0, "", 0, rt, "", effectiveStepID, "")
 							}
-							completedSet[step.NodeID] = struct{}{}
+							completedSet[effectiveStepID] = struct{}{}
 						}
 					}
 					cp := runtime.NewNodeCheckpoint(agent.ID, sessionID, j.ID, step.NodeID, graphBytes, payloadResults, nil)
@@ -645,7 +658,7 @@ runLoop:
 			}
 		}
 		if completedSet != nil {
-			if _, done := completedSet[step.NodeID]; done {
+			if _, done := completedSet[effectiveStepID]; done {
 				continue
 			}
 		}
@@ -721,7 +734,7 @@ runLoop:
 			if resultType != StepResultSuccess && resultType != StepResultPure && resultType != StepResultSideEffectCommitted && resultType != StepResultCompensated {
 				stateStr = string(resultType)
 			}
-			_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, durationMs, stateStr, 1, resultType, reason, step.NodeID, "")
+			_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, durationMs, stateStr, 1, resultType, reason, effectiveStepID, "")
 		}
 		if isStepFailure(resultType) {
 			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
@@ -734,7 +747,7 @@ runLoop:
 			// 推理快照：供因果调试（该步的决策上下文）
 			snapshot := map[string]interface{}{
 				"node_id":     step.NodeID,
-				"step_id":     step.NodeID,
+				"step_id":     effectiveStepID,
 				"node_type":   step.NodeType,
 				"goal":        j.Goal,
 				"duration_ms": durationMs,

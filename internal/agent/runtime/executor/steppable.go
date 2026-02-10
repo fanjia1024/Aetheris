@@ -17,6 +17,7 @@ package executor
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"rag-platform/internal/agent/planner"
 	"rag-platform/internal/agent/runtime"
@@ -53,6 +54,7 @@ func TopoOrder(g *planner.TaskGraph) ([]string, error) {
 			queue = append(queue, id)
 		}
 	}
+	sort.Strings(queue) // 确定性：同层节点按 ID 排序
 	var order []string
 	for len(queue) > 0 {
 		u := queue[0]
@@ -71,6 +73,7 @@ func TopoOrder(g *planner.TaskGraph) ([]string, error) {
 				queue = append(queue, v)
 			}
 		}
+		sort.Strings(queue) // 确定性：下一批按 ID 排序
 	}
 	if len(order) != len(nodeSet) {
 		return nil, fmt.Errorf("executor: TaskGraph 存在环，无法拓扑排序")

@@ -39,11 +39,15 @@ type stateChangesByStepContextKey struct{}
 // pendingToolInvocationsContextKey 用于在 context 中传递事件流「已 started 无 finished」的 idempotency_key 集合（Activity Log Barrier），禁止再次执行
 type pendingToolInvocationsContextKey struct{}
 
+// executionStepIDContextKey 用于在 context 中传递确定性步身份（design/step-identity.md），供 Ledger/事件写入与 Replay 一致
+type executionStepIDContextKey struct{}
+
 var theAgentContextKey = agentContextKey{}
 var theJobIDContextKey = jobIDContextKey{}
 var theReplayContextKey = replayContextKey{}
 var theStateChangesByStepContextKey = stateChangesByStepContextKey{}
 var thePendingToolInvocationsContextKey = pendingToolInvocationsContextKey{}
+var theExecutionStepIDContextKey = executionStepIDContextKey{}
 
 // WithAgent 将 agent 放入 ctx，供 Runner.Invoke 时传入节点
 func WithAgent(ctx context.Context, agent *runtime.Agent) context.Context {
@@ -126,6 +130,21 @@ func StateChangesByStepFromContext(ctx context.Context) map[string][]StateChange
 	}
 	m, _ := v.(map[string][]StateChangeForVerify)
 	return m
+}
+
+// WithExecutionStepID 将确定性步身份放入 ctx（design/step-identity.md），供 Ledger 与事件写入使用
+func WithExecutionStepID(ctx context.Context, stepID string) context.Context {
+	return context.WithValue(ctx, theExecutionStepIDContextKey, stepID)
+}
+
+// ExecutionStepIDFromContext 从 context 取出步身份；空表示使用 planner node ID（向后兼容）
+func ExecutionStepIDFromContext(ctx context.Context) string {
+	v := ctx.Value(theExecutionStepIDContextKey)
+	if v == nil {
+		return ""
+	}
+	s, _ := v.(string)
+	return s
 }
 
 // AgentDAGPayload DAG 统一载荷：整图节点入参/出参一致，便于多前驱时合并结果

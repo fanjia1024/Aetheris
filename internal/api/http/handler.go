@@ -17,7 +17,9 @@ package http
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -901,9 +903,15 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 				}
 				if taskGraph != nil {
 					graphBytes, _ := taskGraph.Marshal()
+					planHash := ""
+					if len(graphBytes) > 0 {
+						h := sha256.Sum256(graphBytes)
+						planHash = hex.EncodeToString(h[:])
+					}
 					payloadPlan, _ := json.Marshal(map[string]interface{}{
 						"task_graph": json.RawMessage(graphBytes),
 						"goal":       req.Message,
+						"plan_hash":  planHash,
 					})
 					_, _ = h.jobEventStore.Append(ctx, jobIDOut, ver, jobstore.JobEvent{
 						JobID: jobIDOut, Type: jobstore.PlanGenerated, Payload: payloadPlan,

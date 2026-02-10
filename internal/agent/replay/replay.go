@@ -134,6 +134,7 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 		case jobstore.NodeFinished:
 			var payload struct {
 				NodeID         string          `json:"node_id"`
+				StepID         string          `json:"step_id"` // 确定性步身份（design/step-identity.md）；有则用其作为 CompletedNodeIDs 的 key，否则用 node_id 向后兼容
 				PayloadResults json.RawMessage `json:"payload_results"`
 				ResultType     string          `json:"result_type"` // Phase A: only success (or empty for old events) advances CompletedNodeIDs
 			}
@@ -147,7 +148,11 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 			default:
 				continue
 			}
-			out.CompletedNodeIDs[payload.NodeID] = struct{}{}
+			completedKey := payload.NodeID
+			if payload.StepID != "" {
+				completedKey = payload.StepID
+			}
+			out.CompletedNodeIDs[completedKey] = struct{}{}
 			out.CursorNode = payload.NodeID
 			if len(payload.PayloadResults) > 0 {
 				out.PayloadResults = []byte(payload.PayloadResults)

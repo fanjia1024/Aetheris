@@ -16,6 +16,8 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 
 	"rag-platform/internal/agent/runtime/executor"
@@ -42,9 +44,15 @@ func (s *PlanGeneratedSinkImpl) AppendPlanGenerated(ctx context.Context, jobID s
 		return err
 	}
 	stepIndex := ver + 1
+	planHash := ""
+	if len(taskGraphJSON) > 0 {
+		h := sha256.Sum256(taskGraphJSON)
+		planHash = hex.EncodeToString(h[:])
+	}
 	payload, err := json.Marshal(map[string]interface{}{
 		"task_graph":     json.RawMessage(taskGraphJSON),
 		"goal":           goal,
+		"plan_hash":      planHash, // 决策记录完整性校验与调试（design/workflow-decision-record.md）
 		"trace_span_id":  "plan",
 		"parent_span_id": "root",
 		"step_index":     stepIndex,

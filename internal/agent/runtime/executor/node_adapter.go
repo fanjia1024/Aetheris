@@ -152,11 +152,14 @@ func (a *ToolNodeAdapter) runConfirmation(ctx context.Context, jobID, taskID str
 }
 
 // writeCatchUpFinished 恢复路径：向事件流追加 tool_invocation_finished 与 command_committed（catch-up），使事件流与已提交结果一致（Activity Log Barrier）
-func (a *ToolNodeAdapter) writeCatchUpFinished(ctx context.Context, jobID, taskID, idempotencyKey, argsHash string, resultBytes []byte) error {
+func (a *ToolNodeAdapter) writeCatchUpFinished(ctx context.Context, jobID, taskID, nodeIDForEvent, idempotencyKey, argsHash string, resultBytes []byte) error {
+	if nodeIDForEvent == "" {
+		nodeIDForEvent = taskID
+	}
 	invocationID := "catchup-" + idempotencyKey
 	finishedAt := time.Now().UTC()
 	if a.ToolEventSink != nil {
-		if err := a.ToolEventSink.AppendToolInvocationFinished(ctx, jobID, taskID, &ToolInvocationFinishedPayload{
+		if err := a.ToolEventSink.AppendToolInvocationFinished(ctx, jobID, nodeIDForEvent, &ToolInvocationFinishedPayload{
 			InvocationID:   invocationID,
 			IdempotencyKey: idempotencyKey,
 			Outcome:        ToolInvocationOutcomeSuccess,
@@ -167,7 +170,7 @@ func (a *ToolNodeAdapter) writeCatchUpFinished(ctx context.Context, jobID, taskI
 		}
 	}
 	if a.CommandEventSink != nil {
-		if err := a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, resultBytes, argsHash); err != nil {
+		if err := a.CommandEventSink.AppendCommandCommitted(ctx, jobID, nodeIDForEvent, taskID, resultBytes, argsHash); err != nil {
 			return err
 		}
 	}
@@ -176,9 +179,16 @@ func (a *ToolNodeAdapter) writeCatchUpFinished(ctx context.Context, jobID, taskI
 
 func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, cfg map[string]any, agent *runtime.Agent, p *AgentDAGPayload) (*AgentDAGPayload, error) {
 	jobID := JobIDFromContext(ctx)
-	idempotencyKey := IdempotencyKey(jobID, taskID, toolName, cfg)
+	stepIDForLedger := ExecutionStepIDFromContext(ctx)
+	if stepIDForLedger == "" {
+		stepIDForLedger = taskID
+	}
+	idempotencyKey := IdempotencyKey(jobID, stepIDForLedger, toolName, cfg)
 	argsHash := ArgumentsHash(cfg)
-	stepChanges := StateChangesByStepFromContext(ctx)[taskID]
+	stepChanges := StateChangesByStepFromContext(ctx)[stepIDForLedger]
+	if stepChanges == nil {
+		stepChanges = StateChangesByStepFromContext(ctx)[taskID]
+	}
 
 	// Activity Log Barrier：事件流中已 started 无 finished 时禁止再次执行，仅恢复或失败（design/effect-system.md）
 	if pending := PendingToolInvocationsFromContext(ctx); pending != nil {
@@ -201,7 +211,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 				if err := a.runConfirmation(ctx, jobID, taskID, stepChanges); err != nil {
 					return nil, err
 				}
-				if err := a.writeCatchUpFinished(ctx, jobID, taskID, idempotencyKey, argsHash, resultBytes); err != nil {
+				if err := a.writeCatchUpFinished(ctx, jobID, taskID, stepIDForLedger, idempotencyKey, argsHash, resultBytes); err != nil {
 					return nil, err
 				}
 				var nodeResult map[string]any
@@ -317,6 +327,10 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 
 // runNodeExecute 执行 tool 并写事件；当 Ledger 存在时 rec 非 nil 且已 SetStarted，成功后需 Commit
 func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, toolName string, cfg map[string]any, idempotencyKey, argsHash string, ledgerRec *ToolInvocationRecord, stepChanges []StateChangeForVerify, agent *runtime.Agent, p *AgentDAGPayload) (*AgentDAGPayload, error) {
+	nodeIDForEvent := ExecutionStepIDFromContext(ctx)
+	if nodeIDForEvent == "" {
+		nodeIDForEvent = taskID
+	}
 	var state interface{}
 	if prev, ok := p.Results[taskID]; ok {
 		if m, ok := prev.(map[string]any); ok {
@@ -340,7 +354,7 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 		})
 	}
 	if a.ToolEventSink != nil && jobID != "" {
-		_ = a.ToolEventSink.AppendToolInvocationStarted(ctx, jobID, taskID, &ToolInvocationStartedPayload{
+		_ = a.ToolEventSink.AppendToolInvocationStarted(ctx, jobID, nodeIDForEvent, &ToolInvocationStartedPayload{
 			InvocationID:   invocationID,
 			ToolName:       toolName,
 			ArgumentsHash:  argsHash,
@@ -350,11 +364,11 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 	}
 	if a.CommandEventSink != nil && jobID != "" {
 		inputBytes, _ := json.Marshal(cfg)
-		_ = a.CommandEventSink.AppendCommandEmitted(ctx, jobID, taskID, taskID, "tool", inputBytes)
+		_ = a.CommandEventSink.AppendCommandEmitted(ctx, jobID, nodeIDForEvent, taskID, "tool", inputBytes)
 	}
 	if a.ToolEventSink != nil && jobID != "" {
 		inputBytes, _ := json.Marshal(cfg)
-		_ = a.ToolEventSink.AppendToolCalled(ctx, jobID, taskID, toolName, inputBytes)
+		_ = a.ToolEventSink.AppendToolCalled(ctx, jobID, nodeIDForEvent, toolName, inputBytes)
 	}
 	result, err := a.Tools.Execute(ctx, toolName, cfg, state)
 	finishedAt := time.Now().UTC()
@@ -368,7 +382,7 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 		}
 		p.Results[taskID] = map[string]any{"error": err.Error(), "at": time.Now()}
 		if a.ToolEventSink != nil && jobID != "" {
-			_ = a.ToolEventSink.AppendToolInvocationFinished(ctx, jobID, taskID, &ToolInvocationFinishedPayload{
+			_ = a.ToolEventSink.AppendToolInvocationFinished(ctx, jobID, nodeIDForEvent, &ToolInvocationFinishedPayload{
 				InvocationID:   invocationID,
 				IdempotencyKey: idempotencyKey,
 				Outcome:        ToolInvocationOutcomeFailure,
@@ -376,8 +390,8 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 				FinishedAt:     FormatStartedAt(finishedAt),
 			})
 			outBytes, _ := json.Marshal(map[string]interface{}{"error": err.Error()})
-			_ = a.ToolEventSink.AppendToolReturned(ctx, jobID, taskID, outBytes)
-			_ = a.ToolEventSink.AppendToolResultSummarized(ctx, jobID, taskID, toolName, truncateStr(err.Error(), 200), err.Error(), false)
+			_ = a.ToolEventSink.AppendToolReturned(ctx, jobID, nodeIDForEvent, outBytes)
+			_ = a.ToolEventSink.AppendToolResultSummarized(ctx, jobID, nodeIDForEvent, toolName, truncateStr(err.Error(), 200), err.Error(), false)
 		}
 		if agent != nil && agent.Session != nil {
 			inputStr := ""
@@ -395,7 +409,7 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 	resultBytes, _ := json.Marshal(nodeResult)
 	// 先写事件再写 Store，保证 Replay 以事件流为事实来源时能先看到 completion，避免崩溃后重放重复执行（Tool Idempotency Guard）
 	if a.ToolEventSink != nil && jobID != "" {
-		_ = a.ToolEventSink.AppendToolInvocationFinished(ctx, jobID, taskID, &ToolInvocationFinishedPayload{
+		_ = a.ToolEventSink.AppendToolInvocationFinished(ctx, jobID, nodeIDForEvent, &ToolInvocationFinishedPayload{
 			InvocationID:   invocationID,
 			IdempotencyKey: idempotencyKey,
 			Outcome:        ToolInvocationOutcomeSuccess,
@@ -404,7 +418,7 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 		})
 	}
 	if a.CommandEventSink != nil && jobID != "" {
-		_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, resultBytes, argsHash)
+		_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, nodeIDForEvent, taskID, resultBytes, argsHash)
 	}
 	if a.InvocationLedger != nil && jobID != "" {
 		_ = a.InvocationLedger.Commit(ctx, invocationID, idempotencyKey, resultBytes)
@@ -417,12 +431,12 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 	p.Results[taskID] = nodeResult
 	if a.ToolEventSink != nil && jobID != "" {
 		outBytes, _ := json.Marshal(map[string]interface{}{"output": result.Output, "error": result.Err, "done": result.Done})
-		_ = a.ToolEventSink.AppendToolReturned(ctx, jobID, taskID, outBytes)
+		_ = a.ToolEventSink.AppendToolReturned(ctx, jobID, nodeIDForEvent, outBytes)
 		summary := truncateStr(result.Output, 200)
 		if result.Err != "" {
 			summary = truncateStr("error: "+result.Err, 200)
 		}
-		_ = a.ToolEventSink.AppendToolResultSummarized(ctx, jobID, taskID, toolName, summary, result.Err, false)
+		_ = a.ToolEventSink.AppendToolResultSummarized(ctx, jobID, nodeIDForEvent, toolName, summary, result.Err, false)
 	}
 	msg := result.Output
 	if result.Err != "" {
