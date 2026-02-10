@@ -17,9 +17,11 @@ package http
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"html"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -59,12 +61,21 @@ type AgentCreator interface {
 	Create(ctx context.Context, name string) (*agentruntime.Agent, error)
 }
 
+// IngestQueueForAPI 入库队列的 API 侧接口（入队与状态查询）；由 app 在 postgres 时注入
+type IngestQueueForAPI interface {
+	Enqueue(ctx context.Context, payload map[string]interface{}) (taskID string, err error)
+	GetStatus(ctx context.Context, taskID string) (status string, result interface{}, errMsg string, completedAt interface{}, err error)
+}
+
 // Handler HTTP 处理器（仅依赖 Engine + DocumentService，不直接调用 storage）
 type Handler struct {
 	engine         *eino.Engine
 	docService     appcore.DocumentService
 	agent          AgentRunner
 	sessionManager SessionManager
+
+	// ingestQueue 可选；postgres 时用于异步入库入队与状态查询
+	ingestQueue IngestQueueForAPI
 
 	// v1 Agent Runtime
 	agentManager    *agentruntime.Manager
@@ -89,6 +100,11 @@ func NewHandler(engine *eino.Engine, docService appcore.DocumentService) *Handle
 // SetAgent 设置 Agent 入口（可选，用于 /api/agent/run）
 func (h *Handler) SetAgent(agent AgentRunner) {
 	h.agent = agent
+}
+
+// SetIngestQueue 设置入库队列（postgres 时由 app 注入，用于 POST /documents/upload/async 与 GET /documents/upload/status/:id）
+func (h *Handler) SetIngestQueue(q IngestQueueForAPI) {
+	h.ingestQueue = q
 }
 
 // SetSessionManager 设置 Session 管理器（用于 /api/agent/run 的 session 生命周期）
@@ -169,6 +185,91 @@ func (h *Handler) UploadDocument(ctx context.Context, c *app.RequestContext) {
 		"status":  "success",
 		"result":  result,
 		"message": "文档上传成功",
+	})
+}
+
+// UploadDocumentAsync 异步入库：将文件入队后立即返回 202，由 Worker 消费执行 ingest_pipeline；需配置 postgres
+func (h *Handler) UploadDocumentAsync(ctx context.Context, c *app.RequestContext) {
+	if h.ingestQueue == nil {
+		c.JSON(consts.StatusNotImplemented, map[string]string{
+			"error": "异步入库需要配置 jobstore.type=postgres",
+		})
+		return
+	}
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(consts.StatusBadRequest, map[string]string{
+			"error": "请上传文件",
+		})
+		return
+	}
+	opened, err := file.Open()
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, map[string]string{
+			"error": "打开上传文件失败",
+		})
+		return
+	}
+	defer opened.Close()
+	data, err := io.ReadAll(opened)
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, map[string]string{
+			"error": "读取上传文件失败",
+		})
+		return
+	}
+	payload := map[string]interface{}{
+		"content_base64": base64.StdEncoding.EncodeToString(data),
+		"filename":       file.Filename,
+		"metadata": map[string]interface{}{
+			"filename":    file.Filename,
+			"size":        file.Size,
+			"uploaded_at": time.Now(),
+		},
+	}
+	taskID, err := h.ingestQueue.Enqueue(ctx, payload)
+	if err != nil {
+		hlog.CtxErrorf(ctx, "入库任务入队失败: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"error":   "入库任务入队失败",
+			"details": err.Error(),
+		})
+		return
+	}
+	c.JSON(consts.StatusAccepted, map[string]interface{}{
+		"task_id": taskID,
+		"message": "已入队",
+	})
+}
+
+// UploadStatus 查询异步入库任务状态（GET /documents/upload/status/:task_id）
+func (h *Handler) UploadStatus(ctx context.Context, c *app.RequestContext) {
+	if h.ingestQueue == nil {
+		c.JSON(consts.StatusNotImplemented, map[string]string{
+			"error": "任务状态查询需要配置 jobstore.type=postgres",
+		})
+		return
+	}
+	taskID := c.Param("task_id")
+	if taskID == "" {
+		c.JSON(consts.StatusBadRequest, map[string]string{"error": "缺少 task_id"})
+		return
+	}
+	status, result, errMsg, completedAt, err := h.ingestQueue.GetStatus(ctx, taskID)
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if status == "" {
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+		return
+	}
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"task_id":      taskID,
+		"status":       status,
+		"result":       result,
+		"error":        errMsg,
+		"completed_at": completedAt,
 	})
 }
 

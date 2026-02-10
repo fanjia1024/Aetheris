@@ -61,6 +61,8 @@ func (r *Router) Build(addr string, opts ...config.Option) *server.Hertz {
 	documents := api.Group("/documents")
 	{
 		documents.POST("/upload", authHandler, r.handler.UploadDocument)
+		documents.POST("/upload/async", authHandler, r.handler.UploadDocumentAsync)
+		documents.GET("/upload/status/:task_id", authHandler, r.handler.UploadStatus)
 		documents.GET("/", authHandler, r.handler.ListDocuments)
 		documents.GET("/:id", authHandler, r.handler.GetDocument)
 		documents.DELETE("/:id", authHandler, r.handler.DeleteDocument)

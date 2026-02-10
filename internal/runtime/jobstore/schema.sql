@@ -58,3 +58,37 @@ CREATE TABLE IF NOT EXISTS agent_states (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (agent_id, session_id)
 );
+
+-- 工具调用账本（多 Worker 共享）：job_id + idempotency_key 唯一，Confirmation Replay 与防重放
+CREATE TABLE IF NOT EXISTS tool_invocations (
+    job_id          TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    invocation_id   TEXT NOT NULL,
+    step_id         TEXT NOT NULL,
+    tool_name       TEXT NOT NULL,
+    args_hash       TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    result          BYTEA,
+    committed       BOOLEAN NOT NULL DEFAULT false,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (job_id, idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tool_invocations_job_id ON tool_invocations (job_id);
+
+-- 入库任务队列（API 入队、Worker 认领执行 ingest_pipeline）
+CREATE TABLE IF NOT EXISTS ingest_tasks (
+    id          TEXT PRIMARY KEY,
+    payload     JSONB NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    claimed_at  TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    worker_id   TEXT,
+    result      JSONB,
+    error       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_ingest_tasks_status ON ingest_tasks (status);
+CREATE INDEX IF NOT EXISTS idx_ingest_tasks_created_at ON ingest_tasks (created_at);

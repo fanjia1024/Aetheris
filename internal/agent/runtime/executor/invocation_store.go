@@ -18,10 +18,11 @@ import "context"
 
 // ToolInvocationStatus 持久化记录状态
 const (
-	ToolInvocationStatusStarted = "started"
-	ToolInvocationStatusSuccess = "success"
-	ToolInvocationStatusFailure = "failure"
-	ToolInvocationStatusTimeout = "timeout"
+	ToolInvocationStatusStarted   = "started"
+	ToolInvocationStatusSuccess   = "success"
+	ToolInvocationStatusFailure   = "failure"
+	ToolInvocationStatusTimeout   = "timeout"
+	ToolInvocationStatusConfirmed = "confirmed" // 已通过 ResourceVerifier 校验，可选策略下后续 replay 可跳过校验
 )
 
 // ToolInvocationRecord 工具调用持久化记录；committed=true 表示外部世界已改变，replay 不得再执行

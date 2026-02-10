@@ -155,10 +155,12 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 	// 1) 持久化存储优先：已 committed 且 success 则先 Confirmation 再注入，不执行
 	if a.InvocationStore != nil && jobID != "" {
 		rec, _ := a.InvocationStore.GetByJobAndIdempotencyKey(ctx, jobID, idempotencyKey)
-		if rec != nil && rec.Committed && rec.Status == ToolInvocationStatusSuccess && len(rec.Result) > 0 {
+		if rec != nil && rec.Committed && (rec.Status == ToolInvocationStatusSuccess || rec.Status == ToolInvocationStatusConfirmed) && len(rec.Result) > 0 {
 			if err := a.runConfirmation(ctx, jobID, taskID, stepChanges); err != nil {
 				return nil, err
 			}
+			// 校验通过后可将状态置为 confirmed，供审计或可选策略「已 confirmed 则跳过校验」
+			_ = a.InvocationStore.SetFinished(ctx, idempotencyKey, ToolInvocationStatusConfirmed, rec.Result, true)
 			var nodeResult map[string]any
 			_ = json.Unmarshal(rec.Result, &nodeResult)
 			if nodeResult == nil {

@@ -17,6 +17,7 @@ package worker
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -24,15 +25,18 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/common/expfmt"
 
 	"rag-platform/internal/agent/job"
 	"rag-platform/internal/agent/planner"
 	"rag-platform/internal/agent/runtime"
 	agentexec "rag-platform/internal/agent/runtime/executor"
+	"rag-platform/internal/agent/runtime/executor/verifier"
 	"rag-platform/internal/agent/tools"
 	"rag-platform/internal/app"
 	"rag-platform/internal/app/api"
+	"rag-platform/internal/ingestqueue"
 	"rag-platform/internal/runtime/eino"
 	"rag-platform/internal/runtime/jobstore"
 	"rag-platform/internal/storage/metadata"
@@ -125,8 +129,20 @@ func NewApp(cfg *config.Config) (*App, error) {
 			v1Planner = planner.NewLLMPlanner(llmClient)
 		}
 		nodeEventSink := api.NewNodeEventSink(pgEventStore)
-		invocationStore := agentexec.NewToolInvocationStoreMem()
-		dagCompiler := api.NewDAGCompiler(llmClient, toolsReg, engine, nodeEventSink, nodeEventSink, invocationStore, nil)
+		var invocationStore agentexec.ToolInvocationStore
+		if invPoolConfig, errPool := pgxpool.ParseConfig(dsn); errPool == nil {
+			if invPool, errPool := pgxpool.NewWithConfig(context.Background(), invPoolConfig); errPool == nil {
+				invocationStore = agentexec.NewToolInvocationStorePg(invPool)
+			}
+		}
+		if invocationStore == nil {
+			invocationStore = agentexec.NewToolInvocationStoreMem()
+		}
+		var resourceVerifier agentexec.ResourceVerifier
+		if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+			resourceVerifier = verifier.NewGitHubVerifier(token)
+		}
+		dagCompiler := api.NewDAGCompiler(llmClient, toolsReg, engine, nodeEventSink, nodeEventSink, invocationStore, resourceVerifier)
 		dagRunner := api.NewDAGRunner(dagCompiler)
 		checkpointStore := runtime.NewCheckpointStoreMem()
 		agentStateStore, errState := runtime.NewAgentStateStorePg(context.Background(), dsn)
@@ -284,7 +300,83 @@ func (a *App) Shutdown(ctx context.Context) error {
 
 // startWorkerQueue 启动工作队列消费者；每个入库任务应调用 a.engine.ExecuteWorkflow(ctx, "ingest_pipeline", taskPayload)
 func (a *App) startWorkerQueue() error {
-	// 任务驱动、eino 执行：从队列取到任务后调用 engine.ExecuteWorkflow(..., "ingest_pipeline", payload)
-	// 暂无实际队列实现时仅返回成功
+	if a.config == nil || a.config.JobStore.Type != "postgres" || a.config.JobStore.DSN == "" {
+		return nil
+	}
+	dsn := a.config.JobStore.DSN
+	poolConfig, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return fmt.Errorf("解析入库队列 DSN 失败: %w", err)
+	}
+	pool, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
+	if err != nil {
+		return fmt.Errorf("创建入库队列连接池失败: %w", err)
+	}
+	queue := ingestqueue.NewIngestQueuePg(pool)
+	workerID := fmt.Sprintf("%s-%d", getHostname(), os.Getpid())
+	pollInterval := 2 * time.Second
+	if a.config.Worker.PollInterval != "" {
+		if d, err := time.ParseDuration(a.config.Worker.PollInterval); err == nil && d > 0 {
+			pollInterval = d
+		}
+	}
+	go a.runIngestQueueLoop(queue, workerID, pollInterval)
+	a.logger.Info("入库队列消费者已启动", "worker_id", workerID, "poll_interval", pollInterval)
 	return nil
+}
+
+func getHostname() string {
+	h, _ := os.Hostname()
+	if h == "" {
+		return "worker"
+	}
+	return h
+}
+
+// runIngestQueueLoop 轮询认领入库任务并执行 ingest_pipeline，直到 shutdown 关闭
+func (a *App) runIngestQueueLoop(queue ingestqueue.IngestQueue, workerID string, pollInterval time.Duration) {
+	for {
+		select {
+		case <-a.shutdown:
+			return
+		default:
+		}
+		ctx := context.Background()
+		taskID, payload, err := queue.ClaimOne(ctx, workerID)
+		if err != nil {
+			a.logger.Error("认领入库任务失败", "error", err)
+			time.Sleep(pollInterval)
+			continue
+		}
+		if taskID == "" {
+			time.Sleep(pollInterval)
+			continue
+		}
+		contentBase64, _ := payload["content_base64"].(string)
+		if contentBase64 == "" {
+			_ = queue.MarkFailed(ctx, taskID, "payload 缺少 content_base64")
+			continue
+		}
+		decoded, err := base64.StdEncoding.DecodeString(contentBase64)
+		if err != nil {
+			_ = queue.MarkFailed(ctx, taskID, "content_base64 解码失败: "+err.Error())
+			continue
+		}
+		params := map[string]interface{}{"content": decoded}
+		if fn, ok := payload["filename"].(string); ok && fn != "" {
+			params["filename"] = fn
+		}
+		if meta, ok := payload["metadata"]; ok {
+			params["metadata"] = meta
+		}
+		result, err := a.engine.ExecuteWorkflow(ctx, "ingest_pipeline", params)
+		if err != nil {
+			_ = queue.MarkFailed(ctx, taskID, err.Error())
+			a.logger.Error("入库任务执行失败", "task_id", taskID, "error", err)
+			continue
+		}
+		if err := queue.MarkCompleted(ctx, taskID, result); err != nil {
+			a.logger.Error("标记入库任务完成失败", "task_id", taskID, "error", err)
+		}
+	}
 }

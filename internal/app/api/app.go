@@ -31,6 +31,7 @@ import (
 	hertzslog "github.com/hertz-contrib/logger/slog"
 	"github.com/hertz-contrib/obs-opentelemetry/provider"
 	hertztracing "github.com/hertz-contrib/obs-opentelemetry/tracing"
+	"github.com/jackc/pgx/v5/pgxpool"
 	apigrpc "rag-platform/internal/api/grpc"
 
 	"rag-platform/internal/agent"
@@ -39,10 +40,12 @@ import (
 	"rag-platform/internal/agent/planner"
 	"rag-platform/internal/agent/runtime"
 	agentexec "rag-platform/internal/agent/runtime/executor"
+	"rag-platform/internal/agent/runtime/executor/verifier"
 	"rag-platform/internal/agent/tools"
 	"rag-platform/internal/api/http"
 	"rag-platform/internal/api/http/middleware"
 	"rag-platform/internal/app"
+	"rag-platform/internal/ingestqueue"
 	"rag-platform/internal/model/llm"
 	"rag-platform/internal/pipeline/ingest"
 	"rag-platform/internal/pipeline/query"
@@ -218,9 +221,26 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		jobStore = job.NewJobStoreMem()
 		jobEventStore = jobstore.NewMemoryStore()
 	}
+	var invocationStore agentexec.ToolInvocationStore
+	if bootstrap.Config != nil && bootstrap.Config.JobStore.Type == "postgres" && bootstrap.Config.JobStore.DSN != "" {
+		invPoolConfig, errPool := pgxpool.ParseConfig(bootstrap.Config.JobStore.DSN)
+		if errPool != nil {
+			return nil, fmt.Errorf("解析 ToolInvocationStore DSN 失败: %w", errPool)
+		}
+		invPool, errPool := pgxpool.NewWithConfig(context.Background(), invPoolConfig)
+		if errPool != nil {
+			return nil, fmt.Errorf("创建 ToolInvocationStore 连接池失败: %w", errPool)
+		}
+		invocationStore = agentexec.NewToolInvocationStorePg(invPool)
+	} else {
+		invocationStore = agentexec.NewToolInvocationStoreMem()
+	}
 	nodeEventSink := NewNodeEventSink(jobEventStore)
-	invocationStore := agentexec.NewToolInvocationStoreMem()
-	dagCompiler = NewDAGCompiler(llmClientForAgent, toolsReg, engine, nodeEventSink, nodeEventSink, invocationStore, nil)
+	var resourceVerifier agentexec.ResourceVerifier
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		resourceVerifier = verifier.NewGitHubVerifier(token)
+	}
+	dagCompiler = NewDAGCompiler(llmClientForAgent, toolsReg, engine, nodeEventSink, nodeEventSink, invocationStore, resourceVerifier)
 	dagRunner = NewDAGRunner(dagCompiler)
 	var agentStateStore runtime.AgentStateStore
 	if bootstrap.Config != nil && bootstrap.Config.JobStore.Type == "postgres" && bootstrap.Config.JobStore.DSN != "" {
@@ -231,6 +251,14 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		agentStateStore = pgState
 	} else {
 		agentStateStore = runtime.NewAgentStateStoreMem()
+	}
+	if bootstrap.Config != nil && bootstrap.Config.JobStore.Type == "postgres" && bootstrap.Config.JobStore.DSN != "" {
+		ingestPoolConfig, errIngest := pgxpool.ParseConfig(bootstrap.Config.JobStore.DSN)
+		if errIngest == nil {
+			if ingestPool, errIngest := pgxpool.NewWithConfig(context.Background(), ingestPoolConfig); errIngest == nil {
+				handler.SetIngestQueue(ingestqueue.NewIngestQueuePg(ingestPool))
+			}
+		}
 	}
 	checkpointStore := runtime.NewCheckpointStoreMem()
 	dagRunner.SetCheckpointStores(checkpointStore, &jobStoreForRunnerAdapter{JobStore: jobStore})
