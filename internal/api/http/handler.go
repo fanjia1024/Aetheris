@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"strconv"
 	"strings"
 	"time"
@@ -1059,20 +1060,148 @@ func buildTraceHTML(jobID string, j *job.Job, events []jobstore.JobEvent) string
 		status = j.Status.String()
 		goal = j.Goal
 	}
-	s := "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Trace " + jobID + "</title></head><body>"
-	s += "<h1>Job: " + jobID + "</h1>"
-	s += "<p><b>Goal:</b> " + goal + "</p>"
-	s += "<p><b>Status:</b> " + status + "</p>"
+	escJobID := html.EscapeString(jobID)
+	escGoal := html.EscapeString(goal)
+	escStatus := html.EscapeString(status)
+
 	tree := BuildExecutionTree(events)
-	s += "<h2>Execution Tree (User → Plan → Node → Tool)</h2><ul>"
-	s += ExecutionTreeToHTML(tree)
-	s += "</ul>"
-	s += "<h2>Timeline</h2><ul>"
+	steps := FlattenSteps(tree)
+	timeline := make([]map[string]interface{}, 0, len(events))
 	for _, e := range events {
-		s += "<li><code>" + string(e.Type) + "</code> " + e.CreatedAt.Format("15:04:05") + " <pre>" + string(e.Payload) + "</pre></li>"
+		payload := json.RawMessage(e.Payload)
+		if len(e.Payload) == 0 {
+			payload = []byte("null")
+		}
+		timeline = append(timeline, map[string]interface{}{
+			"type":       string(e.Type),
+			"created_at": e.CreatedAt,
+			"payload":    payload,
+		})
 	}
-	s += "</ul></body></html>"
-	return s
+	traceData := map[string]interface{}{
+		"job_id":   jobID,
+		"goal":     goal,
+		"status":   status,
+		"steps":    steps,
+		"tree":     tree,
+		"timeline": timeline,
+	}
+	jsonBytes, _ := json.Marshal(traceData)
+	jsonStr := string(jsonBytes)
+
+	var b strings.Builder
+	b.WriteString("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Trace ")
+	b.WriteString(escJobID)
+	b.WriteString("</title><style>")
+	b.WriteString(".trace-layout{display:flex;gap:1rem;margin:1rem 0;min-height:400px;}")
+	b.WriteString(".step-timeline{flex:0 0 280px;border:1px solid #ccc;overflow-y:auto;}")
+	b.WriteString(".step-timeline .step{ padding:0.4rem 0.6rem;cursor:pointer;border-bottom:1px solid #eee;}")
+	b.WriteString(".step-timeline .step:hover{background:#f0f0f0;}")
+	b.WriteString(".step-timeline .step.selected{background:#e0e8ff;}")
+	b.WriteString(".step-timeline .step .label{font-weight:500;}")
+	b.WriteString(".step-timeline .step .meta{font-size:0.85em;color:#666;}")
+	b.WriteString(".detail-panel{flex:1;border:1px solid #ccc;padding:0.8rem;overflow-y:auto;}")
+	b.WriteString(".detail-panel h3{margin-top:0;}")
+	b.WriteString(".detail-panel pre{background:#f5f5f5;padding:0.5rem;overflow:auto;font-size:0.9em;}")
+	b.WriteString(".detail-panel .placeholder{color:#888;font-style:italic;}")
+	b.WriteString(".tree-section{margin-top:1rem;}")
+	b.WriteString(".tree-section summary{cursor:pointer;}")
+	b.WriteString(".tree-section ul{list-style:none;padding-left:1rem;}")
+	b.WriteString(".tree-section li{cursor:pointer;padding:0.2rem 0;}")
+	b.WriteString(".tree-section li:hover{background:#f0f0f0;}")
+	b.WriteString("</style></head><body>")
+	b.WriteString("<h1>Job: ")
+	b.WriteString(escJobID)
+	b.WriteString("</h1><p><b>Goal:</b> ")
+	b.WriteString(escGoal)
+	b.WriteString("</p><p><b>Status:</b> ")
+	b.WriteString(escStatus)
+	b.WriteString("</p><div class=\"trace-layout\"><div class=\"step-timeline\" id=\"step-timeline\">")
+
+	for _, st := range steps {
+		b.WriteString("<div class=\"step\" data-span-id=\"")
+		b.WriteString(html.EscapeString(st.SpanID))
+		b.WriteString("\" data-type=\"")
+		b.WriteString(html.EscapeString(st.Type))
+		b.WriteString("\">")
+		b.WriteString("<div class=\"label\">")
+		b.WriteString(html.EscapeString(st.Label))
+		b.WriteString("</div><div class=\"meta\">")
+		if st.StartTime != nil {
+			b.WriteString(st.StartTime.Format("15:04:05"))
+		}
+		if st.DurationMs > 0 {
+			b.WriteString(" &middot; ")
+			b.WriteString(strconv.FormatInt(st.DurationMs, 10))
+			b.WriteString("ms")
+		}
+		b.WriteString("</div></div>")
+	}
+
+	b.WriteString("</div><div class=\"detail-panel\" id=\"detail-panel\">")
+	b.WriteString("<p class=\"placeholder\" id=\"detail-placeholder\">Select a step or tree node.</p>")
+	b.WriteString("<div id=\"detail-content\" style=\"display:none;\">")
+	b.WriteString("<h3>Payload</h3><pre id=\"detail-payload\"></pre>")
+	b.WriteString("<h3>Tool I/O</h3><pre id=\"detail-tool-io\"></pre>")
+	b.WriteString("<h3>Reasoning</h3><p class=\"placeholder\">Reasoning snapshot (future)</p>")
+	b.WriteString("<h3>State diff</h3><p class=\"placeholder\">State diff (future)</p>")
+	b.WriteString("</div></div></div>")
+	b.WriteString("<div class=\"tree-section\"><details open><summary>Execution tree (User → Plan → Node → Tool)</summary>")
+	b.WriteString("<ul id=\"trace-tree\">")
+	b.WriteString(renderTraceTreeHTML(tree))
+	b.WriteString("</ul></details></div>")
+	b.WriteString("<script>window.__TRACE__ = ")
+	b.WriteString(jsonStr)
+	b.WriteString(";</script><script>")
+	b.WriteString("(function(){ var T = window.__TRACE__; var panel = document.getElementById('detail-panel'); var ph = document.getElementById('detail-placeholder'); var content = document.getElementById('detail-content'); var payloadEl = document.getElementById('detail-payload'); var toolIoEl = document.getElementById('detail-tool-io'); function select(spanId){ document.querySelectorAll('.step-timeline .step').forEach(function(el){ el.classList.toggle('selected', el.getAttribute('data-span-id') === spanId); }); document.querySelectorAll('.tree-section [data-span-id]').forEach(function(el){ el.classList.toggle('selected', el.getAttribute('data-span-id') === spanId); }); var step = T.steps.find(function(s){ return s.span_id === spanId; }); if(!step){ ph.style.display='block'; content.style.display='none'; return; } ph.style.display='none'; content.style.display='block'; var events = T.timeline.filter(function(e){ try{ var p = typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload; return (p && (p.trace_span_id === spanId || p.node_id === spanId)); }catch(_){ return false; } }); payloadEl.textContent = events.length ? JSON.stringify(events.map(function(e){ return { type: e.type, created_at: e.created_at, payload: e.payload }; }), null, 2) : ''; var io = []; if(step.input) io.push('Input: ' + (typeof step.input === 'string' ? step.input : JSON.stringify(step.input))); if(step.output) io.push('Output: ' + (typeof step.output === 'string' ? step.output : JSON.stringify(step.output))); toolIoEl.textContent = io.length ? io.join('\\n\\n') : '(none)'; } document.getElementById('step-timeline').addEventListener('click', function(ev){ var el = ev.target.closest('.step'); if(el) select(el.getAttribute('data-span-id')); }); document.getElementById('trace-tree').addEventListener('click', function(ev){ var el = ev.target.closest('[data-span-id]'); if(el) select(el.getAttribute('data-span-id')); }); })();")
+	b.WriteString("</script></body></html>")
+	return b.String()
+}
+
+// renderTraceTreeHTML renders tree nodes with data-span-id for selection.
+func renderTraceTreeHTML(root *ExecutionNode) string {
+	if root == nil {
+		return ""
+	}
+	if root.Type == "job" {
+		var out string
+		for _, c := range root.Children {
+			out += renderTraceTreeHTML(c)
+		}
+		return out
+	}
+	label := root.SpanID
+	switch root.Type {
+	case "plan":
+		label = "Plan"
+	case "node":
+		label = "Node " + root.NodeID
+	case "tool":
+		label = "Tool " + root.ToolName
+	}
+	if root.StartTime != nil {
+		label += " " + root.StartTime.Format("15:04:05")
+	}
+	if root.EndTime != nil && root.StartTime != nil {
+		label += fmt.Sprintf(" (%dms)", root.EndTime.Sub(*root.StartTime).Milliseconds())
+	}
+	var b strings.Builder
+	b.WriteString("<li data-span-id=\"")
+	b.WriteString(html.EscapeString(root.SpanID))
+	b.WriteString("\"><b>")
+	b.WriteString(html.EscapeString(label))
+	b.WriteString("</b> <code>")
+	b.WriteString(html.EscapeString(root.Type))
+	b.WriteString("</code>")
+	if len(root.Children) > 0 {
+		b.WriteString("<ul>")
+		for _, c := range root.Children {
+			b.WriteString(renderTraceTreeHTML(c))
+		}
+		b.WriteString("</ul>")
+	}
+	b.WriteString("</li>")
+	return b.String()
 }
 
 // ListTools 返回所有工具的 Manifest 列表（GET /api/tools）

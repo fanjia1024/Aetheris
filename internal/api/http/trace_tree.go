@@ -23,17 +23,21 @@ import (
 	"rag-platform/internal/runtime/jobstore"
 )
 
-// ExecutionNode 执行树节点，对应 design/execution-trace.md 的树结构
+// ExecutionNode is a node in the execution tree (see design/execution-trace.md).
+// Input/Output are set for type=tool from tool_called/tool_returned payloads.
 type ExecutionNode struct {
-	SpanID    string           `json:"span_id"`
-	ParentID  *string          `json:"parent_id,omitempty"`
-	Type      string           `json:"type"` // job | plan | node | tool
-	NodeID    string           `json:"node_id,omitempty"`
-	ToolName  string           `json:"tool_name,omitempty"`
-	StartTime *time.Time       `json:"start_time,omitempty"`
-	EndTime   *time.Time       `json:"end_time,omitempty"`
-	StepIndex int              `json:"step_index,omitempty"`
-	Children  []*ExecutionNode `json:"children,omitempty"`
+	SpanID        string           `json:"span_id"`
+	ParentID      *string          `json:"parent_id,omitempty"`
+	Type          string           `json:"type"` // job | plan | node | tool
+	NodeID        string           `json:"node_id,omitempty"`
+	ToolName      string           `json:"tool_name,omitempty"`
+	StartTime     *time.Time       `json:"start_time,omitempty"`
+	EndTime       *time.Time       `json:"end_time,omitempty"`
+	StepIndex     int              `json:"step_index,omitempty"`
+	Input         json.RawMessage  `json:"input,omitempty"`          // tool_called payload input (type=tool)
+	Output        json.RawMessage  `json:"output,omitempty"`         // tool_returned payload output (type=tool)
+	PayloadSummary string          `json:"payload_summary,omitempty"` // one-line summary for type=node (e.g. llm/workflow)
+	Children      []*ExecutionNode `json:"children,omitempty"`
 }
 
 // BuildExecutionTree 从事件流推导执行树（兼容无 trace_span_id 的旧事件）
@@ -137,6 +141,16 @@ func BuildExecutionTree(events []jobstore.JobEvent) *ExecutionNode {
 			if n := byID[spanID]; n != nil {
 				t := e.CreatedAt
 				n.EndTime = &t
+				if raw := pl["payload_results"]; raw != nil {
+					if b, err := json.Marshal(raw); err == nil && len(b) > 0 {
+						const maxSummary = 120
+						if len(b) > maxSummary {
+							n.PayloadSummary = string(b[:maxSummary]) + "..."
+						} else {
+							n.PayloadSummary = string(b)
+						}
+					}
+				}
 			}
 		case jobstore.ToolCalled:
 			nodeID := getStr("node_id")
@@ -163,6 +177,11 @@ func BuildExecutionTree(events []jobstore.JobEvent) *ExecutionNode {
 					StartTime: &e.CreatedAt,
 					StepIndex: si,
 				}
+				if in := pl["input"]; in != nil {
+					if b, err := json.Marshal(in); err == nil {
+						n.Input = b
+					}
+				}
 				byID[spanID] = n
 				openToolByNode[nodeID] = append(openToolByNode[nodeID], n)
 				if node := byID[nodeID]; node != nil {
@@ -176,6 +195,11 @@ func BuildExecutionTree(events []jobstore.JobEvent) *ExecutionNode {
 				last := open[len(open)-1]
 				t := e.CreatedAt
 				last.EndTime = &t
+				if out := pl["output"]; out != nil {
+					if b, err := json.Marshal(out); err == nil {
+						last.Output = b
+					}
+				}
 				openToolByNode[nodeID] = open[:len(open)-1]
 			}
 		default:
@@ -186,7 +210,64 @@ func BuildExecutionTree(events []jobstore.JobEvent) *ExecutionNode {
 	return root
 }
 
-// ExecutionTreeToHTML 将执行树渲染为可解释的嵌套 HTML（User → Plan → Node → Tool）
+// StepInfo is one row in the step timeline (plan, node, or tool).
+type StepInfo struct {
+	SpanID     string          `json:"span_id"`
+	Type       string          `json:"type"`
+	Label      string          `json:"label"`
+	StartTime  *time.Time      `json:"start_time,omitempty"`
+	EndTime    *time.Time      `json:"end_time,omitempty"`
+	DurationMs int64           `json:"duration_ms,omitempty"`
+	Input      json.RawMessage `json:"input,omitempty"`
+	Output     json.RawMessage `json:"output,omitempty"`
+}
+
+// FlattenSteps returns steps in DFS order for the step timeline UI.
+func FlattenSteps(root *ExecutionNode) []StepInfo {
+	var out []StepInfo
+	if root == nil {
+		return out
+	}
+	var walk func(*ExecutionNode)
+	walk = func(n *ExecutionNode) {
+		if n.Type == "job" {
+			for _, c := range n.Children {
+				walk(c)
+			}
+			return
+		}
+		label := n.SpanID
+		switch n.Type {
+		case "plan":
+			label = "Plan"
+		case "node":
+			label = "Node " + n.NodeID
+		case "tool":
+			label = "Tool " + n.ToolName
+		}
+		var durMs int64
+		if n.StartTime != nil && n.EndTime != nil {
+			durMs = n.EndTime.Sub(*n.StartTime).Milliseconds()
+		}
+		out = append(out, StepInfo{
+			SpanID:     n.SpanID,
+			Type:       n.Type,
+			Label:      label,
+			StartTime:  n.StartTime,
+			EndTime:    n.EndTime,
+			DurationMs: durMs,
+			Input:      n.Input,
+			Output:     n.Output,
+		})
+		for _, c := range n.Children {
+			walk(c)
+		}
+	}
+	walk(root)
+	return out
+}
+
+// ExecutionTreeToHTML renders the execution tree as nested HTML (User → Plan → Node → Tool).
 func ExecutionTreeToHTML(root *ExecutionNode) string {
 	if root == nil {
 		return ""

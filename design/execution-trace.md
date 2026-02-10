@@ -66,61 +66,53 @@
 
 ## 四、Trace API 返回格式
 
-GET `/api/jobs/:id/trace` 现有字段：
+GET `/api/jobs/:id/trace` 返回：
 
-- `job_id`, `timeline`, `node_durations`
+- **job_id**：任务 ID
+- **timeline**：原始事件数组，每项 `{ type, created_at, payload }`
+- **node_durations**：节点耗时列表 `{ node_id, started_at, finished_at, duration_ms }`
+- **execution_tree**：执行树，根 `type: "job"`，子节点 DFS 为 plan → node → tool
 
-扩展后增加（与现有兼容）：
+### execution_tree 节点字段（Implementation: [internal/api/http/trace_tree.go](internal/api/http/trace_tree.go)）
 
-- **execution_tree**：树形结构，根为 `"root"`，每个节点含 `span_id`, `parent_id`, `type`, `node_id`（可选）, `tool_name`（可选）, `start_time`, `end_time`, `step_index`（可选）, `payload_ref`（可选，指向 timeline 中某条或 payload 摘要）。
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| span_id | string | 节点 ID |
+| parent_id | string? | 父节点 ID |
+| type | string | job \| plan \| node \| tool |
+| node_id | string? | DAG 节点 ID（node/tool） |
+| tool_name | string? | 工具名（type=tool） |
+| start_time | string? | ISO8601 |
+| end_time | string? | ISO8601 |
+| step_index | int? | 步序号 |
+| **input** | object? | **type=tool 时**，来自 tool_called payload |
+| **output** | object? | **type=tool 时**，来自 tool_returned payload |
+| **payload_summary** | string? | **type=node 时**，node_finished 的 payload_results 摘要（截断） |
+| children | array? | 子节点 |
 
-树结构示例（JSON）：
+Step timeline 数据可由树 DFS 得到（见 `FlattenSteps`），用于 Trace UI 的「步骤列表」；无需新增事件类型。
 
-```json
-{
-  "job_id": "job-xxx",
-  "timeline": [ ... ],
-  "node_durations": [ ... ],
-  "execution_tree": {
-    "span_id": "root",
-    "parent_id": null,
-    "type": "job",
-    "children": [
-      {
-        "span_id": "plan",
-        "parent_id": "root",
-        "type": "plan",
-        "children": [
-          {
-            "span_id": "n1",
-            "parent_id": "plan",
-            "type": "node",
-            "node_id": "n1",
-            "children": [
-              {
-                "span_id": "n1:tool:search:3",
-                "parent_id": "n1",
-                "type": "tool",
-                "tool_name": "search",
-                "start_time": "...",
-                "end_time": "..."
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  }
-}
-```
+### 事件类型（Phase 1 不新增）
 
-## 五、Replay / Debug 语义
+Phase 1 Trace UI 不依赖新事件类型；现有 `job_created` … `job_cancelled` 已支持 step timeline、tool I/O、树推导。可选后续：`reasoning_emitted` 用于 LLM 推理快照。
+
+## 五、Trace UI 布局（Phase 1）
+
+GET `/api/jobs/:id/trace/page` 提供单页 Trace 视图（Chrome DevTools 风格）：
+
+- **左侧**：**Step timeline** — 每行一个逻辑步（plan / node / tool），含 label、时间、duration；点击选中。
+- **右侧**：**Detail panel** — 选中步的 Payload（来自 timeline 中匹配 trace_span_id/node_id 的事件）、Tool I/O（来自 execution_tree 节点 input/output）、占位「Reasoning snapshot (future)」「State diff (future)」。
+- **下方**：**Execution tree** — 可折叠的树（User → Plan → Node → Tool），点击节点与 step timeline 联动。
+
+实现：服务端渲染 HTML + 内联 `window.__TRACE__`（job_id, goal, status, steps, tree, timeline）+ 少量 JS 处理选中与详情展示。见 [internal/api/http/handler.go](internal/api/http/handler.go) `buildTraceHTML`。
+
+## 六、Replay / Debug 语义
 
 - **GET /api/jobs/:id/replay**：只读，返回基于事件流的 timeline，不重放执行；已有 `read_only: true`。
 - **Time-travel**（可选）：若需「从某 step_index 重放」，由 Runner 在后续迭代支持；1.0 仅保证「按事件流完整回放为树结构」即可。
-- **Trace HTML 页**：GET `/api/jobs/:id/trace/page` 可基于 `execution_tree` 渲染「User → Planner → Tool → … → Answer」的可解释视图。
+- **Trace HTML 页**：见上文「Trace UI 布局」。
 
-## 六、与 Tool Registry、Policy 的关系
+## 七、与 Tool Registry、Policy 的关系
 
 - **审计**：Tool Registry 或 Policy 可基于 `execution_tree` 与 `timeline` 审计「某 Job 调用了哪些工具、顺序与结果」。
 - **权限**：后续 Agent Policy 可限制 allowed_tools，Trace 中 tool 节点可标注是否越权（与 Policy 模块对接）。
