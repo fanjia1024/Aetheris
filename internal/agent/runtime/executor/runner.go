@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"rag-platform/internal/agent/planner"
 	"rag-platform/internal/agent/replay"
@@ -36,15 +37,18 @@ type PlanGeneratedSink interface {
 }
 
 // NodeEventSink 节点级事件写入：RunForJob 每步前后写入 NodeStarted/NodeFinished，供 Replay 重建上下文
+// attempt/workerID/durationMs/state 用于 Trace 叙事（v0.9）；见 design/trace-event-schema-v0.9.md
 type NodeEventSink interface {
-	AppendNodeStarted(ctx context.Context, jobID string, nodeID string) error
-	AppendNodeFinished(ctx context.Context, jobID string, nodeID string, payloadResults []byte) error
+	AppendNodeStarted(ctx context.Context, jobID string, nodeID string, attempt int, workerID string) error
+	AppendNodeFinished(ctx context.Context, jobID string, nodeID string, payloadResults []byte, durationMs int64, state string, attempt int) error
+	AppendStateCheckpointed(ctx context.Context, jobID string, nodeID string, stateBefore, stateAfter []byte) error
 }
 
 // ToolEventSink 工具调用事件写入：Tool 节点执行前后写入 ToolCalled/ToolReturned，供 Trace/审计与恢复短路
 type ToolEventSink interface {
 	AppendToolCalled(ctx context.Context, jobID string, nodeID string, toolName string, input []byte) error
 	AppendToolReturned(ctx context.Context, jobID string, nodeID string, output []byte) error
+	AppendToolResultSummarized(ctx context.Context, jobID string, nodeID string, toolName string, summary string, errMsg string, idempotent bool) error
 }
 
 // NodeAndToolEventSink 同时支持节点与工具事件（同一实现可传 Runner 与 Compiler）
@@ -306,7 +310,7 @@ runLoop:
 				if completedSet != nil {
 					if _, done := completedSet[step.NodeID]; !done {
 						if r.nodeEventSink != nil {
-							_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults)
+							_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, 0, "", 0)
 						}
 						completedSet[step.NodeID] = struct{}{}
 					}
@@ -329,9 +333,11 @@ runLoop:
 				continue
 			}
 		}
+		stateBefore, _ := json.Marshal(payload.Results)
 		if r.nodeEventSink != nil {
-			_ = r.nodeEventSink.AppendNodeStarted(ctx, j.ID, step.NodeID)
+			_ = r.nodeEventSink.AppendNodeStarted(ctx, j.ID, step.NodeID, 1, "")
 		}
+		stepStart := time.Now()
 		ctx = WithAgent(ctx, agent)
 		var runErr error
 		payload, runErr = step.Run(ctx, payload)
@@ -340,8 +346,10 @@ runLoop:
 			return fmt.Errorf("executor: 节点 %s 执行失败: %w", step.NodeID, runErr)
 		}
 		payloadResults, _ := json.Marshal(payload.Results)
+		durationMs := time.Since(stepStart).Milliseconds()
 		if r.nodeEventSink != nil {
-			_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults)
+			_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, durationMs, "ok", 1)
+			_ = r.nodeEventSink.AppendStateCheckpointed(ctx, j.ID, step.NodeID, stateBefore, payloadResults)
 		}
 		cp := runtime.NewNodeCheckpoint(agent.ID, sessionID, j.ID, step.NodeID, graphBytes, payloadResults, nil)
 		cpID, saveErr := r.checkpointStore.Save(ctx, cp)

@@ -34,8 +34,8 @@ func NewNodeEventSink(store jobstore.JobStore) agentexec.NodeToolAndCommandEvent
 	return &nodeEventSinkImpl{store: store}
 }
 
-// AppendNodeStarted 实现 NodeEventSink
-func (s *nodeEventSinkImpl) AppendNodeStarted(ctx context.Context, jobID string, nodeID string) error {
+// AppendNodeStarted 实现 NodeEventSink（v0.9 含 attempt, worker_id）
+func (s *nodeEventSinkImpl) AppendNodeStarted(ctx context.Context, jobID string, nodeID string, attempt int, workerID string) error {
 	if s.store == nil {
 		return nil
 	}
@@ -44,12 +44,19 @@ func (s *nodeEventSinkImpl) AppendNodeStarted(ctx context.Context, jobID string,
 		return err
 	}
 	stepIndex := ver + 1
-	payload, err := json.Marshal(map[string]interface{}{
+	pl := map[string]interface{}{
 		"node_id":        nodeID,
 		"trace_span_id":  nodeID,
 		"parent_span_id": "plan",
 		"step_index":     stepIndex,
-	})
+	}
+	if attempt > 0 {
+		pl["attempt"] = attempt
+	}
+	if workerID != "" {
+		pl["worker_id"] = workerID
+	}
+	payload, err := json.Marshal(pl)
 	if err != nil {
 		return err
 	}
@@ -59,8 +66,8 @@ func (s *nodeEventSinkImpl) AppendNodeStarted(ctx context.Context, jobID string,
 	return err
 }
 
-// AppendNodeFinished 实现 NodeEventSink；payloadResults 为当前 payload.Results 的 JSON
-func (s *nodeEventSinkImpl) AppendNodeFinished(ctx context.Context, jobID string, nodeID string, payloadResults []byte) error {
+// AppendNodeFinished 实现 NodeEventSink；payloadResults 为当前 payload.Results 的 JSON（v0.9 含 duration_ms, state, attempt）
+func (s *nodeEventSinkImpl) AppendNodeFinished(ctx context.Context, jobID string, nodeID string, payloadResults []byte, durationMs int64, state string, attempt int) error {
 	if s.store == nil {
 		return nil
 	}
@@ -69,18 +76,56 @@ func (s *nodeEventSinkImpl) AppendNodeFinished(ctx context.Context, jobID string
 		return err
 	}
 	stepIndex := ver + 1
-	payload, err := json.Marshal(map[string]interface{}{
+	pl := map[string]interface{}{
 		"node_id":         nodeID,
 		"payload_results": json.RawMessage(payloadResults),
 		"trace_span_id":   nodeID,
 		"parent_span_id":  "plan",
 		"step_index":      stepIndex,
-	})
+	}
+	if durationMs > 0 {
+		pl["duration_ms"] = durationMs
+	}
+	if state != "" {
+		pl["state"] = state
+	}
+	if attempt > 0 {
+		pl["attempt"] = attempt
+	}
+	payload, err := json.Marshal(pl)
 	if err != nil {
 		return err
 	}
 	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{
 		JobID: jobID, Type: jobstore.NodeFinished, Payload: payload,
+	})
+	return err
+}
+
+// AppendStateCheckpointed 实现 NodeEventSink；v0.9 语义事件，供 Trace 展示 state diff
+func (s *nodeEventSinkImpl) AppendStateCheckpointed(ctx context.Context, jobID string, nodeID string, stateBefore, stateAfter []byte) error {
+	if s.store == nil {
+		return nil
+	}
+	_, ver, err := s.store.ListEvents(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	stepIndex := ver + 1
+	pl := map[string]interface{}{
+		"node_id":      nodeID,
+		"step_index":   stepIndex,
+		"state_after":  json.RawMessage(stateAfter),
+	}
+	if len(stateBefore) > 0 {
+		pl["state_before"] = json.RawMessage(stateBefore)
+	}
+	payload, err := json.Marshal(pl)
+	if err != nil {
+		return err
+	}
+	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{
+		JobID: jobID, Type: jobstore.StateCheckpointed, Payload: payload,
 	})
 	return err
 }
@@ -134,6 +179,38 @@ func (s *nodeEventSinkImpl) AppendToolReturned(ctx context.Context, jobID string
 	}
 	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{
 		JobID: jobID, Type: jobstore.ToolReturned, Payload: payload,
+	})
+	return err
+}
+
+// AppendToolResultSummarized 实现 ToolEventSink；v0.9 语义事件，供 Trace 展示工具结果摘要
+func (s *nodeEventSinkImpl) AppendToolResultSummarized(ctx context.Context, jobID string, nodeID string, toolName string, summary string, errMsg string, idempotent bool) error {
+	if s.store == nil {
+		return nil
+	}
+	_, ver, err := s.store.ListEvents(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	stepIndex := ver + 1
+	pl := map[string]interface{}{
+		"node_id":   nodeID,
+		"tool_name": toolName,
+		"step_index": stepIndex,
+	}
+	if summary != "" {
+		pl["summary"] = summary
+	}
+	if errMsg != "" {
+		pl["error"] = errMsg
+	}
+	pl["idempotent"] = idempotent
+	payload, err := json.Marshal(pl)
+	if err != nil {
+		return err
+	}
+	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{
+		JobID: jobID, Type: jobstore.ToolResultSummarized, Payload: payload,
 	})
 	return err
 }

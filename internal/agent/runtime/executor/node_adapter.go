@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cloudwego/eino/compose"
@@ -167,6 +168,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 			if jobID := JobIDFromContext(ctx); jobID != "" {
 				outBytes, _ := json.Marshal(map[string]interface{}{"error": err.Error()})
 				_ = a.ToolEventSink.AppendToolReturned(ctx, jobID, taskID, outBytes)
+				_ = a.ToolEventSink.AppendToolResultSummarized(ctx, jobID, taskID, toolName, truncateStr(err.Error(), 200), err.Error(), false)
 			}
 		}
 		if agent != nil && agent.Session != nil {
@@ -197,6 +199,11 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 		if jobID := JobIDFromContext(ctx); jobID != "" {
 			outBytes, _ := json.Marshal(map[string]interface{}{"output": result.Output, "error": result.Err, "done": result.Done})
 			_ = a.ToolEventSink.AppendToolReturned(ctx, jobID, taskID, outBytes)
+			summary := truncateStr(result.Output, 200)
+			if result.Err != "" {
+				summary = truncateStr("error: "+result.Err, 200)
+			}
+			_ = a.ToolEventSink.AppendToolResultSummarized(ctx, jobID, taskID, toolName, summary, result.Err, false)
 		}
 	}
 	msg := result.Output
@@ -321,4 +328,11 @@ func (a *WorkflowNodeAdapter) ToNodeRunner(task *planner.TaskNode, agent *runtim
 	return func(ctx context.Context, p *AgentDAGPayload) (*AgentDAGPayload, error) {
 		return a.runNode(ctx, taskID, name, params, p)
 	}, nil
+}
+
+func truncateStr(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	return strings.TrimSpace(s[:max]) + "..."
 }

@@ -987,11 +987,14 @@ func (h *Handler) GetJobTrace(ctx context.Context, c *app.RequestContext) {
 		timeline = append(timeline, entry)
 	}
 	executionTree := BuildExecutionTree(events)
+	narrative := BuildNarrative(events)
 	c.JSON(consts.StatusOK, map[string]interface{}{
-		"job_id":         jobID,
-		"timeline":       timeline,
-		"node_durations": nodeDurations,
-		"execution_tree": executionTree,
+		"job_id":            jobID,
+		"timeline":          timeline,
+		"node_durations":    nodeDurations,
+		"execution_tree":    executionTree,
+		"timeline_segments": narrative.TimelineSegments,
+		"steps":             narrative.Steps,
 	})
 }
 
@@ -1065,7 +1068,8 @@ func buildTraceHTML(jobID string, j *job.Job, events []jobstore.JobEvent) string
 	escStatus := html.EscapeString(status)
 
 	tree := BuildExecutionTree(events)
-	steps := FlattenSteps(tree)
+	flatSteps := FlattenSteps(tree)
+	narrative := BuildNarrative(events)
 	timeline := make([]map[string]interface{}, 0, len(events))
 	for _, e := range events {
 		payload := json.RawMessage(e.Payload)
@@ -1079,12 +1083,14 @@ func buildTraceHTML(jobID string, j *job.Job, events []jobstore.JobEvent) string
 		})
 	}
 	traceData := map[string]interface{}{
-		"job_id":   jobID,
-		"goal":     goal,
-		"status":   status,
-		"steps":    steps,
-		"tree":     tree,
-		"timeline": timeline,
+		"job_id":            jobID,
+		"goal":              goal,
+		"status":            status,
+		"steps":             narrative.Steps,
+		"flat_steps":        flatSteps,
+		"timeline_segments": narrative.TimelineSegments,
+		"tree":              tree,
+		"timeline":          timeline,
 	}
 	jsonBytes, _ := json.Marshal(traceData)
 	jsonStr := string(jsonBytes)
@@ -1094,16 +1100,22 @@ func buildTraceHTML(jobID string, j *job.Job, events []jobstore.JobEvent) string
 	b.WriteString(escJobID)
 	b.WriteString("</title><style>")
 	b.WriteString(".trace-layout{display:flex;gap:1rem;margin:1rem 0;min-height:400px;}")
-	b.WriteString(".step-timeline{flex:0 0 280px;border:1px solid #ccc;overflow-y:auto;}")
-	b.WriteString(".step-timeline .step{ padding:0.4rem 0.6rem;cursor:pointer;border-bottom:1px solid #eee;}")
+	b.WriteString(".timeline-bar{display:flex;flex-wrap:wrap;gap:2px;margin:0.5rem 0;padding:4px;background:#f0f0f0;border-radius:4px;}")
+	b.WriteString(".timeline-bar .seg{padding:4px 8px;border-radius:3px;font-size:0.8em;white-space:nowrap;}")
+	b.WriteString(".timeline-bar .seg.plan{background:#cce;}.timeline-bar .seg.node{background:#cec;}.timeline-bar .seg.tool{background:#eec;}.timeline-bar .seg.recovery{background:#ecc;}")
+	b.WriteString(".timeline-bar .seg.failed{background:#fcc;}.timeline-bar .seg.retryable{background:#fdc;}")
+	b.WriteString(".step-timeline{flex:0 0 300px;border:1px solid #ccc;overflow-y:auto;}")
+	b.WriteString(".step-timeline .step{padding:0.4rem 0.6rem;cursor:pointer;border-bottom:1px solid #eee;}")
 	b.WriteString(".step-timeline .step:hover{background:#f0f0f0;}")
 	b.WriteString(".step-timeline .step.selected{background:#e0e8ff;}")
 	b.WriteString(".step-timeline .step .label{font-weight:500;}")
 	b.WriteString(".step-timeline .step .meta{font-size:0.85em;color:#666;}")
+	b.WriteString(".step-timeline .step .state{font-size:0.8em;margin-top:2px;}")
 	b.WriteString(".detail-panel{flex:1;border:1px solid #ccc;padding:0.8rem;overflow-y:auto;}")
 	b.WriteString(".detail-panel h3{margin-top:0;}")
 	b.WriteString(".detail-panel pre{background:#f5f5f5;padding:0.5rem;overflow:auto;font-size:0.9em;}")
 	b.WriteString(".detail-panel .placeholder{color:#888;font-style:italic;}")
+	b.WriteString(".detail-panel .step-view{display:grid;grid-template-columns:auto 1fr;gap:0.2rem 1rem;margin-bottom:0.8rem;font-size:0.9em;}")
 	b.WriteString(".tree-section{margin-top:1rem;}")
 	b.WriteString(".tree-section summary{cursor:pointer;}")
 	b.WriteString(".tree-section ul{list-style:none;padding-left:1rem;}")
@@ -1116,9 +1128,10 @@ func buildTraceHTML(jobID string, j *job.Job, events []jobstore.JobEvent) string
 	b.WriteString(escGoal)
 	b.WriteString("</p><p><b>Status:</b> ")
 	b.WriteString(escStatus)
-	b.WriteString("</p><div class=\"trace-layout\"><div class=\"step-timeline\" id=\"step-timeline\">")
+	b.WriteString("</p><div class=\"timeline-bar\" id=\"timeline-bar\"></div>")
+	b.WriteString("<div class=\"trace-layout\"><div class=\"step-timeline\" id=\"step-timeline\">")
 
-	for _, st := range steps {
+	for _, st := range narrative.Steps {
 		b.WriteString("<div class=\"step\" data-span-id=\"")
 		b.WriteString(html.EscapeString(st.SpanID))
 		b.WriteString("\" data-type=\"")
@@ -1135,16 +1148,31 @@ func buildTraceHTML(jobID string, j *job.Job, events []jobstore.JobEvent) string
 			b.WriteString(strconv.FormatInt(st.DurationMs, 10))
 			b.WriteString("ms")
 		}
-		b.WriteString("</div></div>")
+		b.WriteString("</div>")
+		if st.State != "" && st.State != "ok" {
+			b.WriteString("<div class=\"state\">")
+			b.WriteString(html.EscapeString(st.State))
+			if st.Attempts > 1 {
+				b.WriteString(" &middot; attempt ")
+				b.WriteString(strconv.Itoa(st.Attempts))
+			}
+			if st.WorkerID != "" {
+				b.WriteString(" &middot; ")
+				b.WriteString(html.EscapeString(st.WorkerID))
+			}
+			b.WriteString("</div>")
+		}
+		b.WriteString("</div>")
 	}
 
 	b.WriteString("</div><div class=\"detail-panel\" id=\"detail-panel\">")
 	b.WriteString("<p class=\"placeholder\" id=\"detail-placeholder\">Select a step or tree node.</p>")
 	b.WriteString("<div id=\"detail-content\" style=\"display:none;\">")
+	b.WriteString("<h3>Step</h3><div class=\"step-view\" id=\"detail-step-view\"></div>")
 	b.WriteString("<h3>Payload</h3><pre id=\"detail-payload\"></pre>")
 	b.WriteString("<h3>Tool I/O</h3><pre id=\"detail-tool-io\"></pre>")
-	b.WriteString("<h3>Reasoning</h3><p class=\"placeholder\">Reasoning snapshot (future)</p>")
-	b.WriteString("<h3>State diff</h3><p class=\"placeholder\">State diff (future)</p>")
+	b.WriteString("<h3>Reasoning</h3><div id=\"detail-reasoning\"></div>")
+	b.WriteString("<h3>State diff</h3><div id=\"detail-state-diff\"></div>")
 	b.WriteString("</div></div></div>")
 	b.WriteString("<div class=\"tree-section\"><details open><summary>Execution tree (User → Plan → Node → Tool)</summary>")
 	b.WriteString("<ul id=\"trace-tree\">")
@@ -1153,9 +1181,14 @@ func buildTraceHTML(jobID string, j *job.Job, events []jobstore.JobEvent) string
 	b.WriteString("<script>window.__TRACE__ = ")
 	b.WriteString(jsonStr)
 	b.WriteString(";</script><script>")
-	b.WriteString("(function(){ var T = window.__TRACE__; var panel = document.getElementById('detail-panel'); var ph = document.getElementById('detail-placeholder'); var content = document.getElementById('detail-content'); var payloadEl = document.getElementById('detail-payload'); var toolIoEl = document.getElementById('detail-tool-io'); function select(spanId){ document.querySelectorAll('.step-timeline .step').forEach(function(el){ el.classList.toggle('selected', el.getAttribute('data-span-id') === spanId); }); document.querySelectorAll('.tree-section [data-span-id]').forEach(function(el){ el.classList.toggle('selected', el.getAttribute('data-span-id') === spanId); }); var step = T.steps.find(function(s){ return s.span_id === spanId; }); if(!step){ ph.style.display='block'; content.style.display='none'; return; } ph.style.display='none'; content.style.display='block'; var events = T.timeline.filter(function(e){ try{ var p = typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload; return (p && (p.trace_span_id === spanId || p.node_id === spanId)); }catch(_){ return false; } }); payloadEl.textContent = events.length ? JSON.stringify(events.map(function(e){ return { type: e.type, created_at: e.created_at, payload: e.payload }; }), null, 2) : ''; var io = []; if(step.input) io.push('Input: ' + (typeof step.input === 'string' ? step.input : JSON.stringify(step.input))); if(step.output) io.push('Output: ' + (typeof step.output === 'string' ? step.output : JSON.stringify(step.output))); toolIoEl.textContent = io.length ? io.join('\\n\\n') : '(none)'; } document.getElementById('step-timeline').addEventListener('click', function(ev){ var el = ev.target.closest('.step'); if(el) select(el.getAttribute('data-span-id')); }); document.getElementById('trace-tree').addEventListener('click', function(ev){ var el = ev.target.closest('[data-span-id]'); if(el) select(el.getAttribute('data-span-id')); }); })();")
+	writeTracePageScript(&b)
 	b.WriteString("</script></body></html>")
 	return b.String()
+}
+
+// writeTracePageScript writes the Trace page JS: timeline bar + select() with step view, reasoning, state diff.
+func writeTracePageScript(b *strings.Builder) {
+	b.WriteString("(function(){ var T = window.__TRACE__; var ph = document.getElementById('detail-placeholder'); var content = document.getElementById('detail-content'); var stepViewEl = document.getElementById('detail-step-view'); var payloadEl = document.getElementById('detail-payload'); var toolIoEl = document.getElementById('detail-tool-io'); var reasoningEl = document.getElementById('detail-reasoning'); var stateDiffEl = document.getElementById('detail-state-diff'); var segs = T.timeline_segments || []; var bar = document.getElementById('timeline-bar'); segs.forEach(function(s){ var c = s.type; if(s.status === 'failed') c += ' failed'; else if(s.status === 'retryable') c += ' retryable'; var d = document.createElement('span'); d.className = 'seg ' + c; d.textContent = s.label + (s.duration_ms ? ' ' + s.duration_ms + 'ms' : ''); bar.appendChild(d); }); function row(el,k,v){ if(!v) return; var p = document.createElement('div'); p.textContent = k + ':'; var p2 = document.createElement('div'); p2.textContent = v; el.appendChild(p); el.appendChild(p2); } function select(spanId){ document.querySelectorAll('.step-timeline .step').forEach(function(el){ el.classList.toggle('selected', el.getAttribute('data-span-id') === spanId); }); document.querySelectorAll('.tree-section [data-span-id]').forEach(function(el){ el.classList.toggle('selected', el.getAttribute('data-span-id') === spanId); }); var step = T.steps.find(function(s){ return s.span_id === spanId; }); if(!step){ ph.style.display='block'; content.style.display='none'; return; } ph.style.display='none'; content.style.display='block'; stepViewEl.innerHTML = ''; row(stepViewEl,'Step', step.label); row(stepViewEl,'State', step.state || 'ok'); row(stepViewEl,'Attempts', step.attempts ? String(step.attempts) : ''); row(stepViewEl,'Worker', step.worker_id); row(stepViewEl,'Duration', step.duration_ms ? step.duration_ms + 'ms' : ''); var events = T.timeline.filter(function(e){ try{ var p = typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload; return (p && (p.trace_span_id === spanId || p.node_id === spanId)); }catch(_){ return false;} }); payloadEl.textContent = events.length ? JSON.stringify(events.map(function(e){ return { type: e.type, created_at: e.created_at, payload: e.payload }; }), null, 2) : ''; var io = []; var inv = step.tool_invocation; if(inv){ if(inv.input) io.push('Input: ' + (typeof inv.input === 'string' ? inv.input : JSON.stringify(inv.input))); if(inv.output) io.push('Output: ' + (typeof inv.output === 'string' ? inv.output : JSON.stringify(inv.output))); if(inv.summary) io.push('Summary: ' + inv.summary); if(inv.error) io.push('Error: ' + inv.error); if(inv.idempotent) io.push('Idempotent: true'); } if(!io.length){ var flat = (T.flat_steps || []).find(function(s){ return s.span_id === spanId; }); if(flat){ if(flat.input) io.push('Input: ' + (typeof flat.input === 'string' ? flat.input : JSON.stringify(flat.input))); if(flat.output) io.push('Output: ' + (typeof flat.output === 'string' ? flat.output : JSON.stringify(flat.output))); } } toolIoEl.textContent = io.length ? io.join('\\n\\n') : '(none)'; reasoningEl.innerHTML = ''; if(step.reasoning && step.reasoning.length){ step.reasoning.forEach(function(r){ var p = document.createElement('p'); p.innerHTML = '<strong>' + (r.role || '') + '</strong>: ' + (r.content || ''); reasoningEl.appendChild(p); }); } else { var p = document.createElement('p'); p.className = 'placeholder'; p.textContent = 'Reasoning snapshot (none recorded)'; reasoningEl.appendChild(p); } stateDiffEl.innerHTML = ''; if(step.state_diff && (step.state_diff.state_before || step.state_diff.state_after)){ var before = document.createElement('p'); before.textContent = 'Before: ' + (step.state_diff.state_before ? (typeof step.state_diff.state_before === 'string' ? step.state_diff.state_before : JSON.stringify(step.state_diff.state_before)) : '{}'); stateDiffEl.appendChild(before); var after = document.createElement('p'); after.textContent = 'After: ' + (step.state_diff.state_after ? (typeof step.state_diff.state_after === 'string' ? step.state_diff.state_after : JSON.stringify(step.state_diff.state_after)) : '{}'); stateDiffEl.appendChild(after); if(step.state_diff.changed_keys && step.state_diff.changed_keys.length){ var ch = document.createElement('p'); ch.textContent = 'Changed keys: ' + step.state_diff.changed_keys.join(', '); stateDiffEl.appendChild(ch); } } else { var p = document.createElement('p'); p.className = 'placeholder'; p.textContent = 'State diff (none)'; stateDiffEl.appendChild(p); } } document.getElementById('step-timeline').addEventListener('click', function(ev){ var el = ev.target.closest('.step'); if(el) select(el.getAttribute('data-span-id')); }); document.getElementById('trace-tree').addEventListener('click', function(ev){ var el = ev.target.closest('[data-span-id]'); if(el) select(el.getAttribute('data-span-id')); }); })();")
 }
 
 // renderTraceTreeHTML renders tree nodes with data-span-id for selection.

@@ -31,6 +31,16 @@ const (
 	JobCompleted     EventType = "job_completed"
 	JobFailed        EventType = "job_failed"
 	JobCancelled     EventType = "job_cancelled"
+
+	// Semantic events for Trace narrative (v0.9); see design/trace-event-schema-v0.9.md
+	StateCheckpointed      EventType = "state_checkpointed"
+	AgentThoughtRecorded   EventType = "agent_thought_recorded"
+	DecisionMade           EventType = "decision_made"
+	ToolSelected           EventType = "tool_selected"
+	ToolResultSummarized   EventType = "tool_result_summarized"
+	RecoveryStarted        EventType = "recovery_started"
+	RecoveryCompleted      EventType = "recovery_completed"
+	StepCompensated        EventType = "step_compensated"
 )
 
 // JobEvent 单条不可变事件；Job 的真实形态是事件流
