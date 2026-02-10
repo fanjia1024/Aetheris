@@ -114,7 +114,7 @@ The project provides a Makefile for one-command build and startup of all service
 | `make fmt` | gofmt -w |
 | `make tidy` | go mod tidy |
 
-**One-command run**: From the repo root, run `make run` to build and then start the API (default :8080) and Worker in the background; PIDs and logs are under `bin/`. Use `make stop` to stop. If using Postgres as jobstore, start Postgres first (see [docs/deployment.md](docs/deployment.md)).
+**One-command run**: From the repo root, run `make run` to build and then start the API (default :8080) and Worker in the background; PIDs and logs are under `bin/`. Use `make stop` to stop. If using Postgres as jobstore, start Postgres first (see [docs/deployment.md](docs/deployment.md)). For a full walkthrough of core features (快速体验 vs 完整运行时), see [docs/get-started.md](docs/get-started.md).
 
 ---
 

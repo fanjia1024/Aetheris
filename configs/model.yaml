@@ -5,7 +5,7 @@ model:
     providers:
       # 通义千问（DashScope OpenAI 兼容接口）
       qwen:
-        api_key: "sk-810e9c55ef5948f58837c90eed07b8bc"
+        api_key: "${DASHSCOPE_API_KEY}"
         base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
         models:
           qwen3_max:
@@ -41,7 +41,7 @@ model:
   embedding:
     providers:
       qwen:
-        api_key: "sk-810e9c55ef5948f58837c90eed07b8bc"
+        api_key: "${DASHSCOPE_API_KEY}"
         base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
         models:
           text_embedding_v2:
@@ -69,7 +69,7 @@ model:
   vision:
     providers:
       qwen:
-        api_key: "sk-810e9c55ef5948f58837c90eed07b8bc"
+        api_key: "${DASHSCOPE_API_KEY}"
         base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
         models:
           qwen_vl_plus:

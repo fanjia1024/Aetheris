@@ -1,6 +1,6 @@
 # Usage
 
-Requires **Go 1.25.7+** (aligned with go.mod and security fixes).
+Requires **Go 1.25.7+** (aligned with go.mod and security fixes). For a first-time setup and full core-feature walkthrough (快速体验 vs 完整运行时), see [Get Started](get-started.md).
 
 ## Starting services
 
