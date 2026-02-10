@@ -30,12 +30,13 @@ import (
 type StepResultType string
 
 const (
-	StepResultSuccess                StepResultType = "success"
-	StepResultSideEffectCommitted    StepResultType = "side_effect_committed" // 外部世界已改变，replay 不得重放
+	StepResultSuccess                StepResultType = "success"                 // 通用成功；非 tool 步会记为 StepResultPure
+	StepResultPure                   StepResultType = "pure"                   // 无副作用完成（纯计算，如 LLM 步）；replay 可安全重放
+	StepResultSideEffectCommitted    StepResultType = "side_effect_committed"   // 外部世界已改变，replay 不得重放
 	StepResultRetryableFailure       StepResultType = "retryable_failure"
 	StepResultPermanentFailure       StepResultType = "permanent_failure"
 	StepResultCompensatableFailure   StepResultType = "compensatable_failure"
-	StepResultCompensated            StepResultType = "compensated" // 已回滚，视为终态
+	StepResultCompensated            StepResultType = "compensated"             // 已回滚，视为终态
 )
 
 // Sentinel errors for adapters to mark failure kind; Runner uses these to set result_type.
@@ -385,8 +386,12 @@ runLoop:
 				payloadResults, _ := json.Marshal(payload.Results)
 				if completedSet != nil {
 					if _, done := completedSet[step.NodeID]; !done {
+						rt := StepResultPure
+						if step.NodeType == "tool" {
+							rt = StepResultSideEffectCommitted
+						}
 						if r.nodeEventSink != nil {
-							_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, 0, "", 0, StepResultSuccess, "")
+							_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, 0, "", 0, rt, "")
 						}
 						completedSet[step.NodeID] = struct{}{}
 					}
@@ -431,9 +436,13 @@ runLoop:
 		payload, runErr = step.Run(ctx, payload)
 		durationMs := time.Since(stepStart).Milliseconds()
 		resultType, reason := ClassifyError(runErr)
-		// 成功完成的 tool 步记为 side_effect_committed，事件流明确「世界已改变」
-		if resultType == StepResultSuccess && step.NodeType == "tool" {
-			resultType = StepResultSideEffectCommitted
+		// 世界语义：tool 成功 = 已提交副作用；非 tool 成功 = 纯计算（Pure），replay 可重放
+		if resultType == StepResultSuccess {
+			if step.NodeType == "tool" {
+				resultType = StepResultSideEffectCommitted
+			} else {
+				resultType = StepResultPure
+			}
 		}
 		payloadResults, _ := json.Marshal(payload.Results)
 		if runErr != nil && len(payloadResults) == 0 {
@@ -441,7 +450,7 @@ runLoop:
 		}
 		if r.nodeEventSink != nil {
 			stateStr := "ok"
-			if resultType != StepResultSuccess && resultType != StepResultSideEffectCommitted && resultType != StepResultCompensated {
+			if resultType != StepResultSuccess && resultType != StepResultPure && resultType != StepResultSideEffectCommitted && resultType != StepResultCompensated {
 				stateStr = string(resultType)
 			}
 			_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, durationMs, stateStr, 1, resultType, reason)

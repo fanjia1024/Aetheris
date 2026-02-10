@@ -110,6 +110,7 @@ func NewDAGCompiler(llmClient llm.Client, toolsReg *tools.Registry, engine *eino
 	}
 	if invocationStore != nil {
 		toolAdapter.InvocationStore = invocationStore
+		toolAdapter.InvocationLedger = agentexec.NewInvocationLedgerFromStore(invocationStore)
 	}
 	if resourceVerifier != nil {
 		toolAdapter.ResourceVerifier = resourceVerifier

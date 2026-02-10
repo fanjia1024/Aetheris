@@ -99,9 +99,9 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 			if err := json.Unmarshal(e.Payload, &payload); err != nil {
 				continue
 			}
-			// success / side_effect_committed / compensated 均视为节点完成；缺省为 success 以兼容旧事件
+			// pure / success / side_effect_committed / compensated 均视为节点完成；缺省为 success 以兼容旧事件
 			switch payload.ResultType {
-			case "", "success", "side_effect_committed", "compensated":
+			case "", "success", "pure", "side_effect_committed", "compensated":
 				// advance
 			default:
 				continue

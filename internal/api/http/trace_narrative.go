@@ -41,7 +41,7 @@ type StepNarrative struct {
 	Label          string                 `json:"label"`
 	NodeID         string                 `json:"node_id,omitempty"`
 	State          string                 `json:"state,omitempty"`
-	ResultType     string                 `json:"result_type,omitempty"` // Phase A: success | retryable_failure | permanent_failure | compensatable_failure
+	ResultType     string                 `json:"result_type,omitempty"` // Phase A 世界语义: pure | success | side_effect_committed | retryable_failure | permanent_failure | compensatable_failure | compensated
 	Reason         string                 `json:"reason,omitempty"`
 	Attempts       int                    `json:"attempts,omitempty"`
 	WorkerID       string                 `json:"worker_id,omitempty"`

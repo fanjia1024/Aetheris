@@ -124,11 +124,14 @@ func (a *LLMNodeAdapter) ToNodeRunner(task *planner.TaskNode, agent *runtime.Age
 
 // ToolNodeAdapter 将 tool 型 TaskNode 转为 DAG 节点
 type ToolNodeAdapter struct {
-	Tools             ToolExec
-	ToolEventSink     ToolEventSink       // 可选；Tool 执行前后写 ToolCalled/ToolReturned
-	CommandEventSink  CommandEventSink   // 可选；执行成功后立即写 command_committed，保证副作用安全
-	InvocationStore   ToolInvocationStore // 可选；持久化存储，先查再执行，跨进程防 double-commit
-	ResourceVerifier  ResourceVerifier   // 可选；Confirmation Replay 时校验外部资源仍存在，不通过则失败 job
+	Tools            ToolExec
+	ToolEventSink    ToolEventSink    // 可选；Tool 执行前后写 ToolCalled/ToolReturned
+	CommandEventSink CommandEventSink // 可选；执行成功后立即写 command_committed，保证副作用安全
+	// InvocationLedger 执行许可账本；非 nil 时所有 tool 调用经 Acquire/Commit，禁止直接拥有执行权
+	InvocationLedger InvocationLedger
+	// InvocationStore 可选；当 InvocationLedger 为 nil 时用于兼容旧逻辑（先查再执行）
+	InvocationStore  ToolInvocationStore
+	ResourceVerifier ResourceVerifier // 可选；Confirmation Replay 时校验外部资源仍存在，不通过则失败 job
 }
 
 // runConfirmation 在注入前校验本步的 StateChanged；若 verifier 存在且有待校验项且任一项失败则返回永久失败错误
@@ -151,15 +154,55 @@ func (a *ToolNodeAdapter) runConfirmation(ctx context.Context, jobID, taskID str
 func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, cfg map[string]any, agent *runtime.Agent, p *AgentDAGPayload) (*AgentDAGPayload, error) {
 	jobID := JobIDFromContext(ctx)
 	idempotencyKey := IdempotencyKey(jobID, taskID, toolName, cfg)
+	argsHash := ArgumentsHash(cfg)
 	stepChanges := StateChangesByStepFromContext(ctx)[taskID]
-	// 1) 持久化存储优先：已 committed 且 success 则先 Confirmation 再注入，不执行
+
+	// Ledger 为仲裁：先申请执行许可，禁止在 ReturnRecordedResult 时调用 tool
+	if a.InvocationLedger != nil && jobID != "" {
+		var replayResult []byte
+		if completed := CompletedToolInvocationsFromContext(ctx); completed != nil {
+			replayResult = completed[idempotencyKey]
+		}
+		decision, rec, err := a.InvocationLedger.Acquire(ctx, jobID, taskID, toolName, argsHash, idempotencyKey, replayResult)
+		if err != nil {
+			return nil, err
+		}
+		switch decision {
+		case InvocationDecisionReturnRecordedResult:
+			if err := a.runConfirmation(ctx, jobID, taskID, stepChanges); err != nil {
+				return nil, err
+			}
+			var nodeResult map[string]any
+			if rec != nil && len(rec.Result) > 0 {
+				_ = json.Unmarshal(rec.Result, &nodeResult)
+			}
+			if nodeResult == nil {
+				nodeResult = make(map[string]any)
+			}
+			if p.Results == nil {
+				p.Results = make(map[string]any)
+			}
+			p.Results[taskID] = nodeResult
+			return p, nil
+		case InvocationDecisionWaitOtherWorker:
+			return nil, &StepFailure{Type: StepResultRetryableFailure, Inner: fmt.Errorf("invocation in progress for %s", idempotencyKey), NodeID: taskID}
+		case InvocationDecisionRejected:
+			return nil, &StepFailure{Type: StepResultPermanentFailure, Inner: fmt.Errorf("ledger rejected invocation %s", idempotencyKey), NodeID: taskID}
+		case InvocationDecisionAllowExecute:
+			// 仅在此分支执行 tool，然后 Commit
+			return a.runNodeExecute(ctx, jobID, taskID, toolName, cfg, idempotencyKey, argsHash, rec, stepChanges, agent, p)
+		default:
+			return nil, &StepFailure{Type: StepResultPermanentFailure, Inner: fmt.Errorf("unknown ledger decision"), NodeID: taskID}
+		}
+	}
+
+	// 无 Ledger：兼容旧逻辑（store 或仅事件重放）
 	if a.InvocationStore != nil && jobID != "" {
 		rec, _ := a.InvocationStore.GetByJobAndIdempotencyKey(ctx, jobID, idempotencyKey)
 		if rec != nil && rec.Committed && (rec.Status == ToolInvocationStatusSuccess || rec.Status == ToolInvocationStatusConfirmed) && len(rec.Result) > 0 {
 			if err := a.runConfirmation(ctx, jobID, taskID, stepChanges); err != nil {
 				return nil, err
 			}
-			// 校验通过后可将状态置为 confirmed，供审计或可选策略「已 confirmed 则跳过校验」
 			_ = a.InvocationStore.SetFinished(ctx, idempotencyKey, ToolInvocationStatusConfirmed, rec.Result, true)
 			var nodeResult map[string]any
 			_ = json.Unmarshal(rec.Result, &nodeResult)
@@ -173,7 +216,6 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 			return p, nil
 		}
 	}
-	// 2) 幂等重放：事件流中已有成功完成的同 idempotency_key 调用则先 Confirmation 再注入结果、不执行（无 store 或 store 未命中时）
 	if completed := CompletedToolInvocationsFromContext(ctx); completed != nil {
 		if resultJSON, ok := completed[idempotencyKey]; ok {
 			if err := a.runConfirmation(ctx, jobID, taskID, stepChanges); err != nil {
@@ -193,7 +235,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 			return p, nil
 		}
 	}
-	// 1.0 短路：Replay 已注入的节点结果不再执行真实 Tool，避免二次副作用
+	// 1.0 短路：Replay 已注入的节点结果不再执行
 	if prev, ok := p.Results[taskID]; ok {
 		if m, ok := prev.(map[string]any); ok {
 			if _, hasDone := m["done"]; hasDone {
@@ -204,6 +246,11 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 			}
 		}
 	}
+	return a.runNodeExecute(ctx, jobID, taskID, toolName, cfg, idempotencyKey, argsHash, nil, stepChanges, agent, p)
+}
+
+// runNodeExecute 执行 tool 并写事件；当 Ledger 存在时 rec 非 nil 且已 SetStarted，成功后需 Commit
+func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, toolName string, cfg map[string]any, idempotencyKey, argsHash string, ledgerRec *ToolInvocationRecord, stepChanges []StateChangeForVerify, agent *runtime.Agent, p *AgentDAGPayload) (*AgentDAGPayload, error) {
 	var state interface{}
 	if prev, ok := p.Results[taskID]; ok {
 		if m, ok := prev.(map[string]any); ok {
@@ -211,14 +258,17 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 		}
 	}
 	invocationID := uuid.New().String()
+	if ledgerRec != nil {
+		invocationID = ledgerRec.InvocationID
+	}
 	startedAt := time.Now().UTC()
-	if a.InvocationStore != nil && jobID != "" {
+	if a.InvocationLedger == nil && a.InvocationStore != nil && jobID != "" {
 		_ = a.InvocationStore.SetStarted(ctx, &ToolInvocationRecord{
 			InvocationID:   invocationID,
 			JobID:          jobID,
 			StepID:         taskID,
 			ToolName:       toolName,
-			ArgsHash:       ArgumentsHash(cfg),
+			ArgsHash:       argsHash,
 			IdempotencyKey: idempotencyKey,
 			Status:         ToolInvocationStatusStarted,
 		})
@@ -227,7 +277,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 		_ = a.ToolEventSink.AppendToolInvocationStarted(ctx, jobID, taskID, &ToolInvocationStartedPayload{
 			InvocationID:   invocationID,
 			ToolName:       toolName,
-			ArgumentsHash:  ArgumentsHash(cfg),
+			ArgumentsHash:  argsHash,
 			IdempotencyKey: idempotencyKey,
 			StartedAt:      FormatStartedAt(startedAt),
 		})
@@ -243,7 +293,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 	result, err := a.Tools.Execute(ctx, toolName, cfg, state)
 	finishedAt := time.Now().UTC()
 	if err != nil {
-		if a.InvocationStore != nil && jobID != "" {
+		if a.InvocationLedger == nil && a.InvocationStore != nil && jobID != "" {
 			errResult, _ := json.Marshal(map[string]any{"error": err.Error()})
 			_ = a.InvocationStore.SetFinished(ctx, idempotencyKey, ToolInvocationStatusFailure, errResult, false)
 		}
@@ -277,8 +327,9 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 		"done": result.Done, "state": result.State, "output": result.Output, "error": result.Err,
 	}
 	resultBytes, _ := json.Marshal(nodeResult)
-	// 先写持久化 store 并设 committed，再写事件，保证跨进程权威
-	if a.InvocationStore != nil && jobID != "" {
+	if a.InvocationLedger != nil && jobID != "" {
+		_ = a.InvocationLedger.Commit(ctx, invocationID, idempotencyKey, resultBytes)
+	} else if a.InvocationStore != nil && jobID != "" {
 		_ = a.InvocationStore.SetFinished(ctx, idempotencyKey, ToolInvocationStatusSuccess, resultBytes, true)
 	}
 	if a.ToolEventSink != nil && jobID != "" {
@@ -290,7 +341,6 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 			FinishedAt:     FormatStartedAt(finishedAt),
 		})
 	}
-	// 副作用安全：执行成功后立即写 command_committed，再更新内存与 ToolReturned
 	if a.CommandEventSink != nil && jobID != "" {
 		_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, resultBytes)
 	}
