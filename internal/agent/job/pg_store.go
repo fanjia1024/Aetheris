@@ -17,6 +17,7 @@ package job
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -108,6 +109,27 @@ func nullTime(t time.Time) interface{} {
 	return t
 }
 
+func capsToPg(caps []string) interface{} {
+	if len(caps) == 0 {
+		return nil
+	}
+	return strings.Join(caps, ",")
+}
+
+func pgToCaps(s *string) []string {
+	if s == nil || strings.TrimSpace(*s) == "" {
+		return nil
+	}
+	parts := strings.Split(*s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 func (s *JobStorePg) Create(ctx context.Context, j *Job) (string, error) {
 	if j == nil {
 		return "", errors.New("job is nil")
@@ -124,9 +146,9 @@ func (s *JobStorePg) Create(ctx context.Context, j *Job) (string, error) {
 		j.UpdatedAt = now
 	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO jobs (id, agent_id, goal, status, cursor, retry_count, session_id, cancel_requested_at, created_at, updated_at, idempotency_key)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-		id, j.AgentID, j.Goal, statusToPg(StatusPending), j.Cursor, j.RetryCount, nullStr(j.SessionID), nullTime(j.CancelRequestedAt), j.CreatedAt, j.UpdatedAt, nullStr(j.IdempotencyKey))
+		`INSERT INTO jobs (id, agent_id, goal, status, cursor, retry_count, session_id, cancel_requested_at, created_at, updated_at, idempotency_key, required_capabilities)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		id, j.AgentID, j.Goal, statusToPg(StatusPending), j.Cursor, j.RetryCount, nullStr(j.SessionID), nullTime(j.CancelRequestedAt), j.CreatedAt, j.UpdatedAt, nullStr(j.IdempotencyKey), capsToPg(j.RequiredCapabilities))
 	if err != nil {
 		return "", err
 	}
@@ -136,14 +158,13 @@ func (s *JobStorePg) Create(ctx context.Context, j *Job) (string, error) {
 func (s *JobStorePg) Get(ctx context.Context, jobID string) (*Job, error) {
 	var j Job
 	var status int
-	var cursor, sessionID *string
+	var cursor, sessionID, idempotencyKey, requiredCaps *string
 	var retryCount int
 	var cancelRequestedAt *time.Time
 	var createdAt, updatedAt time.Time
-	var idempotencyKey *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, agent_id, goal, status, cursor, retry_count, session_id, cancel_requested_at, created_at, updated_at, idempotency_key FROM jobs WHERE id = $1`,
-		jobID).Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &cancelRequestedAt, &createdAt, &updatedAt, &idempotencyKey)
+		`SELECT id, agent_id, goal, status, cursor, retry_count, session_id, cancel_requested_at, created_at, updated_at, idempotency_key, required_capabilities FROM jobs WHERE id = $1`,
+		jobID).Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &cancelRequestedAt, &createdAt, &updatedAt, &idempotencyKey, &requiredCaps)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -166,6 +187,7 @@ func (s *JobStorePg) Get(ctx context.Context, jobID string) (*Job, error) {
 	if idempotencyKey != nil {
 		j.IdempotencyKey = *idempotencyKey
 	}
+	j.RequiredCapabilities = pgToCaps(requiredCaps)
 	return &j, nil
 }
 
@@ -175,14 +197,13 @@ func (s *JobStorePg) GetByAgentAndIdempotencyKey(ctx context.Context, agentID, i
 	}
 	var j Job
 	var status int
-	var cursor, sessionID *string
+	var cursor, sessionID, key, requiredCaps *string
 	var retryCount int
 	var cancelRequestedAt *time.Time
 	var createdAt, updatedAt time.Time
-	var key *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, agent_id, goal, status, cursor, retry_count, session_id, cancel_requested_at, created_at, updated_at, idempotency_key FROM jobs WHERE agent_id = $1 AND idempotency_key = $2`,
-		agentID, idempotencyKey).Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &cancelRequestedAt, &createdAt, &updatedAt, &key)
+		`SELECT id, agent_id, goal, status, cursor, retry_count, session_id, cancel_requested_at, created_at, updated_at, idempotency_key, required_capabilities FROM jobs WHERE agent_id = $1 AND idempotency_key = $2`,
+		agentID, idempotencyKey).Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &cancelRequestedAt, &createdAt, &updatedAt, &key, &requiredCaps)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -205,12 +226,13 @@ func (s *JobStorePg) GetByAgentAndIdempotencyKey(ctx context.Context, agentID, i
 	j.RetryCount = retryCount
 	j.CreatedAt = createdAt
 	j.UpdatedAt = updatedAt
+	j.RequiredCapabilities = pgToCaps(requiredCaps)
 	return &j, nil
 }
 
 func (s *JobStorePg) ListByAgent(ctx context.Context, agentID string) ([]*Job, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, agent_id, goal, status, cursor, retry_count, session_id, cancel_requested_at, created_at, updated_at, idempotency_key FROM jobs WHERE agent_id = $1 ORDER BY created_at DESC`,
+		`SELECT id, agent_id, goal, status, cursor, retry_count, session_id, cancel_requested_at, created_at, updated_at, idempotency_key, required_capabilities FROM jobs WHERE agent_id = $1 ORDER BY created_at DESC`,
 		agentID)
 	if err != nil {
 		return nil, err
@@ -220,11 +242,11 @@ func (s *JobStorePg) ListByAgent(ctx context.Context, agentID string) ([]*Job, e
 	for rows.Next() {
 		var j Job
 		var status int
-		var cursor, sessionID, idempotencyKey *string
+		var cursor, sessionID, idempotencyKey, requiredCaps *string
 		var retryCount int
 		var cancelRequestedAt *time.Time
 		var createdAt, updatedAt time.Time
-		if err := rows.Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &cancelRequestedAt, &createdAt, &updatedAt, &idempotencyKey); err != nil {
+		if err := rows.Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &cancelRequestedAt, &createdAt, &updatedAt, &idempotencyKey, &requiredCaps); err != nil {
 			return nil, err
 		}
 		j.Status = pgToStatus(status)
@@ -243,6 +265,7 @@ func (s *JobStorePg) ListByAgent(ctx context.Context, agentID string) ([]*Job, e
 		j.RetryCount = retryCount
 		j.CreatedAt = createdAt
 		j.UpdatedAt = updatedAt
+		j.RequiredCapabilities = pgToCaps(requiredCaps)
 		list = append(list, &j)
 	}
 	return list, rows.Err()
@@ -269,17 +292,35 @@ func (s *JobStorePg) UpdateCursor(ctx context.Context, jobID string, cursor stri
 }
 
 func (s *JobStorePg) ClaimNextPending(ctx context.Context) (*Job, error) {
-	// 原子取一条 status=0 并置为 1
+	return s.ClaimNextPendingFromQueue(ctx, "")
+}
+
+func (s *JobStorePg) ClaimNextPendingFromQueue(ctx context.Context, queueClass string) (*Job, error) {
+	return s.ClaimNextPendingForWorker(ctx, queueClass, nil)
+}
+
+func (s *JobStorePg) ClaimNextPendingForWorker(ctx context.Context, queueClass string, workerCapabilities []string) (*Job, error) {
+	_ = queueClass // 当前 PG 未按队列过滤，与 ClaimNextPendingFromQueue 一致
+	if len(workerCapabilities) == 0 {
+		return s.claimNextPendingPg(ctx)
+	}
 	var j Job
 	var status int
-	var cursor, sessionID *string
+	var cursor, sessionID, requiredCaps *string
 	var retryCount int
 	var createdAt, updatedAt time.Time
+	// 仅认领 RequiredCapabilities 被 workerCapabilities 覆盖的 Job（空或 NULL 表示任意 Worker 可执行）
 	err := s.pool.QueryRow(ctx,
 		`UPDATE jobs SET status = $1, updated_at = now()
-		 WHERE id = (SELECT id FROM jobs WHERE status = $2 ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED)
-		 RETURNING id, agent_id, goal, status, cursor, retry_count, session_id, created_at, updated_at`,
-		pgStatusRunning, pgStatusPending).Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &createdAt, &updatedAt)
+		 WHERE id = (
+		   SELECT id FROM jobs
+		   WHERE status = $2
+		   AND (required_capabilities IS NULL OR trim(required_capabilities) = '' OR
+		     (SELECT bool_and(trim(c) = ANY($3)) FROM unnest(string_to_array(required_capabilities, ',')) AS c))
+		   ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED
+		 )
+		 RETURNING id, agent_id, goal, status, cursor, retry_count, session_id, created_at, updated_at, required_capabilities`,
+		pgStatusRunning, pgStatusPending, workerCapabilities).Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &createdAt, &updatedAt, &requiredCaps)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -296,6 +337,38 @@ func (s *JobStorePg) ClaimNextPending(ctx context.Context) (*Job, error) {
 	j.RetryCount = retryCount
 	j.CreatedAt = createdAt
 	j.UpdatedAt = updatedAt
+	j.RequiredCapabilities = pgToCaps(requiredCaps)
+	return &j, nil
+}
+
+func (s *JobStorePg) claimNextPendingPg(ctx context.Context) (*Job, error) {
+	var j Job
+	var status int
+	var cursor, sessionID, requiredCaps *string
+	var retryCount int
+	var createdAt, updatedAt time.Time
+	err := s.pool.QueryRow(ctx,
+		`UPDATE jobs SET status = $1, updated_at = now()
+		 WHERE id = (SELECT id FROM jobs WHERE status = $2 ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED)
+		 RETURNING id, agent_id, goal, status, cursor, retry_count, session_id, created_at, updated_at, required_capabilities`,
+		pgStatusRunning, pgStatusPending).Scan(&j.ID, &j.AgentID, &j.Goal, &status, &cursor, &retryCount, &sessionID, &createdAt, &updatedAt, &requiredCaps)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	j.Status = StatusRunning
+	if cursor != nil {
+		j.Cursor = *cursor
+	}
+	if sessionID != nil {
+		j.SessionID = *sessionID
+	}
+	j.RetryCount = retryCount
+	j.CreatedAt = createdAt
+	j.UpdatedAt = updatedAt
+	j.RequiredCapabilities = pgToCaps(requiredCaps)
 	return &j, nil
 }
 

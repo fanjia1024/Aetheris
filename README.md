@@ -92,7 +92,7 @@ Key components:
 * **Execution Engine (eino)** — executes DAG nodes
 * **Workers** — distributed execution
 
-RAG is just one capability that an agent may choose to use.
+RAG is one capability that agents can use via pipelines or tools; it is **pluggable**, not the only built-in scenario. Aetheris is an **Agent Workflow Runtime** (like Temporal for agents): retrieval, generation, and knowledge pipelines are integrated as optional components, not the core product.
 
 Detailed documentation (configuration, CLI, deployment) is in [docs/](docs/).
 

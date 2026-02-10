@@ -33,6 +33,7 @@ import (
 	"rag-platform/internal/agent/runtime"
 	agentexec "rag-platform/internal/agent/runtime/executor"
 	"rag-platform/internal/agent/runtime/executor/verifier"
+	replaysandbox "rag-platform/internal/agent/replay/sandbox"
 	"rag-platform/internal/agent/tools"
 	"rag-platform/internal/app"
 	"rag-platform/internal/app/api"
@@ -153,6 +154,7 @@ func NewApp(cfg *config.Config) (*App, error) {
 		dagRunner.SetPlanGeneratedSink(api.NewPlanGeneratedSink(pgEventStore))
 		dagRunner.SetNodeEventSink(nodeEventSink)
 		dagRunner.SetReplayContextBuilder(api.NewReplayContextBuilder(pgEventStore))
+		dagRunner.SetReplayPolicy(replaysandbox.DefaultPolicy{})
 		maxAttempts := cfg.Worker.MaxAttempts
 		if maxAttempts <= 0 {
 			maxAttempts = 3
@@ -212,6 +214,7 @@ func NewApp(cfg *config.Config) (*App, error) {
 			pollInterval,
 			leaseDur,
 			maxConcurrency,
+			cfg.Worker.Capabilities,
 			logger,
 		)
 		logger.Info("Worker Agent Job 模式已启用", "worker_id", DefaultWorkerID(), "dsn", dsn)

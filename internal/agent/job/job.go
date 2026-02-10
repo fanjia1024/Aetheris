@@ -62,4 +62,10 @@ type Job struct {
 	CancelRequestedAt time.Time
 	// IdempotencyKey 幂等键：POST message 时可选 Idempotency-Key header，同 Agent 下相同 key 在有效窗口内只创建一次 Job
 	IdempotencyKey string
+	// Priority 优先级，数值越大越先被调度；空/0 为默认
+	Priority int
+	// QueueClass 队列类型（realtime / default / background / heavy），Scheduler 可按队列拉取
+	QueueClass string
+	// RequiredCapabilities 执行该 Job 所需能力（如 llm, tool, rag）；空表示任意 Worker 可执行；Scheduler 按能力派发
+	RequiredCapabilities []string
 }

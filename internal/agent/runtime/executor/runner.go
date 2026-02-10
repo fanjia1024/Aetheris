@@ -23,6 +23,7 @@ import (
 
 	"rag-platform/internal/agent/planner"
 	"rag-platform/internal/agent/replay"
+	replaysandbox "rag-platform/internal/agent/replay/sandbox"
 	"rag-platform/internal/agent/runtime"
 )
 
@@ -154,6 +155,7 @@ type Runner struct {
 	planGeneratedSink PlanGeneratedSink
 	nodeEventSink     NodeEventSink
 	replayBuilder     replay.ReplayContextBuilder
+	replayPolicy      replaysandbox.ReplayPolicy // 可选；Replay 时按策略决定执行或注入
 }
 
 // NewRunner 创建 Runner（仅编译与单次 Invoke）
@@ -180,6 +182,11 @@ func (r *Runner) SetNodeEventSink(sink NodeEventSink) {
 // SetReplayContextBuilder 设置从事件流重建执行上下文的 Builder（可选）；无 Checkpoint 时尝试从事件恢复
 func (r *Runner) SetReplayContextBuilder(b replay.ReplayContextBuilder) {
 	r.replayBuilder = b
+}
+
+// SetReplayPolicy 设置 Replay 策略（可选）；为 nil 时使用默认“已 command_committed 则注入”逻辑
+func (r *Runner) SetReplayPolicy(p replaysandbox.ReplayPolicy) {
+	r.replayPolicy = p
 }
 
 // Run 执行单轮：通过 Agent 的 Planner 得到 TaskGraph，编译为 DAG 并执行
@@ -371,42 +378,83 @@ runLoop:
 	for i := startIndex; i < len(steps); i++ {
 		step := steps[i]
 		commandID := step.NodeID // 单命令每节点
-		// 命令级跳过：事件流中已 command_committed 的永不重放，仅注入结果并推进游标
+		// 命令级跳过：事件流中已 command_committed 的永不重放，仅注入结果并推进游标（或按 ReplayPolicy 决策）
 		if replayCtx != nil {
-			if _, committed := replayCtx.CompletedCommandIDs[commandID]; committed {
-				if resultBytes, ok := replayCtx.CommandResults[commandID]; ok && len(resultBytes) > 0 {
+			if r.replayPolicy != nil {
+				decision := r.replayPolicy.Decide(step.NodeID, commandID, step.NodeType, replayCtx)
+				if decision.Inject && len(decision.Result) > 0 {
 					var nodeResult interface{}
-					if err := json.Unmarshal(resultBytes, &nodeResult); err == nil {
+					if err := json.Unmarshal(decision.Result, &nodeResult); err == nil {
 						if payload.Results == nil {
 							payload.Results = make(map[string]any)
 						}
 						payload.Results[step.NodeID] = nodeResult
 					}
-				}
-				payloadResults, _ := json.Marshal(payload.Results)
-				if completedSet != nil {
-					if _, done := completedSet[step.NodeID]; !done {
-						rt := StepResultPure
-						if step.NodeType == "tool" {
-							rt = StepResultSideEffectCommitted
+					payloadResults, _ := json.Marshal(payload.Results)
+					if completedSet != nil {
+						if _, done := completedSet[step.NodeID]; !done {
+							rt := StepResultPure
+							if step.NodeType == "tool" {
+								rt = StepResultSideEffectCommitted
+							}
+							if r.nodeEventSink != nil {
+								_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, 0, "", 0, rt, "")
+							}
+							completedSet[step.NodeID] = struct{}{}
 						}
-						if r.nodeEventSink != nil {
-							_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, 0, "", 0, rt, "")
-						}
-						completedSet[step.NodeID] = struct{}{}
 					}
+					cp := runtime.NewNodeCheckpoint(agent.ID, sessionID, j.ID, step.NodeID, graphBytes, payloadResults, nil)
+					cpID, saveErr := r.checkpointStore.Save(ctx, cp)
+					if saveErr != nil {
+						_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
+						return fmt.Errorf("executor: 保存 checkpoint 失败: %w", saveErr)
+					}
+					if agent.Session != nil {
+						agent.Session.SetLastCheckpoint(cpID)
+					}
+					_ = r.jobStore.UpdateCursor(ctx, j.ID, cpID)
+					continue
 				}
-				cp := runtime.NewNodeCheckpoint(agent.ID, sessionID, j.ID, step.NodeID, graphBytes, payloadResults, nil)
-				cpID, saveErr := r.checkpointStore.Save(ctx, cp)
-				if saveErr != nil {
+				if !decision.Inject && (decision.Kind == replaysandbox.SideEffect || decision.Kind == replaysandbox.External) {
 					_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
-					return fmt.Errorf("executor: 保存 checkpoint 失败: %w", saveErr)
+					return fmt.Errorf("executor: replay 时副作用节点 %s 无已记录结果，禁止执行", step.NodeID)
 				}
-				if agent.Session != nil {
-					agent.Session.SetLastCheckpoint(cpID)
+			} else {
+				if _, committed := replayCtx.CompletedCommandIDs[commandID]; committed {
+					if resultBytes, ok := replayCtx.CommandResults[commandID]; ok && len(resultBytes) > 0 {
+						var nodeResult interface{}
+						if err := json.Unmarshal(resultBytes, &nodeResult); err == nil {
+							if payload.Results == nil {
+								payload.Results = make(map[string]any)
+							}
+							payload.Results[step.NodeID] = nodeResult
+						}
+					}
+					payloadResults, _ := json.Marshal(payload.Results)
+					if completedSet != nil {
+						if _, done := completedSet[step.NodeID]; !done {
+							rt := StepResultPure
+							if step.NodeType == "tool" {
+								rt = StepResultSideEffectCommitted
+							}
+							if r.nodeEventSink != nil {
+								_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, 0, "", 0, rt, "")
+							}
+							completedSet[step.NodeID] = struct{}{}
+						}
+					}
+					cp := runtime.NewNodeCheckpoint(agent.ID, sessionID, j.ID, step.NodeID, graphBytes, payloadResults, nil)
+					cpID, saveErr := r.checkpointStore.Save(ctx, cp)
+					if saveErr != nil {
+						_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
+						return fmt.Errorf("executor: 保存 checkpoint 失败: %w", saveErr)
+					}
+					if agent.Session != nil {
+						agent.Session.SetLastCheckpoint(cpID)
+					}
+					_ = r.jobStore.UpdateCursor(ctx, j.ID, cpID)
+					continue
 				}
-				_ = r.jobStore.UpdateCursor(ctx, j.ID, cpID)
-				continue
 			}
 		}
 		if completedSet != nil {

@@ -34,10 +34,34 @@ type JobStore interface {
 	UpdateCursor(ctx context.Context, jobID string, cursor string) error
 	// ClaimNextPending 原子取出一条 Pending 并置为 Running，无则返回 nil, nil
 	ClaimNextPending(ctx context.Context) (*Job, error)
+	// ClaimNextPendingFromQueue 从指定队列取出一条 Pending（同队列内按 Priority 降序）；queueClass 为空时等价 ClaimNextPending
+	ClaimNextPendingFromQueue(ctx context.Context, queueClass string) (*Job, error)
+	// ClaimNextPendingForWorker 从指定队列取出一条 Pending 且该 Job 的 RequiredCapabilities 被 workerCapabilities 覆盖；capabilities 为空时等价 ClaimNextPendingFromQueue
+	ClaimNextPendingForWorker(ctx context.Context, queueClass string, workerCapabilities []string) (*Job, error)
 	// Requeue 将 Job 重新入队为 Pending（用于重试；会递增 RetryCount）
 	Requeue(ctx context.Context, job *Job) error
 	// RequestCancel 请求取消执行中的 Job；Worker 轮询 Get 时发现 CancelRequestedAt 非零则取消 runCtx
 	RequestCancel(ctx context.Context, jobID string) error
+}
+
+// jobMatchesCapabilities 判断 Job 的 RequiredCapabilities 是否被 workerCapabilities 覆盖；jobRequired 为空表示任意 Worker 可执行；workerCapabilities 为空表示不按能力过滤
+func jobMatchesCapabilities(jobRequired, workerCapabilities []string) bool {
+	if len(jobRequired) == 0 {
+		return true
+	}
+	if len(workerCapabilities) == 0 {
+		return true
+	}
+	set := make(map[string]struct{}, len(workerCapabilities))
+	for _, c := range workerCapabilities {
+		set[c] = struct{}{}
+	}
+	for _, r := range jobRequired {
+		if _, ok := set[r]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // JobStoreMem 内存实现：map + Pending 队列，Create 时入队，ClaimNextPending 取队首并置 Running
@@ -138,24 +162,46 @@ func (s *JobStoreMem) UpdateCursor(ctx context.Context, jobID string, cursor str
 }
 
 func (s *JobStoreMem) ClaimNextPending(ctx context.Context) (*Job, error) {
+	return s.ClaimNextPendingFromQueue(ctx, "")
+}
+
+func (s *JobStoreMem) ClaimNextPendingFromQueue(ctx context.Context, queueClass string) (*Job, error) {
+	return s.ClaimNextPendingForWorker(ctx, queueClass, nil)
+}
+
+func (s *JobStoreMem) ClaimNextPendingForWorker(ctx context.Context, queueClass string, workerCapabilities []string) (*Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for len(s.pending) > 0 {
-		id := s.pending[0]
-		s.pending = s.pending[1:]
+	var bestID string
+	var bestPriority int
+	var bestIdx int = -1
+	for idx, id := range s.pending {
 		j, ok := s.byID[id]
-		if !ok {
+		if !ok || j.Status != StatusPending {
 			continue
 		}
-		if j.Status != StatusPending {
+		if queueClass != "" && j.QueueClass != "" && j.QueueClass != queueClass {
 			continue
 		}
-		j.Status = StatusRunning
-		j.UpdatedAt = time.Now()
-		cp := *j
-		return &cp, nil
+		if !jobMatchesCapabilities(j.RequiredCapabilities, workerCapabilities) {
+			continue
+		}
+		if bestIdx < 0 || j.Priority > bestPriority {
+			bestID = id
+			bestPriority = j.Priority
+			bestIdx = idx
+		}
 	}
-	return nil, nil
+	if bestIdx < 0 {
+		return nil, nil
+	}
+	// 从 pending 中移除 bestID（保持顺序）
+	s.pending = append(s.pending[:bestIdx], s.pending[bestIdx+1:]...)
+	j := s.byID[bestID]
+	j.Status = StatusRunning
+	j.UpdatedAt = time.Now()
+	cp := *j
+	return &cp, nil
 }
 
 func (s *JobStoreMem) Requeue(ctx context.Context, job *Job) error {

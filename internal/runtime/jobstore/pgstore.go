@@ -181,6 +181,35 @@ func (s *pgStore) Claim(ctx context.Context, workerID string) (string, int, erro
 	return claimedID, claimedVersion, nil
 }
 
+func (s *pgStore) ClaimJob(ctx context.Context, workerID string, jobID string) (int, error) {
+	now := time.Now()
+	expires := now.Add(s.leaseDur)
+	terminal1, terminal2, terminal3 := string(JobCompleted), string(JobFailed), string(JobCancelled)
+
+	var version int
+	err := s.pool.QueryRow(ctx, `
+		SELECT e.version FROM job_events e
+		INNER JOIN (SELECT job_id, MAX(version) AS v FROM job_events WHERE job_id = $1 GROUP BY job_id) m ON e.job_id = m.job_id AND e.version = m.v
+		WHERE e.job_id = $1 AND e.type NOT IN ($2, $3, $4)
+		AND NOT EXISTS (SELECT 1 FROM job_claims c WHERE c.job_id = $1 AND c.expires_at > $5)
+	`, jobID, terminal1, terminal2, terminal3, now).Scan(&version)
+	if err != nil {
+		if errNoRows(err) {
+			return 0, ErrNoJob
+		}
+		return 0, err
+	}
+
+	_, err = s.pool.Exec(ctx,
+		`INSERT INTO job_claims (job_id, worker_id, expires_at) VALUES ($1, $2, $3)
+		 ON CONFLICT (job_id) DO UPDATE SET worker_id = $2, expires_at = $3`,
+		jobID, workerID, expires)
+	if err != nil {
+		return 0, err
+	}
+	return version, nil
+}
+
 func (s *pgStore) Heartbeat(ctx context.Context, workerID string, jobID string) error {
 	expires := time.Now().Add(s.leaseDur)
 	cmd, err := s.pool.Exec(ctx,

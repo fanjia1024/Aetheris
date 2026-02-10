@@ -26,6 +26,10 @@ Runner 由**事件流驱动状态机推进**，保证重放时**不重跑已提�
 
 Adapter 在 Execute 成功后**立即**写 `command_committed`，再由 Runner 写 `node_finished`。
 
+### Tool completion visibility（2.0）
+
+为保证 at-most-once tool 执行，**completion 必须先于 NodeFinished/checkpoint 对 Replay 可见**。即：事件流为 Replay 的事实来源时，Tool 节点在 Adapter 内应先写 `tool_invocation_finished` 与 `command_committed`，再写 InvocationStore 的 SetFinished/Commit；Runner 再写 NodeFinished 与 UpdateCursor。这样若 Worker 在「tool 已执行、事件已落盘」后、UpdateCursor 前崩溃，Replay 仍能从事件流看到 completion 并注入结果，不会重复执行。见 [node_adapter.go](internal/agent/runtime/executor/node_adapter.go) 中 Tool 成功路径的写入顺序。
+
 ## 推进规则
 
 1. **startIndex**：第一个不在 CompletedNodeIDs 中的 step 索引（Replay 路径）；或 Checkpoint 路径下「CursorNode 的下一索引」。

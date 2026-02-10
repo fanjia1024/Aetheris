@@ -41,6 +41,7 @@ import (
 	"rag-platform/internal/agent/runtime"
 	agentexec "rag-platform/internal/agent/runtime/executor"
 	"rag-platform/internal/agent/runtime/executor/verifier"
+	replaysandbox "rag-platform/internal/agent/replay/sandbox"
 	"rag-platform/internal/agent/tools"
 	"rag-platform/internal/api/http"
 	"rag-platform/internal/api/http/middleware"
@@ -349,6 +350,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	dagRunner.SetPlanGeneratedSink(NewPlanGeneratedSink(jobEventStore))
 	dagRunner.SetNodeEventSink(nodeEventSink)
 	dagRunner.SetReplayContextBuilder(NewReplayContextBuilder(jobEventStore))
+	dagRunner.SetReplayPolicy(replaysandbox.DefaultPolicy{})
 	runJob := func(ctx context.Context, j *job.Job) error {
 		agent, _ := agentRuntimeManager.Get(ctx, j.AgentID)
 		if agent == nil {
@@ -395,6 +397,9 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		}
 		if sc.Backoff != "" {
 			schedulerConfig.Backoff = parseDuration(sc.Backoff, time.Second)
+		}
+		if len(sc.Queues) > 0 {
+			schedulerConfig.Queues = sc.Queues
 		}
 	}
 	jobScheduler := job.NewScheduler(jobStore, runJob, schedulerConfig)

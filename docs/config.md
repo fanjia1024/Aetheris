@@ -43,6 +43,7 @@ Only when `jobstore.type=memory`; with `postgres` the API does not start the Sch
 | max_concurrency | Max concurrent jobs |
 | retry_max | Max retries after failure (excluding first attempt) |
 | backoff | Wait before retry |
+| queues | Optional. Priority-ordered queue list, e.g. `["realtime","default","background"]`. Scheduler claims from the first non-empty queue. Empty or unset → single queue (no class). Job.QueueClass / Job.Priority set at create time (e.g. by API) control which queue a job belongs to; Postgres store requires schema migration for queue columns to filter by queue. |
 
 ### agent.adk (Eino ADK 主 Runner)
 
@@ -111,6 +112,7 @@ Use `DASHSCOPE_API_KEY` for Qwen/DashScope, `ANTHROPIC_API_KEY` for Claude, `COH
 | retry_delay | Retry delay |
 | timeout | Task timeout |
 | poll_interval | Interval for Claiming jobs from the event store |
+| capabilities | Optional. List of worker capabilities (e.g. `["llm", "tool", "rag"]`). When set, the Worker only claims jobs whose **required_capabilities** are satisfied by this list (empty job requirements = any worker). Enables multi-agent / multi-model dispatch: e.g. LLM-only workers vs. tool+rag workers. Omit or leave empty to accept any job. |
 
 ### jobstore
 

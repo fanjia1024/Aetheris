@@ -29,11 +29,15 @@ type RunJobFunc func(ctx context.Context, j *Job) error
 // CompensateFunc 在 CompensatableFailure 时调用（jobID、失败节点 nodeID）；Week 1 可为 stub，Phase B 接真实回滚
 type CompensateFunc func(ctx context.Context, jobID, nodeID string) error
 
-// SchedulerConfig 调度器配置：并发上限、重试与 backoff
+// SchedulerConfig 调度器配置：并发上限、重试、backoff、队列优先级与能力派发
 type SchedulerConfig struct {
 	MaxConcurrency int           // 最大并发执行数，<=0 表示 1
 	RetryMax       int           // 最大重试次数（不含首次）
 	Backoff        time.Duration // 重试前等待时间
+	// Queues 按优先级轮询的队列列表（如 realtime, default, background）；空则使用 ClaimNextPending 不区分队列
+	Queues []string
+	// Capabilities 调度器（Worker）能力列表；非空时仅认领 Job.RequiredCapabilities 满足的 Job
+	Capabilities []string
 }
 
 // Scheduler 在 JobStore 之上提供排队、并发限制与重试；形态为 API→Job Queue→Scheduler→Worker→Executor
@@ -79,8 +83,26 @@ func (s *Scheduler) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case s.limiter <- struct{}{}:
-				// 占一个槽位后拉取
-				j, _ := s.store.ClaimNextPending(ctx)
+				// 占一个槽位后拉取；若配置了 Queues 则按队列优先级依次尝试；Capabilities 非空时按能力派发
+				var j *Job
+				if len(s.config.Queues) > 0 {
+					for _, q := range s.config.Queues {
+						if len(s.config.Capabilities) > 0 {
+							j, _ = s.store.ClaimNextPendingForWorker(ctx, q, s.config.Capabilities)
+						} else {
+							j, _ = s.store.ClaimNextPendingFromQueue(ctx, q)
+						}
+						if j != nil {
+							break
+						}
+					}
+				} else {
+					if len(s.config.Capabilities) > 0 {
+						j, _ = s.store.ClaimNextPendingForWorker(ctx, "", s.config.Capabilities)
+					} else {
+						j, _ = s.store.ClaimNextPending(ctx)
+					}
+				}
 				if j == nil {
 					<-s.limiter
 					time.Sleep(200 * time.Millisecond)

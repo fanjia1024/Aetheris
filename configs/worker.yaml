@@ -7,6 +7,8 @@ worker:
   timeout: 5m
   # Agent Job 拉取间隔（从事件存储 Claim）
   poll_interval: "2s"
+  # Worker 能力列表；仅认领 Job.required_capabilities 被满足的 Job；空表示接受任意 Job（如 llm, tool, rag）
+  # capabilities: ["llm", "tool"]
 
 # 任务事件与元数据存储（与 API 共用 DSN 时，Worker Claim 执行 Job）
 jobstore:

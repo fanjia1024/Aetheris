@@ -327,11 +327,7 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 		"done": result.Done, "state": result.State, "output": result.Output, "error": result.Err,
 	}
 	resultBytes, _ := json.Marshal(nodeResult)
-	if a.InvocationLedger != nil && jobID != "" {
-		_ = a.InvocationLedger.Commit(ctx, invocationID, idempotencyKey, resultBytes)
-	} else if a.InvocationStore != nil && jobID != "" {
-		_ = a.InvocationStore.SetFinished(ctx, idempotencyKey, ToolInvocationStatusSuccess, resultBytes, true)
-	}
+	// 先写事件再写 Store，保证 Replay 以事件流为事实来源时能先看到 completion，避免崩溃后重放重复执行（Tool Idempotency Guard）
 	if a.ToolEventSink != nil && jobID != "" {
 		_ = a.ToolEventSink.AppendToolInvocationFinished(ctx, jobID, taskID, &ToolInvocationFinishedPayload{
 			InvocationID:   invocationID,
@@ -343,6 +339,11 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 	}
 	if a.CommandEventSink != nil && jobID != "" {
 		_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, resultBytes)
+	}
+	if a.InvocationLedger != nil && jobID != "" {
+		_ = a.InvocationLedger.Commit(ctx, invocationID, idempotencyKey, resultBytes)
+	} else if a.InvocationStore != nil && jobID != "" {
+		_ = a.InvocationStore.SetFinished(ctx, idempotencyKey, ToolInvocationStatusSuccess, resultBytes, true)
 	}
 	if p.Results == nil {
 		p.Results = make(map[string]any)

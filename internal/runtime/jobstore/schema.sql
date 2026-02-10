@@ -25,17 +25,18 @@ CREATE INDEX IF NOT EXISTS idx_job_claims_expires_at ON job_claims (expires_at);
 
 -- Job 元数据表（API 与 Worker 共享；与 internal/agent/job 语义一致）
 CREATE TABLE IF NOT EXISTS jobs (
-    id                   TEXT PRIMARY KEY,
-    agent_id             TEXT NOT NULL,
-    goal                 TEXT NOT NULL,
-    status               INT  NOT NULL,
-    cursor               TEXT,
-    retry_count          INT  NOT NULL DEFAULT 0,
-    session_id           TEXT,
-    cancel_requested_at  TIMESTAMPTZ,
-    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
-    idempotency_key      TEXT
+    id                     TEXT PRIMARY KEY,
+    agent_id               TEXT NOT NULL,
+    goal                   TEXT NOT NULL,
+    status                 INT  NOT NULL,
+    cursor                 TEXT,
+    retry_count            INT  NOT NULL DEFAULT 0,
+    session_id             TEXT,
+    cancel_requested_at    TIMESTAMPTZ,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    idempotency_key        TEXT,
+    required_capabilities  TEXT
 );
 
 -- 升级已有库时如缺少 cancel_requested_at 可执行：
@@ -43,6 +44,8 @@ CREATE TABLE IF NOT EXISTS jobs (
 -- 升级已有库时如缺少 idempotency_key 可执行：
 -- ALTER TABLE jobs ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
 -- CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_agent_idempotency ON jobs (agent_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+-- Worker 能力调度：Job 所需能力，逗号分隔（如 'llm,tool'）；空或 NULL 表示任意 Worker 可执行（升级已有库时执行下一行）
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS required_capabilities TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_jobs_agent_id ON jobs (agent_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs (status);

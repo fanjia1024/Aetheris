@@ -36,6 +36,8 @@ type JobStore interface {
 	Append(ctx context.Context, jobID string, expectedVersion int, event JobEvent) (newVersion int, err error)
 	// Claim 尝试占用一个可执行的 job，成功返回 jobID 与当前 version；无可用 job 返回 ErrNoJob
 	Claim(ctx context.Context, workerID string) (jobID string, version int, err error)
+	// ClaimJob 占用指定 jobID（用于能力调度：先由 metadata store 按能力选出 Job，再在此占租约）；若该 job 已终止或已被占用则返回错误
+	ClaimJob(ctx context.Context, workerID string, jobID string) (version int, err error)
 	// Heartbeat 续租；仅当该 job 被同一 workerID 占用时延长过期时间
 	Heartbeat(ctx context.Context, workerID string, jobID string) error
 	// Watch 订阅该 job 的新事件；实现层在每次对该 job 成功 Append 后向返回的 channel 发送新事件

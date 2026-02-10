@@ -138,6 +138,42 @@ func TestMemoryStore_Claim_SkipsCompleted(t *testing.T) {
 	}
 }
 
+func TestMemoryStore_ClaimJob(t *testing.T) {
+	ctx := context.Background()
+	s := NewMemoryStore()
+	jobID := "job-1"
+	_, _ = s.Append(ctx, jobID, 0, JobEvent{JobID: jobID, Type: JobCreated})
+
+	ver, err := s.ClaimJob(ctx, "worker-1", jobID)
+	if err != nil {
+		t.Fatalf("ClaimJob: %v", err)
+	}
+	if ver != 1 {
+		t.Errorf("ClaimJob: expected version 1, got %d", ver)
+	}
+
+	// 同一 job 再次 ClaimJob 应失败（已占用）
+	_, err = s.ClaimJob(ctx, "worker-2", jobID)
+	if err != ErrClaimNotFound {
+		t.Errorf("expected ErrClaimNotFound when job already claimed, got %v", err)
+	}
+
+	// 不存在的 job
+	_, err = s.ClaimJob(ctx, "worker-1", "nonexistent")
+	if err != ErrNoJob {
+		t.Errorf("expected ErrNoJob for nonexistent job, got %v", err)
+	}
+
+	// 已完成的 job（新 job 从未被 claim）
+	jobID2 := "job-2"
+	_, _ = s.Append(ctx, jobID2, 0, JobEvent{JobID: jobID2, Type: JobCreated})
+	_, _ = s.Append(ctx, jobID2, 1, JobEvent{JobID: jobID2, Type: JobCompleted})
+	_, err = s.ClaimJob(ctx, "worker-2", jobID2)
+	if err != ErrNoJob {
+		t.Errorf("expected ErrNoJob for completed job, got %v", err)
+	}
+}
+
 func TestMemoryStore_Watch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

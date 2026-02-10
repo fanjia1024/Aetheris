@@ -29,12 +29,13 @@ import (
 	"rag-platform/pkg/metrics"
 )
 
-// AgentJobRunner 从事件存储 Claim Job，从元数据存储取 Job，执行 Runner 并写回事件与状态；支持并发上限（Backpressure）
+// AgentJobRunner 从事件存储 Claim Job，从元数据存储取 Job，执行 Runner 并写回事件与状态；支持并发上限（Backpressure）与按能力派发
 type AgentJobRunner struct {
 	workerID        string
 	jobEventStore   jobstore.JobStore
 	jobStore        job.JobStore
 	runJob          func(ctx context.Context, j *job.Job) error
+	capabilities    []string   // Worker 能力列表；非空时按能力从 jobStore 选 Job 再在 eventStore 占租约
 	pollInterval    time.Duration
 	leaseDuration   time.Duration
 	heartbeatTicker time.Duration
@@ -45,7 +46,7 @@ type AgentJobRunner struct {
 	wg              sync.WaitGroup
 }
 
-// NewAgentJobRunner 创建 Agent Job 拉取执行器；runJob 由外部注入；maxConcurrency 为同时执行 Job 上限，<=0 时默认 2
+// NewAgentJobRunner 创建 Agent Job 拉取执行器；runJob 由外部注入；maxConcurrency 为同时执行 Job 上限，<=0 时默认 2；capabilities 非空时按能力派发（仅认领 RequiredCapabilities 满足的 Job）
 func NewAgentJobRunner(
 	workerID string,
 	jobEventStore jobstore.JobStore,
@@ -53,6 +54,7 @@ func NewAgentJobRunner(
 	runJob func(ctx context.Context, j *job.Job) error,
 	pollInterval, leaseDuration time.Duration,
 	maxConcurrency int,
+	capabilities []string,
 	logger *log.Logger,
 ) *AgentJobRunner {
 	heartbeat := leaseDuration / 2
@@ -67,6 +69,7 @@ func NewAgentJobRunner(
 		jobEventStore:   jobEventStore,
 		jobStore:        jobStore,
 		runJob:          runJob,
+		capabilities:    capabilities,
 		pollInterval:    pollInterval,
 		leaseDuration:   leaseDuration,
 		heartbeatTicker: heartbeat,
@@ -77,7 +80,7 @@ func NewAgentJobRunner(
 	}
 }
 
-// Start 启动 Claim 循环；先占并发槽位再 Claim，执行后释放槽位（Backpressure）
+// Start 启动 Claim 循环；先占并发槽位再 Claim，执行后释放槽位（Backpressure）；capabilities 非空时按能力从 jobStore 选 Job 再在 eventStore 占租约
 func (r *AgentJobRunner) Start(ctx context.Context) {
 	r.wg.Add(1)
 	go func() {
@@ -89,23 +92,51 @@ func (r *AgentJobRunner) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case r.limiter <- struct{}{}:
-				// 占一个槽位后再 Claim，避免 100+ job 时 goroutine/LLM 爆炸
-				jobID, _, err := r.jobEventStore.Claim(ctx, r.workerID)
-				if err != nil {
-					<-r.limiter
-					if err == jobstore.ErrNoJob {
+				var jobID string
+				if len(r.capabilities) > 0 {
+					// 按能力派发：先从 metadata store 认领能力匹配的 Job，再在 event store 占租约
+					j, errClaim := r.jobStore.ClaimNextPendingForWorker(ctx, "", r.capabilities)
+					if errClaim != nil || j == nil {
+						<-r.limiter
 						select {
 						case <-r.stopCh:
 							return
 						case <-ctx.Done():
 							return
 						case <-time.After(r.pollInterval):
-							continue
 						}
+						continue
 					}
-					r.logger.Error("Claim 失败", "error", err)
-					time.Sleep(r.pollInterval)
-					continue
+					_, errEvent := r.jobEventStore.ClaimJob(ctx, r.workerID, j.ID)
+					if errEvent != nil {
+						_ = r.jobStore.Requeue(ctx, j)
+						<-r.limiter
+						if errEvent != jobstore.ErrNoJob && errEvent != jobstore.ErrClaimNotFound {
+							r.logger.Error("ClaimJob 失败", "job_id", j.ID, "error", errEvent)
+						}
+						time.Sleep(r.pollInterval)
+						continue
+					}
+					jobID = j.ID
+				} else {
+					var err error
+					jobID, _, err = r.jobEventStore.Claim(ctx, r.workerID)
+					if err != nil {
+						<-r.limiter
+						if err == jobstore.ErrNoJob {
+							select {
+							case <-r.stopCh:
+								return
+							case <-ctx.Done():
+								return
+							case <-time.After(r.pollInterval):
+								continue
+							}
+						}
+						r.logger.Error("Claim 失败", "error", err)
+						time.Sleep(r.pollInterval)
+						continue
+					}
 				}
 				r.wg.Add(1)
 				go func(claimedJobID string) {

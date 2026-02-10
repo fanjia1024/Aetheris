@@ -140,6 +140,25 @@ func (s *memoryStore) Claim(ctx context.Context, workerID string) (string, int, 
 	return "", 0, ErrNoJob
 }
 
+func (s *memoryStore) ClaimJob(ctx context.Context, workerID string, jobID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	events, ok := s.byJob[jobID]
+	if !ok || len(events) == 0 {
+		return 0, ErrNoJob
+	}
+	last := events[len(events)-1].Type
+	if last == JobCompleted || last == JobFailed || last == JobCancelled {
+		return 0, ErrNoJob
+	}
+	now := time.Now()
+	if claim, ok := s.claims[jobID]; ok && claim.ExpiresAt.After(now) {
+		return 0, ErrClaimNotFound
+	}
+	s.claims[jobID] = claimRecord{WorkerID: workerID, ExpiresAt: now.Add(leaseDuration)}
+	return len(events), nil
+}
+
 func (s *memoryStore) Heartbeat(ctx context.Context, workerID string, jobID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

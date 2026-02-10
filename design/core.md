@@ -1,5 +1,11 @@
 # Go + eino 全量重构架构设计（RAG / Agent / Workflow）
 
+## 定位
+
+Aetheris 是 **Agent Workflow Runtime**（类比 Temporal 之于工作流）：核心是任务编排、事件溯源、恢复与可观测，而非单一 AI 应用。RAG/检索/生成以 **Pipeline 或工具** 形式接入，是默认可选能力之一；通过配置或插件注册启用，并非 Runtime 唯一内置场景。
+
+---
+
 ## 1. 设计目标
 
 本架构基于 **Go 语言**，以 **eino** 作为唯一的核心 Workflow / Agent Runtime，重构现有离线索引与在线检索系统，目标包括：
