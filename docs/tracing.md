@@ -1,26 +1,28 @@
-# 链路追踪
+# Tracing
 
-API 服务通过 [Hertz 链路追踪](https://www.cloudwego.io/zh/docs/hertz/tutorials/observability/tracing/) 与 [hertz-contrib/obs-opentelemetry](https://github.com/hertz-contrib/obs-opentelemetry) 接入 OpenTelemetry，每个 HTTP 请求会自动创建 trace span，并支持将 span 上报到 OTLP 后端（如 Jaeger、OpenTelemetry Collector）。
+This page describes **HTTP request OpenTelemetry tracing** (Hertz + obs-opentelemetry): each HTTP request gets a trace span and can be exported to an OTLP backend. This is different from **Job execution trace** (timeline and execution_tree for a single agent job); for that see [design/execution-trace.md](../design/execution-trace.md) and the "Execution trace" section in [usage.md](usage.md), and `GET /api/jobs/:id/trace`.
 
-## 配置
+The API uses [Hertz tracing](https://www.cloudwego.io/zh/docs/hertz/tutorials/observability/tracing/) and [hertz-contrib/obs-opentelemetry](https://github.com/hertz-contrib/obs-opentelemetry) to send spans to OTLP backends (e.g. Jaeger, OpenTelemetry Collector).
 
-在 `configs/api.yaml` 的 `monitoring.tracing` 下配置：
+## Configuration
+
+In `configs/api.yaml` under `monitoring.tracing`:
 
 ```yaml
 monitoring:
   tracing:
     enable: true
-    service_name: "rag-api"        # 服务名，用于 trace 中标识
-    export_endpoint: "localhost:4317"  # OTLP gRPC 端点
-    insecure: true                  # 非 TLS 连接时设为 true
+    service_name: "rag-api"        # Service name in traces
+    export_endpoint: "localhost:4317"  # OTLP gRPC endpoint
+    insecure: true                  # Use true for non-TLS
 ```
 
-- 若不配置 `export_endpoint`，将读取环境变量 **OTEL_EXPORTER_OTLP_ENDPOINT**（仅 endpoint，不含协议；如 `localhost:4317`）。
-- `enable: false` 或不配置 endpoint 时，不创建 provider、不上报 trace，行为与未接入时一致。
+- If `export_endpoint` is not set, the **OTEL_EXPORTER_OTLP_ENDPOINT** env var is used (endpoint only, e.g. `localhost:4317`).
+- When `enable` is false or no endpoint is configured, no provider is created and no traces are sent.
 
-## 本地查看 Trace（Jaeger）
+## Viewing traces locally (Jaeger)
 
-1. 使用 Docker 启动 Jaeger（含 OTLP gRPC 接收）：
+1. Start Jaeger with OTLP gRPC:
 
    ```bash
    docker run -d --name jaeger \
@@ -29,11 +31,16 @@ monitoring:
      --collector.otlp.enabled=true
    ```
 
-2. 将 API 的 `export_endpoint` 设为 `localhost:4317`（或本机 IP:4317），并设置 `monitoring.tracing.enable: true`，启动 API。
+2. Set the API `export_endpoint` to `localhost:4317` (or your host:4317) and `monitoring.tracing.enable: true`, then start the API.
 
-3. 发起若干请求（如上传文档、查询）后，打开 http://localhost:16686 在 Jaeger UI 中选择服务 `rag-api` 查看 trace。
+3. After some requests (e.g. upload, query), open http://localhost:16686 and select service `rag-api` in the Jaeger UI.
 
-## 说明
+## Notes
 
-- 请求的 context 会携带 trace 信息传递到 `ExecuteWorkflow`（ingest_pipeline、query_pipeline），因此整条调用链在同一 trace 下。
-- 若需在 pipeline 内为 loader/parser/retrieve/generate 等步骤创建子 span，可在 `internal/runtime/eino/workflow_executors.go` 中使用 `otel trace.SpanFromContext(ctx)` 与 `tracer.Start(ctx, "step_name", ...)` 扩展。
+- Request context carries trace info into `ExecuteWorkflow` (ingest_pipeline, query_pipeline), so the full call chain is in one trace.
+- To add child spans for loader/parser/retrieve/generate inside the pipeline, use `otel trace.SpanFromContext(ctx)` and `tracer.Start(ctx, "step_name", ...)` in `internal/runtime/eino/workflow_executors.go`.
+
+## FAQ
+
+- **No traces**: Ensure `monitoring.tracing.enable` is true and `export_endpoint` or `OTEL_EXPORTER_OTLP_ENDPOINT` is set; restart the API after changes.
+- **With Jaeger**: Ensure OTLP is enabled (e.g. `--collector.otlp.enabled=true`), or the API’s spans will not be received.

@@ -94,6 +94,28 @@ Key components:
 
 RAG is just one capability that an agent may choose to use.
 
+Detailed documentation (configuration, CLI, deployment) is in [docs/](docs/).
+
+---
+
+## Makefile — Build and run
+
+The project provides a Makefile for one-command build and startup of all services.
+
+| Command | Description |
+|---------|-------------|
+| `make` / `make help` | Show help |
+| `make build` | Build api, worker, and cli into `bin/` |
+| `make run` | **Build and start API + Worker in background** (one-command startup) |
+| `make stop` | Stop API and Worker started by `make run` |
+| `make clean` | Remove `bin/` |
+| `make test` | Run tests |
+| `make vet` | go vet |
+| `make fmt` | gofmt -w |
+| `make tidy` | go mod tidy |
+
+**One-command run**: From the repo root, run `make run` to build and then start the API (default :8080) and Worker in the background; PIDs and logs are under `bin/`. Use `make stop` to stop. If using Postgres as jobstore, start Postgres first (see [docs/deployment.md](docs/deployment.md)).
+
 ---
 
 ## Why This Matters

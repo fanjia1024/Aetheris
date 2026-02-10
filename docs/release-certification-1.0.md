@@ -1,171 +1,171 @@
-# CoRag 1.0 发布验证（Release Certification）
+# CoRag 1.0 release certification
 
-本清单为 **1.0 发布门禁**：按顺序执行，逐条打勾。**任一条失败 → 不能发 1.0。**
+This checklist is the **1.0 release gate**: execute in order and check off each item. **Any failure → do not release 1.0.**
 
 ---
 
-## 0. 准备环境
+## 0. Environment setup
 
-**最小拓扑**：1 API + 2 Worker + 1 存储。
+**Minimum topology**: 1 API + 2 Workers + 1 storage.
 
-- **Tests 3、8** 必须使用 **Postgres** 作为 job 存储（`jobstore.type=postgres`）；否则 API/进程崩溃后 job 状态不共享，无法通过。
-- 存储（向量/元数据）可为内存；仅用于本认证时。
+- **Tests 3 and 8** require **Postgres** for job storage (`jobstore.type=postgres`); otherwise job state is not shared across API/process crashes and the tests cannot pass.
+- Vector/metadata storage may be in-memory for this certification only.
 
-**启动**：
+**Start**:
 
 ```bash
-# 终端 1
+# Terminal 1
 go run ./cmd/api
 
-# 终端 2
+# Terminal 2
 go run ./cmd/worker
 
-# 终端 3
+# Terminal 3
 go run ./cmd/worker
 ```
 
-**验证**：
+**Verify**:
 
 ```bash
 curl -s http://localhost:8080/api/health
 ```
 
-- **通过条件**：返回 200，响应表示 OK。
+- **Pass**: 200, response indicates OK.
 
 ---
 
-## 第一部分：Runtime 正确性（v0.9 Gate）
+## Part 1: Runtime correctness (v0.9 gate)
 
-### 测试 1：Job 不丢失
+### Test 1: Job not lost
 
-1. 创建 Agent：
+1. Create agent:
    ```bash
    curl -s -X POST http://localhost:8080/api/agents -H "Content-Type: application/json" -d '{}'
    ```
-   记录返回的 `id` 为 `agent_id`。
+   Record the returned `id` as `agent_id`.
 
-2. 发送消息：
+2. Send message:
    ```bash
    curl -s -X POST http://localhost:8080/api/agents/{agent_id}/message \
      -H "Content-Type: application/json" \
-     -d '{"message":"帮我写一篇 200 字的 AI 介绍，并调用工具"}'
+     -d '{"message":"Write a 200-word intro to AI and call a tool"}'
    ```
-   得到 **202 Accepted**，记录 `job_id`。
+   Get **202 Accepted**, record `job_id`.
 
-3. 轮询状态：
+3. Poll status:
    ```bash
    curl -s http://localhost:8080/api/jobs/{job_id}
    ```
 
-**通过条件**：状态依次出现 `pending` → `running` → `completed`。若一直卡在 `pending`，则 Scheduler/Worker 未真正工作 → **失败**。
+**Pass**: Status goes `pending` → `running` → `completed`. If it stays `pending`, Scheduler/Worker are not running → **fail**.
 
 ---
 
-### 测试 2：Worker Crash Recovery（1.0 最关键）
+### Test 2: Worker crash recovery (critical for 1.0)
 
-1. 在任务**运行过程中**杀死一个 worker：
+1. **While a job is running**, kill one worker:
    ```bash
    ps aux | grep worker
    kill -9 <pid>
    ```
 
-2. 观察同一 job：
+2. Watch the same job:
    ```bash
    curl -s http://localhost:8080/api/jobs/{job_id}
    ```
 
-**1.0 必须结果**：
+**Required for 1.0**:
 
-- 同一 `job_id` **最终**变为 `completed`（可能先保持 `running`，直到另一 Worker 重新 Claim）。
-- **不重新规划**（事件流中仅一条 `plan_generated`）。
-- **不重新开始**、**不丢步骤**（从 Replay/checkpoint 续跑，已完成节点不重执行）。
+- Same `job_id` **eventually** becomes `completed` (may stay `running` until another Worker reclaims).
+- **No re-plan** (only one `plan_generated` in event stream).
+- **No restart from scratch**, **no lost steps** (resume from replay/checkpoint; completed nodes not re-run).
 
-若变为 `RUNNING` → `FAILED`，或从头重新执行 → **不能发 1.0**。
+If it goes `RUNNING` → `FAILED`, or restarts from the beginning → **do not release 1.0**.
 
-*说明：当前无 `stalled` 状态；若后续增加「租约过期未续约」的 stalled 展示，则可能观察到 RUNNING → STALLED → RUNNING → COMPLETED。*
-
----
-
-### 测试 3：API Crash
-
-1. 任务运行中关闭 API（如 Ctrl+C）。
-2. 约 10 秒后重启 API：`go run ./cmd/api`。
-
-**1.0 必须**：同一 job 继续执行并完成（由 Worker 从 Postgres 继续 Claim/执行）。
-
-若 job 丢失或状态回退，说明 Job 状态仅在 API 内存 → **直接判定不是 Runtime**。本测试要求 `jobstore.type=postgres`。
+*Note: There is no `stalled` state today; if "lease expired, no heartbeat" is added later, you might see RUNNING → STALLED → RUNNING → COMPLETED.*
 
 ---
 
-### 测试 4：多 Worker 并发一致性
+### Test 3: API crash
 
-同时创建 10 个任务：
+1. While a job is running, stop the API (e.g. Ctrl+C).
+2. After ~10 seconds, restart API: `go run ./cmd/api`.
+
+**Required for 1.0**: The same job continues and completes (Worker continues Claim/execute from Postgres).
+
+If the job is lost or status regresses, job state was only in API memory → **not a runtime**. This test requires `jobstore.type=postgres`.
+
+---
+
+### Test 4: Multi-Worker concurrency consistency
+
+Create 10 jobs at once:
 
 ```bash
 for i in $(seq 1 10); do
   curl -s -X POST http://localhost:8080/api/agents/{agent_id}/message \
     -H "Content-Type: application/json" \
-    -d '{"message":"查询天气并总结"}' &
+    -d '{"message":"Query weather and summarize"}' &
 done
 wait
 ```
 
-**检查**：日志与事件中 **每个 job 只被执行一次**。若出现同一 job 被两个 Worker 同时执行、或同一 tool 被调用两次 → Claim/Lease 失效 → **不可发布 1.0**。
+**Check**: In logs and events **each job is executed exactly once**. If the same job is run by two Workers or the same tool is called twice → Claim/Lease is broken → **do not release 1.0**.
 
 ---
 
-### 测试 5：Replay 一致性
+### Test 5: Replay consistency
 
-任务完成后，可重启所有 Worker 再验证：
+After jobs complete, restart all Workers and verify:
 
-1. `kill -9` 所有 worker，重新启动 worker。
-2. 调用 **只读** 的 Replay/Trace 接口（**不触发任何执行**）：
+1. `kill -9` all workers, start workers again.
+2. Call **read-only** Replay/Trace (**do not trigger execution**):
    ```bash
    curl -s http://localhost:8080/api/jobs/{job_id}/replay
-   # 或
+   # or
    curl -s http://localhost:8080/api/jobs/{job_id}/trace
    curl -s http://localhost:8080/api/jobs/{job_id}/events
    ```
 
-**1.0 必须**：
+**Required for 1.0**:
 
-- 得到**相同执行路径**（与事件流一致）。
-- **不再次调用 LLM**、**不再次调用工具**（上述接口仅读事件，不跑 Runner）。
+- **Same execution path** (consistent with event stream).
+- **No LLM calls**, **no tool calls** (these endpoints only read events, do not run Runner).
 
-若「replay」实际重新执行流程，则只是重新跑流程，不是 runtime replay → **失败**。
+If "replay" actually re-runs the flow, it is not runtime replay → **fail**.
 
 ---
 
-### 测试 6：取消任务
+### Test 6: Cancel job
 
-任务运行中执行：
+While a job is running:
 
 ```bash
 curl -s -X POST http://localhost:8080/api/jobs/{job_id}/stop
 ```
 
-**通过条件**：
+**Pass**:
 
-- 状态变为 `running` → `cancelled`。
-- LLM 立即终止、Worker 不再执行该 job。
+- Status goes `running` → `cancelled`.
+- LLM stops promptly; Worker stops executing that job.
 
-若任务继续跑 → 企业环境不可用 → **失败**。
+If the job keeps running → not acceptable for production → **fail**.
 
 ---
 
-## 第二部分：1.0 平台能力（v1.0 Gate）
+## Part 2: 1.0 platform (v1.0 gate)
 
-### 测试 7：Trace 可解释性
+### Test 7: Trace explainability
 
-对任意一个已完成 job，应能通过 API 看到：
+For any completed job, the API must show:
 
-- 每个节点（node_id、类型）。
-- 若为 tool 节点：tool 输入/输出（来自 `tool_called` / `tool_returned` 或 `node_finished` payload）。
-- 耗时（由 `node_started` / `node_finished` 时间戳可推算，或 trace 中直接提供 duration）。
+- Each node (node_id, type).
+- For tool nodes: tool input/output (from `tool_called` / `tool_returned` or `node_finished` payload).
+- Timing (from `node_started` / `node_finished` timestamps or duration in trace).
 
-**1.0 定义**：用户能理解 Agent **为什么做这个决策**。若仅能看日志 `INFO executing node...`，不视为 Trace UI/可解释性 → **失败**。
+**1.0 definition**: User can understand **why** the agent made a decision. If only logs like `INFO executing node...` are visible, that is not Trace UI / explainability → **fail**.
 
-接口示例：
+Example:
 
 ```bash
 curl -s http://localhost:8080/api/jobs/{job_id}/trace
@@ -174,60 +174,60 @@ curl -s http://localhost:8080/api/jobs/{job_id}/nodes/{node_id}
 
 ---
 
-### 测试 8：真正恢复（最硬核）
+### Test 8: Full recovery (hardest)
 
-1. 创建一条**长任务**（多步 tool/LLM）。
-2. **同时** kill：
+1. Create one **long job** (multiple tool/LLM steps).
+2. **At the same time** kill:
    ```bash
-   kill -9 所有 worker
+   kill -9 all workers
    kill -9 api
    ```
-3. 等待约 10 秒。
-4. **全部重启**：先起 API，再起 2 个 Worker。
+3. Wait ~10 seconds.
+4. **Restart everything**: API first, then 2 Workers.
 
-**通过条件**：同一 job 继续执行并**完成** → 拥有真正的 Agent Runtime 1.0。
+**Pass**: The same job continues and **completes** → true Agent Runtime 1.0.
 
-若失败 → 即当前与 1.0 的差距。本测试要求 Postgres job 存储。
-
----
-
-## 第三部分：可运营能力
-
-1.0 必须支持排障，应能：
-
-| 能力           | 接口 |
-|----------------|------|
-| 查看某 Agent 下所有 job | `GET /api/agents/{id}/jobs` |
-| 查看某个 job 详情       | `GET /api/jobs/{id}` |
-| 查看某个 job 执行步骤   | `GET /api/jobs/{id}/trace`、`GET /api/jobs/{id}/events`、`GET /api/jobs/{id}/nodes/{node_id}` |
-| 强制取消               | `POST /api/jobs/{id}/stop` |
-| Replay/只读回放        | `GET /api/jobs/{id}/replay` 或 trace+events |
-
-「重新执行」指新发一条 message 创建新 job，而非对同一 job 再次执行。
+If it fails → that is the gap to 1.0. This test requires Postgres job storage.
 
 ---
 
-## 发布判定标准（最终）
+## Part 3: Operations
 
-仅当以下**四条全部满足**时，方可宣称：
+1.0 must support troubleshooting:
+
+| Capability | API |
+|------------|-----|
+| List all jobs for an agent | `GET /api/agents/{id}/jobs` |
+| Job details | `GET /api/jobs/{id}` |
+| Job execution steps | `GET /api/jobs/{id}/trace`, `GET /api/jobs/{id}/events`, `GET /api/jobs/{id}/nodes/{node_id}` |
+| Force cancel | `POST /api/jobs/{id}/stop` |
+| Replay / read-only | `GET /api/jobs/{id}/replay` or trace+events |
+
+"Re-execute" means sending a new message to create a new job, not running the same job again.
+
+---
+
+## Release criteria (final)
+
+Only when **all four** below hold can you claim:
 
 > **CoRag v1.0 — Agent Runtime Platform**
 
-1. **任意进程崩溃任务不丢**
-2. **恢复不重复调用工具**
-3. **可完整回放执行**（只读 trace/replay，不重跑）
-4. **用户可观察执行原因**（Trace：节点、tool I/O、耗时）
+1. **No job loss on any process crash**
+2. **Recovery does not re-call tools**
+3. **Full replay** (read-only trace/replay, no re-run)
+4. **User can observe why execution happened** (Trace: nodes, tool I/O, timing)
 
-少一条 → 仅能标为 v0.9。
+If any is missing → at most v0.9.
 
 ---
 
-## 自动化脚本
+## Automation
 
-可自动化的步骤（环境已就绪：API + Worker 已启动）可由脚本执行：
+Steps that can be automated (once API + Workers are up) can be run with:
 
 ```bash
 ./scripts/release-cert-1.0.sh
 ```
 
-脚本覆盖：Step 0（health）、Test 1（Job 不丢失）、Test 6（取消）、Test 7（Trace）、可选 Test 4（多 job）、Test 5（Replay）。Tests 2、3、8 需**手动**杀进程/重启并按上述条件验证。
+The script covers: Step 0 (health), Test 1 (job not lost), Test 6 (cancel), Test 7 (Trace), optional Test 4 (multi job), Test 5 (Replay). Tests 2, 3, and 8 require **manual** kill/restart and verification as above.

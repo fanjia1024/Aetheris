@@ -1,25 +1,27 @@
-# 使用说明
+# Usage
 
-## 启动服务
+Requires **Go 1.25.7+** (aligned with go.mod and security fixes).
 
-### API 服务
+## Starting services
+
+### API
 
 ```bash
-# 使用合并配置（api + model），推荐
+# Recommended: merged config (api + model)
 go run ./cmd/api
 
-# 默认监听 :8080，可通过 configs/api.yaml 的 api.port 修改
+# Default listen :8080; override via api.port in configs/api.yaml
 ```
 
-启动时会加载 `configs/api.yaml` 与 `configs/model.yaml`，若配置了 `model.defaults.llm` 与 `model.defaults.embedding`，将自动注册完整的 query_pipeline 与 ingest_pipeline（检索 + 生成、解析 + 切片 + 向量化 + 索引）。
+Startup loads `configs/api.yaml` and `configs/model.yaml`. If `model.defaults.llm` and `model.defaults.embedding` are set, the full query_pipeline and ingest_pipeline (retrieve + generate, parse + split + embed + index) are registered automatically.
 
-### Worker（离线任务）
+### Worker (offline tasks)
 
 ```bash
 go run ./cmd/worker
 ```
 
-使用 `configs/worker.yaml`，负责从任务队列消费并调用 eino 的 ingest_pipeline 等（当前队列为占位实现）。
+Uses `configs/worker.yaml`; consumes from the task queue and runs eino ingest_pipeline (queue is currently a placeholder implementation).
 
 ### CLI
 
@@ -27,146 +29,147 @@ go run ./cmd/worker
 go run ./cmd/cli
 ```
 
-用于调试或管理，具体子命令见实现。
+For debugging and admin; subcommands and usage are in [CLI (cli.md)](cli.md).
 
-## 环境变量与配置
+## Environment variables and configuration
 
-- **API Key**：在 `configs/model.yaml` 中可写为 `api_key: "${OPENAI_API_KEY}"`，运行时从环境变量替换。
-- **Planner 类型（v1 Agent）**：`PLANNER_TYPE=rule` 时，新创建的 v1 Agent 使用**规则规划器**（无 LLM，返回固定 TaskGraph），便于稳定调试 Executor；不设置或设为其他值时使用 **LLM 规划器**。启动日志会提示当前使用的规划器。
-- **敏感项**：不要将真实 API Key 提交到仓库，使用环境变量或密钥管理。
-- **存储**：API 默认使用 memory 存储（重启后数据丢失）；生产可配置 MySQL/Milvus 等（需实现对应 Store）。
-- **链路追踪**：在 `configs/api.yaml` 的 `monitoring.tracing` 下可开启 OpenTelemetry；未配置 `export_endpoint` 时使用环境变量 `OTEL_EXPORTER_OTLP_ENDPOINT`。详见 [链路追踪（tracing.md）](tracing.md)。
+- **API Key**: In `configs/model.yaml` use `api_key: "${OPENAI_API_KEY}"`; it is substituted at runtime.
+- **Planner (v1 Agent)**: When `PLANNER_TYPE=rule`, new v1 agents use the **rule planner** (no LLM, fixed TaskGraph) for stable Executor debugging; otherwise the **LLM planner** is used. Startup logs indicate which planner is active.
+- **Secrets**: Do not commit real API keys; use environment variables or a secrets manager.
+- **Storage**: API defaults to memory storage (data lost on restart); for production configure MySQL/Milvus etc. (implement the corresponding Store).
+- **Tracing**: Enable OpenTelemetry under `monitoring.tracing` in `configs/api.yaml`; when `export_endpoint` is unset, the **OTEL_EXPORTER_OTLP_ENDPOINT** env var is used. See [Tracing (tracing.md)](tracing.md).
+- For per-file config reference see [Configuration (config.md)](config.md).
 
-## 典型流程
+## Typical flows
 
-### 1. 上传文档
+### 1. Upload a document
 
 ```bash
 curl -X POST http://localhost:8080/api/documents/upload \
   -F "file=@/path/to/your.pdf"
 ```
 
-成功后会执行 ingest_pipeline：加载 → 解析 → 切片 → 向量化 → 写入默认向量索引与元数据。
+On success, ingest_pipeline runs: load → parse → split → embed → write to default vector index and metadata.
 
-### 2. 查看文档列表
+### 2. List documents
 
 ```bash
 curl http://localhost:8080/api/documents/
 ```
 
-### 3. 使用 v1 Agent（推荐）
+### 3. Use v1 Agent (recommended)
 
 ```bash
-# 创建 Agent
+# Create Agent
 curl -X POST http://localhost:8080/api/agents \
   -H "Content-Type: application/json" \
   -d '{"name": "my-agent"}'
-# 返回 {"id": "agent-xxx", "name": "my-agent"}
+# Returns {"id": "agent-xxx", "name": "my-agent"}
 
-# 向 Agent 发送消息（会触发规划与执行）
+# Send message (triggers planning and execution)
 curl -X POST http://localhost:8080/api/agents/<agent-id>/message \
   -H "Content-Type: application/json" \
-  -d '{"message": "你的问题"}'
-# 返回 202 Accepted，并带 job_id，例如：{"status":"accepted","agent_id":"...","job_id":"job-xxx"}
+  -d '{"message": "Your question"}'
+# Returns 202 Accepted with job_id, e.g. {"status":"accepted","agent_id":"...","job_id":"job-xxx"}
 
-# 轮询任务状态（根据 job_id 查询单条任务）
+# Poll job status
 curl http://localhost:8080/api/agents/<agent-id>/jobs/<job_id>
-# 返回任务详情：id、agent_id、goal、status（pending|running|completed|failed）、cursor、retry_count、created_at、updated_at
+# Returns job details: id, agent_id, goal, status (pending|running|completed|failed), cursor, retry_count, created_at, updated_at
 
-# 列出该 Agent 的所有任务（可选查询参数：status、limit）
+# List jobs for this Agent (optional query: status, limit)
 curl "http://localhost:8080/api/agents/<agent-id>/jobs?limit=20&status=completed"
 
-# 查看 Agent 状态
+# Agent state
 curl http://localhost:8080/api/agents/<agent-id>/state
 
-# 列出所有 Agent
+# List all agents
 curl http://localhost:8080/api/agents
 ```
 
-**v0.8 执行路径**：消息写入 Session → **双写**创建 Job：若配置了 JobEventStore，先向事件流 JobStore `Append(JobCreated)`，再调用状态型 JobStore.Create → Scheduler 从状态型 JobStore 拉取 Pending Job → Runner.RunForJob（Steppable + 节点级 Checkpoint）→ PlanGoal 产出 TaskGraph → 编译为 eino DAG → 逐节点执行 → 完成/失败时更新 Job 状态。RAG 可通过 workflow 节点被规划器选用。
+**v0.8 execution path**: Message is written to Session → **dual-write** creates Job (if JobEventStore is configured: append JobCreated to event stream, then state JobStore.Create) → Scheduler pulls Pending jobs from state JobStore → Runner.RunForJob (Steppable + node-level Checkpoint) → PlanGoal produces TaskGraph → compile to eino DAG → execute node by node → update Job status on completion/failure. RAG can be used via workflow nodes chosen by the planner.
 
-**任务存储（事件流）**：事件流接口（ListEvents、Append、Claim、Heartbeat、Watch）为崩溃恢复、多 Worker 与审计回放预留；当前 API 进程内使用内存实现。
+**Job storage (event stream)**: The event stream interface (ListEvents, Append, Claim, Heartbeat, Watch) supports crash recovery, multiple workers, and audit replay; the API currently uses an in-process memory implementation.
 
-**Scheduler 行为**：调度器在 API 进程内运行，从 Job 队列拉取任务并执行。Scheduler 参数（MaxConcurrency、RetryMax、Backoff）由应用代码默认配置（如并发 2、重试 2 次、Backoff 1s），见 `internal/app/api/app.go`。
+**Scheduler**: Runs in the API process, pulls jobs and executes them. Scheduler params (MaxConcurrency, RetryMax, Backoff) are set in app code (e.g. concurrency 2, retry 2, backoff 1s); see `internal/app/api/app.go`.
 
-**Control Plane / Data Plane（Postgres 时）**：当 `jobstore.type=postgres` 时，API 仅作为控制面（创建 Job、查询、取消），**不启动 Scheduler、不执行任何 Job**；所有执行由 Worker 通过 Postgres Claim 完成。API 重启或扩缩容不影响已 Claim 的 Job。详见 [design/services.md](../design/services.md) 第 7 节。
+**Control / Data plane (Postgres)**: When `jobstore.type=postgres`, the API is control-plane only (create job, query, cancel); it **does not start the Scheduler or run any jobs**. All execution is done by Workers via Postgres Claim. API restart or scale does not affect already-claimed jobs. See [design/services.md](../design/services.md) §7.
 
-### 4. 发起查询（已废弃，建议用 Agent 发消息）
+### 4. Query (deprecated; prefer Agent message)
 
 ```bash
 curl -X POST http://localhost:8080/api/query \
   -H "Content-Type: application/json" \
-  -d '{"query": "你的问题", "top_k": 10}'
+  -d '{"query": "Your question", "top_k": 10}'
 ```
 
-将走 query_pipeline：问题向量化 → 检索 → LLM 生成回答。**已标记 Deprecated**，推荐使用 `POST /api/agents/{id}/message`。
+Uses query_pipeline: embed query → retrieve → LLM generate answer. **Deprecated**; use `POST /api/agents/{id}/message` instead.
 
-### 5. 批量查询
+### 5. Batch query
 
 ```bash
 curl -X POST http://localhost:8080/api/query/batch \
   -H "Content-Type: application/json" \
-  -d '{"queries": [{"query": "问题1"}, {"query": "问题2"}]}'
+  -d '{"queries": [{"query": "Question 1"}, {"query": "Question 2"}]}'
 ```
 
-## API 端点汇总
+## API endpoint summary
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | /api/health | 健康检查 |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /api/health | Health check |
 | **v1 Agent** | | |
-| POST | /api/agents | 创建 Agent |
-| GET | /api/agents | 列出所有 Agent |
-| POST | /api/agents/:id/message | 向 Agent 发送消息（创建 Job，返回 202 + job_id）；可选 `Idempotency-Key` header 防重复创建 |
-| GET | /api/agents/:id/state | Agent 状态（status、current_task、last_checkpoint） |
-| GET | /api/agents/:id/jobs | 列出该 Agent 的 Job 列表（可选 ?status=、?limit=） |
-| GET | /api/agents/:id/jobs/:job_id | 单条 Job 详情（轮询任务状态） |
-| **Execution Trace（可解释执行）** | | |
-| GET | /api/jobs/:id/events | 该 Job 的原始事件流（id, type, payload, created_at），供前端/审计用 |
-| GET | /api/jobs/:id/trace | 执行时间线与派生数据（含 execution_tree、node 耗时等） |
-| GET | /api/jobs/:id/trace/page | 同上，HTML 页面，便于浏览器直接查看 |
-| GET | /api/jobs/:id/replay | 只读回放（不重执行） |
-| POST | /api/agents/:id/resume | 恢复执行 |
-| POST | /api/agents/:id/stop | 停止执行 |
-| **文档与知识库** | | |
-| POST | /api/documents/upload | 上传文档 |
-| GET | /api/documents/ | 文档列表 |
-| GET | /api/documents/:id | 文档详情 |
-| DELETE | /api/documents/:id | 删除文档 |
-| GET | /api/knowledge/collections | 集合列表 |
-| POST | /api/knowledge/collections | 创建集合 |
-| DELETE | /api/knowledge/collections/:id | 删除集合 |
-| **查询（Deprecated）** | | |
-| POST | /api/query | 单条查询（推荐用 Agent message） |
-| POST | /api/query/batch | 批量查询 |
-| **Legacy Agent** | | |
-| POST | /api/agent/run | 按 session 执行 Agent（query + session_id） |
-| **系统** | | |
-| GET | /api/system/status | 系统状态（workflows、agents） |
-| GET | /api/system/metrics | 系统指标 |
+| POST | /api/agents | Create agent |
+| GET | /api/agents | List all agents |
+| POST | /api/agents/:id/message | Send message (creates job, 202 + job_id); optional `Idempotency-Key` header |
+| GET | /api/agents/:id/state | Agent state (status, current_task, last_checkpoint) |
+| GET | /api/agents/:id/jobs | List jobs for this agent (?status=, ?limit=) |
+| GET | /api/agents/:id/jobs/:job_id | Single job (poll status) |
+| **Execution trace** | | |
+| GET | /api/jobs/:id/events | Raw event stream (id, type, payload, created_at) |
+| GET | /api/jobs/:id/trace | Timeline and execution_tree, node timings |
+| GET | /api/jobs/:id/trace/page | Same as trace, HTML page |
+| GET | /api/jobs/:id/replay | Read-only replay |
+| POST | /api/agents/:id/resume | Resume execution |
+| POST | /api/agents/:id/stop | Stop execution |
+| **Documents and knowledge** | | |
+| POST | /api/documents/upload | Upload document |
+| GET | /api/documents/ | List documents |
+| GET | /api/documents/:id | Document details |
+| DELETE | /api/documents/:id | Delete document |
+| GET | /api/knowledge/collections | List collections |
+| POST | /api/knowledge/collections | Create collection |
+| DELETE | /api/knowledge/collections/:id | Delete collection |
+| **Query (deprecated)** | | |
+| POST | /api/query | Single query (prefer Agent message) |
+| POST | /api/query/batch | Batch query |
+| **Legacy agent** | | |
+| POST | /api/agent/run | Run agent by session (query + session_id) |
+| **System** | | |
+| GET | /api/system/status | System status (workflows, agents) |
+| GET | /api/system/metrics | Metrics |
 
-以上文档类、知识库类、Agent 类、查询类路由可能挂有鉴权中间件，见 `internal/api/http/router.go`。
+Document, knowledge, agent, and query routes may have auth middleware; see `internal/api/http/router.go`.
 
-## Execution Trace（可解释 AI 执行）
+## Execution trace (explainable execution)
 
-发消息得到 `job_id` 后，可用以下端点查看「该任务做了什么」：
+After sending a message you get a `job_id`. Use these endpoints to see what the job did:
 
-- **GET /api/jobs/:id/events**：返回该 Job 的完整事件流（`job_created`、`plan_generated`、`node_started`、`node_finished`、`command_emitted`、`command_committed`、`tool_called`、`tool_returned`、`job_completed` 等）。前端或运维可据此还原「User → Plan → 节点 → 工具调用」的因果链。
-- **GET /api/jobs/:id/trace**：在事件流基础上返回时间线、节点耗时与 **execution_tree**（树形结构），便于直接渲染「可解释执行」视图。
-- **GET /api/jobs/:id/trace/page**：同上，以 HTML 页面形式展示，浏览器打开即可查看。
+- **GET /api/jobs/:id/events**: Full event stream (`job_created`, `plan_generated`, `node_started`, `node_finished`, `command_emitted`, `command_committed`, `tool_called`, `tool_returned`, `job_completed`, etc.) to reconstruct the User → Plan → nodes → tool calls chain.
+- **GET /api/jobs/:id/trace**: Timeline, node timings, and **execution_tree** for an explainable view.
+- **GET /api/jobs/:id/trace/page**: Same as trace, as an HTML page.
 
-事件语义与树推导规则见 [design/execution-trace.md](../design/execution-trace.md)。
+Event semantics and tree derivation are in [design/execution-trace.md](../design/execution-trace.md).
 
-## 常见问题
+## FAQ
 
-- **Job 与事件流**：创建任务时返回的 `job_id` 同时写入事件流（JobCreated）与状态型 Job，便于未来从事件重放恢复或多 Worker 消费；当前执行仍由状态型 JobStore + Scheduler 驱动。
-- **Idempotency-Key**：`POST /api/agents/:id/message` 支持请求头 `Idempotency-Key`。同一 Agent 下相同 key 的重复请求（如网络重试）会返回已有 `job_id`（202），不新建 Job、不重复写 Session/Plan。
-- **毒任务**：某 Job 反复失败时，达到配置的 max_attempts（Scheduler 的 retry_max、Worker 的 max_attempts）后会被标记为 Failed 并不再调度，见 [design/poison-job.md](../design/poison-job.md)。
-- **v1 Agent 与 /api/query 区别**：v1 Agent 以「Agent + Session + 规划 → TaskGraph → eino DAG」为唯一执行路径，RAG 作为可选工具；`/api/query` 仍直连 query_pipeline，已标记废弃，建议新用法走 Agent 发消息。
-- **PLANNER_TYPE=rule**：用于调试时关闭 LLM 规划，规则规划器返回固定单节点 llm TaskGraph，便于验证 Executor 与 DAG 链路。
-- **无 OPENAI_API_KEY**：未设置或未在配置中填写时，API 仍可启动，但不会注册带真实 LLM/Embedding 的 query 与 ingest 工作流，查询/上传会走占位或返回错误。使用 RulePlanner 时规划不依赖 LLM，但执行 llm 节点仍需要 LLM 配置。
-- **memory 存储**：默认元数据与向量均为内存实现，进程重启后数据清空；需要持久化请配置并实现对应存储类型。
-- **配置未生效**：确认 API 使用 `LoadAPIConfigWithModel`（cmd/api 已使用），并检查 `configs/model.yaml` 中 `defaults.llm`、`defaults.embedding` 与对应 provider/model 键是否存在。
-- **链路追踪**：需在 `configs/api.yaml` 中设置 `monitoring.tracing.enable: true` 并配置 `export_endpoint`（或设置 `OTEL_EXPORTER_OTLP_ENDPOINT`），否则不会上报 trace；本地可用 Jaeger 等 OTLP 后端查看，见 [tracing.md](tracing.md)。
+- **Job and event stream**: The returned `job_id` is written to both the event stream (JobCreated) and the state JobStore for future replay or multi-worker consumption; execution is still driven by the state JobStore + Scheduler.
+- **Idempotency-Key**: `POST /api/agents/:id/message` supports header `Idempotency-Key`. Duplicate requests with the same key (e.g. retries) return the existing `job_id` (202) and do not create a new job or rewrite Session/Plan.
+- **Poison jobs**: When a job keeps failing, after max_attempts (Scheduler retry_max, Worker max_attempts) it is marked Failed and no longer scheduled; see [design/poison-job.md](../design/poison-job.md).
+- **v1 Agent vs /api/query**: v1 Agent uses Agent + Session + plan → TaskGraph → eino DAG as the only path; RAG is an optional tool. `/api/query` still hits query_pipeline directly and is deprecated; use Agent messages for new usage.
+- **PLANNER_TYPE=rule**: Disables LLM planning for debugging; the rule planner returns a fixed single-node llm TaskGraph to verify Executor and DAG.
+- **No OPENAI_API_KEY**: API still starts but will not register real LLM/Embedding query and ingest workflows; query/upload may use placeholders or fail. With RulePlanner, planning does not need LLM, but executing llm nodes still requires LLM config.
+- **Memory storage**: Default metadata and vector are in-memory; data is lost on restart. Configure and implement a persistent store for production.
+- **Config not applied**: Ensure the API uses `LoadAPIConfigWithModel` (cmd/api does) and that `configs/model.yaml` has `defaults.llm`, `defaults.embedding` and the matching provider/model keys.
+- **Tracing**: Set `monitoring.tracing.enable: true` and `export_endpoint` in `configs/api.yaml` (or `OTEL_EXPORTER_OTLP_ENDPOINT`); otherwise no traces are sent. Use Jaeger or another OTLP backend; see [tracing.md](tracing.md).
 
-架构与模块职责以 [design/](design/) 为准；部署步骤以各 [deployments/](../deployments/) 下 README 为准。
+Architecture and module roles are in [design/](design/); deployment steps are in each [deployments/](../deployments/) README.

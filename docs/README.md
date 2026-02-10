@@ -1,25 +1,61 @@
-# 文档中心
+# Documentation
 
-本目录为架构说明、使用指南与 API 文档的入口。
+This directory is the entry point for architecture, usage, and API documentation.
 
-## 版本与变更
+## Quick start
 
-- [CHANGELOG.md](../CHANGELOG.md) — 版本历史与重要变更（v0.8 持久化运行时、事件化 JobStore、Job/Scheduler/Checkpoint/Steppable、v1 Agent API、TaskGraph 执行适配层、RulePlanner、Planner 选择等）
+Install **Go 1.25.7+**, clone the repo, then run:
 
-## 设计文档
+```bash
+go run ./cmd/api
+```
 
-- [design/core.md](../design/core.md) — 总体架构、分层、Agent Runtime 与任务执行、Pipeline 与 eino 编排核心
-- [design/struct.md](../design/struct.md) — 仓库结构与模块职责（含 internal/agent、internal/runtime/jobstore）
-- [design/services.md](../design/services.md) — 多 Service 架构（api / agent / index）
-- [design/jobstore_postgres.md](../design/jobstore_postgres.md) — JobStore 事件模型与 Postgres 实现设计
+Health check: `curl http://localhost:8080/api/health`. For full startup, environment variables, and typical flows see [usage.md](usage.md); for upload → retrieve E2E steps see [test-e2e.md](test-e2e.md).
 
-## 使用与 API
+## Project names
 
-- [使用说明（usage.md）](usage.md) — 启动方式、环境变量、典型流程、API 端点汇总、常见问题
-- [端到端测试（test-e2e.md）](test-e2e.md) — 上传 → 解析 → 切分 → 索引 → 检索的完整测试步骤（PDF / AGENTS.md）
-- [链路追踪（tracing.md）](tracing.md) — OpenTelemetry 配置、OTEL_EXPORTER_OTLP_ENDPOINT、本地 Jaeger 查看 trace
+- **Aetheris** — Product/project name
+- **rag-platform** — go.mod module name
+- **CoRag** — Short name used in deployment and CLI (e.g. `corag` command, `CORAG_API_URL`)
 
-## 示例与部署
+All refer to the same project.
 
-- [examples/](../examples/) — Agent、流式、工具、工作流示例代码
-- [deployments/](../deployments/) — Docker、Compose、K8s 部署说明
+## Version and changes
+
+Recommended **Go 1.25.7+**, aligned with go.mod and CI.
+
+- [CHANGELOG.md](../CHANGELOG.md) — Version history and notable changes (v0.8 persistent runtime, event JobStore, Job/Scheduler/Checkpoint/Steppable, v1 Agent API, TaskGraph execution layer, RulePlanner, planner selection, etc.)
+
+## Recommended reading order
+
+- **Getting started**: This README → [usage.md](usage.md) → [design/core.md](../design/core.md), [design/struct.md](../design/struct.md)
+- **Advanced**: [design/services.md](../design/services.md), [design/jobstore_postgres.md](../design/jobstore_postgres.md), [design/execution-trace.md](../design/execution-trace.md), [design/poison-job.md](../design/poison-job.md)
+- **Operations**: [tracing.md](tracing.md), [config.md](config.md), [deployment.md](deployment.md)
+
+## Design docs
+
+- [design/core.md](../design/core.md) — Overall architecture, layers, Agent Runtime and task execution, Pipeline and eino orchestration
+- [design/struct.md](../design/struct.md) — Repo structure and module roles (internal/agent, internal/runtime/jobstore)
+- [design/services.md](../design/services.md) — Multi-service architecture (api / agent / index)
+- [design/jobstore_postgres.md](../design/jobstore_postgres.md) — JobStore event model and Postgres design
+
+## Usage and API
+
+- [Usage (usage.md)](usage.md) — Startup, environment variables, typical flows, API endpoint summary, FAQ
+- [Configuration (config.md)](config.md) — api.yaml, model.yaml, worker.yaml field reference and env vars
+- [CLI (cli.md)](cli.md) — corag subcommands, install and run, REST API mapping
+- [E2E testing (test-e2e.md)](test-e2e.md) — Upload → parse → split → index → retrieve (PDF / AGENTS.md)
+- [Tracing (tracing.md)](tracing.md) — OpenTelemetry config, OTEL_EXPORTER_OTLP_ENDPOINT, local Jaeger
+
+## Examples and deployment
+
+- [Examples guide (examples.md)](examples.md) — basic_agent, simple_chat_agent, streaming, tool, workflow purpose and run instructions
+- [examples/](../examples/) — Example code
+- [Deployment (deployment.md)](deployment.md) — Compose / Docker / K8s overview and prerequisites
+- [deployments/](../deployments/) — Docker, Compose, K8s directories
+
+## Release and acceptance
+
+- [release-acceptance-v0.9.md](release-acceptance-v0.9.md) — v0.9 runtime correctness (Worker crash recovery, API restart, multi-Worker, Replay)
+- [release-certification-1.0.md](release-certification-1.0.md) — 1.0 release gate checklist
+- [release-checklist-v1.0.md](release-checklist-v1.0.md) — Post-release checklist (core features, distributed, CLI/API, logging and docs)
