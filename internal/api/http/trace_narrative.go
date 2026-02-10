@@ -36,19 +36,21 @@ type TimelineSegment struct {
 
 // StepNarrative is the narrative view for one step (Temporal-style minimal debug unit).
 type StepNarrative struct {
-	SpanID         string          `json:"span_id"`
-	Type           string          `json:"type"` // plan | node | tool
-	Label          string          `json:"label"`
-	NodeID         string          `json:"node_id,omitempty"`
-	State          string          `json:"state,omitempty"`
-	Attempts       int             `json:"attempts,omitempty"`
-	WorkerID       string          `json:"worker_id,omitempty"`
-	DurationMs     int64           `json:"duration_ms,omitempty"`
-	StartTime      *time.Time      `json:"start_time,omitempty"`
-	EndTime        *time.Time      `json:"end_time,omitempty"`
-	Reasoning      []ReasoningItem `json:"reasoning,omitempty"`
+	SpanID         string                 `json:"span_id"`
+	Type           string                 `json:"type"` // plan | node | tool
+	Label          string                 `json:"label"`
+	NodeID         string                 `json:"node_id,omitempty"`
+	State          string                 `json:"state,omitempty"`
+	ResultType     string                 `json:"result_type,omitempty"` // Phase A: success | retryable_failure | permanent_failure | compensatable_failure
+	Reason         string                 `json:"reason,omitempty"`
+	Attempts       int                    `json:"attempts,omitempty"`
+	WorkerID       string                 `json:"worker_id,omitempty"`
+	DurationMs     int64                  `json:"duration_ms,omitempty"`
+	StartTime      *time.Time             `json:"start_time,omitempty"`
+	EndTime        *time.Time             `json:"end_time,omitempty"`
+	Reasoning      []ReasoningItem        `json:"reasoning,omitempty"`
 	ToolInvocation *ToolInvocationSummary `json:"tool_invocation,omitempty"`
-	StateDiff      *StateDiff      `json:"state_diff,omitempty"`
+	StateDiff      *StateDiff             `json:"state_diff,omitempty"`
 }
 
 // ReasoningItem is one agent thought or decision (from agent_thought_recorded, decision_made, tool_selected).
@@ -199,6 +201,8 @@ func BuildNarrative(events []jobstore.JobEvent) *Narrative {
 			if state == "" {
 				state = "ok"
 			}
+			resultType := getStr("result_type")
+			reason := getStr("reason")
 			attempt := getInt("attempt")
 			if attempt == 0 {
 				attempt = 1
@@ -217,6 +221,8 @@ func BuildNarrative(events []jobstore.JobEvent) *Narrative {
 				out.Steps[idx].EndTime = &endAt
 				out.Steps[idx].DurationMs = durMs
 				out.Steps[idx].State = state
+				out.Steps[idx].ResultType = resultType
+				out.Steps[idx].Reason = reason
 				out.Steps[idx].Attempts = attempt
 			}
 			delete(nodeStartTime, nodeID)

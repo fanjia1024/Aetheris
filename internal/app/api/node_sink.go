@@ -24,6 +24,9 @@ import (
 	"rag-platform/internal/runtime/jobstore"
 )
 
+// Ensure node_sink implements the extended NodeEventSink with resultType/reason.
+var _ agentexec.NodeEventSink = (*nodeEventSinkImpl)(nil)
+
 // nodeEventSinkImpl 将节点级事件写入 JobStore，供 Replay 重建执行上下文
 type nodeEventSinkImpl struct {
 	store jobstore.JobStore
@@ -66,8 +69,8 @@ func (s *nodeEventSinkImpl) AppendNodeStarted(ctx context.Context, jobID string,
 	return err
 }
 
-// AppendNodeFinished 实现 NodeEventSink；payloadResults 为当前 payload.Results 的 JSON（v0.9 含 duration_ms, state, attempt）
-func (s *nodeEventSinkImpl) AppendNodeFinished(ctx context.Context, jobID string, nodeID string, payloadResults []byte, durationMs int64, state string, attempt int) error {
+// AppendNodeFinished 实现 NodeEventSink；resultType/reason 为 Phase A 失败语义，Replay 仅当 result_type==success 时视节点完成
+func (s *nodeEventSinkImpl) AppendNodeFinished(ctx context.Context, jobID string, nodeID string, payloadResults []byte, durationMs int64, state string, attempt int, resultType agentexec.StepResultType, reason string) error {
 	if s.store == nil {
 		return nil
 	}
@@ -77,11 +80,14 @@ func (s *nodeEventSinkImpl) AppendNodeFinished(ctx context.Context, jobID string
 	}
 	stepIndex := ver + 1
 	pl := map[string]interface{}{
-		"node_id":         nodeID,
-		"payload_results": json.RawMessage(payloadResults),
-		"trace_span_id":   nodeID,
-		"parent_span_id":  "plan",
-		"step_index":      stepIndex,
+		"node_id":      nodeID,
+		"trace_span_id": nodeID,
+		"parent_span_id": "plan",
+		"step_index":   stepIndex,
+		"result_type":  string(resultType), // required for Replay; default "" treated as success for old events
+	}
+	if len(payloadResults) > 0 {
+		pl["payload_results"] = json.RawMessage(payloadResults)
 	}
 	if durationMs > 0 {
 		pl["duration_ms"] = durationMs
@@ -91,6 +97,9 @@ func (s *nodeEventSinkImpl) AppendNodeFinished(ctx context.Context, jobID string
 	}
 	if attempt > 0 {
 		pl["attempt"] = attempt
+	}
+	if reason != "" {
+		pl["reason"] = reason
 	}
 	payload, err := json.Marshal(pl)
 	if err != nil {

@@ -17,6 +17,7 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -24,6 +25,60 @@ import (
 	"rag-platform/internal/agent/replay"
 	"rag-platform/internal/agent/runtime"
 )
+
+// StepResultType classifies a step completion (Production Semantics Phase A). See design/step-result-failure-model.md.
+type StepResultType string
+
+const (
+	StepResultSuccess              StepResultType = "success"
+	StepResultRetryableFailure     StepResultType = "retryable_failure"
+	StepResultPermanentFailure     StepResultType = "permanent_failure"
+	StepResultCompensatableFailure StepResultType = "compensatable_failure"
+)
+
+// Sentinel errors for adapters to mark failure kind; Runner uses these to set result_type.
+var (
+	ErrRetryable     = errors.New("retryable")
+	ErrPermanent     = errors.New("permanent")
+	ErrCompensatable = errors.New("compensatable")
+)
+
+// StepFailure wraps an error with a StepResultType for classification.
+type StepFailure struct {
+	Type  StepResultType
+	Inner error
+}
+
+func (e *StepFailure) Error() string {
+	if e.Inner != nil {
+		return e.Inner.Error()
+	}
+	return string(e.Type)
+}
+
+func (e *StepFailure) Unwrap() error { return e.Inner }
+
+// ClassifyError maps runErr to (resultType, reason). Default is PermanentFailure.
+func ClassifyError(runErr error) (StepResultType, string) {
+	if runErr == nil {
+		return StepResultSuccess, ""
+	}
+	reason := runErr.Error()
+	var sf *StepFailure
+	if errors.As(runErr, &sf) {
+		return sf.Type, reason
+	}
+	if errors.Is(runErr, ErrRetryable) {
+		return StepResultRetryableFailure, reason
+	}
+	if errors.Is(runErr, ErrCompensatable) {
+		return StepResultCompensatableFailure, reason
+	}
+	if errors.Is(runErr, ErrPermanent) {
+		return StepResultPermanentFailure, reason
+	}
+	return StepResultPermanentFailure, reason
+}
 
 // JobStoreForRunner 供 Runner 更新 Job 游标与状态的最小接口，避免 executor 依赖 job 包
 type JobStoreForRunner interface {
@@ -37,10 +92,10 @@ type PlanGeneratedSink interface {
 }
 
 // NodeEventSink 节点级事件写入：RunForJob 每步前后写入 NodeStarted/NodeFinished，供 Replay 重建上下文
-// attempt/workerID/durationMs/state 用于 Trace 叙事（v0.9）；见 design/trace-event-schema-v0.9.md
+// resultType/reason 为 Phase A 失败语义；仅 result_type==success 时 Replay 将节点视为完成
 type NodeEventSink interface {
 	AppendNodeStarted(ctx context.Context, jobID string, nodeID string, attempt int, workerID string) error
-	AppendNodeFinished(ctx context.Context, jobID string, nodeID string, payloadResults []byte, durationMs int64, state string, attempt int) error
+	AppendNodeFinished(ctx context.Context, jobID string, nodeID string, payloadResults []byte, durationMs int64, state string, attempt int, resultType StepResultType, reason string) error
 	AppendStateCheckpointed(ctx context.Context, jobID string, nodeID string, stateBefore, stateAfter []byte) error
 }
 
@@ -310,7 +365,7 @@ runLoop:
 				if completedSet != nil {
 					if _, done := completedSet[step.NodeID]; !done {
 						if r.nodeEventSink != nil {
-							_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, 0, "", 0)
+							_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, 0, "", 0, StepResultSuccess, "")
 						}
 						completedSet[step.NodeID] = struct{}{}
 					}
@@ -341,14 +396,24 @@ runLoop:
 		ctx = WithAgent(ctx, agent)
 		var runErr error
 		payload, runErr = step.Run(ctx, payload)
-		if runErr != nil {
-			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
-			return fmt.Errorf("executor: 节点 %s 执行失败: %w", step.NodeID, runErr)
-		}
-		payloadResults, _ := json.Marshal(payload.Results)
 		durationMs := time.Since(stepStart).Milliseconds()
+		resultType, reason := ClassifyError(runErr)
+		payloadResults, _ := json.Marshal(payload.Results)
+		if runErr != nil && len(payloadResults) == 0 {
+			payloadResults = []byte("{}")
+		}
 		if r.nodeEventSink != nil {
-			_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, durationMs, "ok", 1)
+			stateStr := "ok"
+			if resultType != StepResultSuccess {
+				stateStr = string(resultType)
+			}
+			_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, durationMs, stateStr, 1, resultType, reason)
+		}
+		if resultType != StepResultSuccess {
+			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
+			return fmt.Errorf("executor: 节点 %s 执行失败 (%s): %w", step.NodeID, resultType, runErr)
+		}
+		if r.nodeEventSink != nil {
 			_ = r.nodeEventSink.AppendStateCheckpointed(ctx, j.ID, step.NodeID, stateBefore, payloadResults)
 		}
 		cp := runtime.NewNodeCheckpoint(agent.ID, sessionID, j.ID, step.NodeID, graphBytes, payloadResults, nil)

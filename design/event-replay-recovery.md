@@ -19,7 +19,7 @@ ListEvents(jobID)
 ```
 
 - **TaskGraphState**：来自事件流中 `plan_generated` 的 payload.`task_graph`。
-- **CompletedNodeIDs**：所有出现过 `node_finished` 的 `node_id` 集合，供 Runner 步前检查。
+- **CompletedNodeIDs**：仅当 `node_finished` 的 payload.`result_type` 为 `success` 或空（兼容旧事件）时，才将该 `node_id` 加入；`retryable_failure` / `permanent_failure` / `compensatable_failure` 不视为完成，供 Phase A 失败语义与 Replay 确定性。
 - **CompletedCommandIDs**：所有出现过 `command_committed` 的 `command_id` 集合（单命令节点下 command_id = node_id）。已提交命令永不重放。
 - **CommandResults**：`command_id` → 该命令的 result JSON，Replay 时用于注入 payload，不重新执行节点。
 - **CursorNode**：来自事件流中**最后一次** `node_finished` 的 payload.`node_id`（兼容 Trace/旧逻辑）。

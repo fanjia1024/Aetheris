@@ -78,8 +78,13 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 			var payload struct {
 				NodeID         string          `json:"node_id"`
 				PayloadResults json.RawMessage `json:"payload_results"`
+				ResultType     string          `json:"result_type"` // Phase A: only success (or empty for old events) advances CompletedNodeIDs
 			}
 			if err := json.Unmarshal(e.Payload, &payload); err != nil {
+				continue
+			}
+			// Only treat node as completed when result_type is success or missing (backward compat)
+			if payload.ResultType != "" && payload.ResultType != "success" {
 				continue
 			}
 			out.CompletedNodeIDs[payload.NodeID] = struct{}{}
