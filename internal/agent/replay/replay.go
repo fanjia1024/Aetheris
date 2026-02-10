@@ -22,16 +22,29 @@ import (
 	"rag-platform/internal/runtime/jobstore"
 )
 
+// StateChangeRecord 单条外部资源变更（从 state_changed 事件解析），供 Confirmation Replay 校验
+type StateChangeRecord struct {
+	ResourceType  string `json:"resource_type"`
+	ResourceID    string `json:"resource_id"`
+	Operation     string `json:"operation"`
+	StepID        string `json:"step_id,omitempty"`
+	ToolName      string `json:"tool_name,omitempty"`
+	Version       string `json:"version,omitempty"`
+	Etag          string `json:"etag,omitempty"`
+	ExternalRef   string `json:"external_ref,omitempty"`
+}
+
 // ReplayContext 从事件流重建的执行上下文，供 Runner 恢复时使用（不重复执行已完成节点）
 type ReplayContext struct {
-	TaskGraphState           []byte              // PlanGenerated 的 task_graph
-	CursorNode               string              // 最后一条 NodeFinished 的 node_id，兼容 Trace/旧逻辑
-	PayloadResults           []byte              // 最后一条 NodeFinished 的 payload_results（累积状态）
-	CompletedNodeIDs         map[string]struct{} // 所有已出现 NodeFinished 的 node_id 集合，供确定性重放
-	PayloadResultsByNode     map[string][]byte   // 按 node_id 的 payload_results，供跳过时合并（可选）
-	CompletedCommandIDs      map[string]struct{} // 所有已出现 command_committed 的 command_id，已提交命令永不重放
-	CommandResults           map[string][]byte   // command_id -> 该命令的 result JSON，Replay 时注入 payload
-	CompletedToolInvocations map[string][]byte   // idempotency_key -> 成功完成的工具调用 result JSON，Replay 时跳过执行并注入
+	TaskGraphState           []byte                  // PlanGenerated 的 task_graph
+	CursorNode               string                  // 最后一条 NodeFinished 的 node_id，兼容 Trace/旧逻辑
+	PayloadResults           []byte                  // 最后一条 NodeFinished 的 payload_results（累积状态）
+	CompletedNodeIDs         map[string]struct{}     // 所有已出现 NodeFinished 的 node_id 集合，供确定性重放
+	PayloadResultsByNode     map[string][]byte       // 按 node_id 的 payload_results，供跳过时合并（可选）
+	CompletedCommandIDs      map[string]struct{}     // 所有已出现 command_committed 的 command_id，已提交命令永不重放
+	CommandResults           map[string][]byte       // command_id -> 该命令的 result JSON，Replay 时注入 payload
+	CompletedToolInvocations map[string][]byte       // idempotency_key -> 成功完成的工具调用 result JSON，Replay 时跳过执行并注入
+	StateChangesByStep       map[string][]StateChangeRecord // node_id -> 该步的 state_changed 列表，供 Confirmation Replay
 }
 
 // ReplayContextBuilder 从 JobStore 事件流构建 ReplayContext
@@ -65,6 +78,7 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 		CompletedCommandIDs:      make(map[string]struct{}),
 		CommandResults:           make(map[string][]byte),
 		CompletedToolInvocations: make(map[string][]byte),
+		StateChangesByStep:      make(map[string][]StateChangeRecord),
 	}
 	for _, e := range events {
 		switch e.Type {
@@ -132,6 +146,18 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 			} else {
 				out.CompletedToolInvocations[pl.IdempotencyKey] = []byte("{}")
 			}
+		case jobstore.StateChanged:
+			var pl struct {
+				NodeID       string              `json:"node_id"`
+				StateChanges []StateChangeRecord `json:"state_changes"`
+			}
+			if err := json.Unmarshal(e.Payload, &pl); err != nil {
+				continue
+			}
+			if pl.NodeID == "" || len(pl.StateChanges) == 0 {
+				continue
+			}
+			out.StateChangesByStep[pl.NodeID] = append(out.StateChangesByStep[pl.NodeID], pl.StateChanges...)
 		}
 	}
 	if len(out.TaskGraphState) == 0 {

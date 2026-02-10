@@ -19,13 +19,16 @@ import (
 	"encoding/json"
 )
 
-// StateChanged 单条外部资源变更，供审计与 Trace UI「本步改变了什么」
+// StateChanged 单条外部资源变更，供审计、Trace UI 与 Confirmation Replay 校验
 type StateChanged struct {
 	ResourceType string `json:"resource_type"` // e.g. github_issue, file, release
 	ResourceID   string `json:"resource_id"`   // e.g. "51", path, tag
 	Operation    string `json:"operation"`     // e.g. created, updated, deleted
 	StepID       string `json:"step_id,omitempty"`
 	ToolName     string `json:"tool_name,omitempty"`
+	Version      string `json:"version,omitempty"`       // 可选，资源版本
+	Etag         string `json:"etag,omitempty"`         // 可选，校验用
+	ExternalRef  string `json:"external_ref,omitempty"`  // 可选，外部 URL 或 ID，供验证与审计
 }
 
 // StateCheckpointOpts 可选扩展字段，供 state_checkpointed 事件与 Trace UI「本步变更」展示
@@ -39,6 +42,11 @@ type StateCheckpointOpts struct {
 // StateChangeSink 写入 state_changed 事件；Adapter 在 tool 提交副作用后可调用
 type StateChangeSink interface {
 	AppendStateChanged(ctx context.Context, jobID string, nodeID string, changes []StateChanged) error
+}
+
+// ResourceVerifier Confirmation Replay 时校验外部资源是否仍存在/一致；ok==false 或 err!=nil 表示不可信，不得注入结果
+type ResourceVerifier interface {
+	Verify(ctx context.Context, jobID, stepID, resourceType, resourceID, operation, externalRef string) (ok bool, err error)
 }
 
 // ChangedKeysFromState 比较 state_before 与 state_after JSON，返回发生变化的 key 列表

@@ -29,9 +29,13 @@ type jobIDContextKey struct{}
 // replayContextKey 用于在 context 中传递 Replay 已完成的工具调用结果（idempotency_key -> result JSON），供 Tool 节点幂等跳过
 type replayContextKey struct{}
 
+// stateChangesByStepContextKey 用于在 context 中传递 Replay 的「按 step 的 state_changed」列表，供 Confirmation Replay 校验
+type stateChangesByStepContextKey struct{}
+
 var theAgentContextKey = agentContextKey{}
 var theJobIDContextKey = jobIDContextKey{}
 var theReplayContextKey = replayContextKey{}
+var theStateChangesByStepContextKey = stateChangesByStepContextKey{}
 
 // WithAgent 将 agent 放入 ctx，供 Runner.Invoke 时传入节点
 func WithAgent(ctx context.Context, agent *runtime.Agent) context.Context {
@@ -75,6 +79,29 @@ func CompletedToolInvocationsFromContext(ctx context.Context) map[string][]byte 
 		return nil
 	}
 	m, _ := v.(map[string][]byte)
+	return m
+}
+
+// StateChangeForVerify Confirmation Replay 时单条待校验的外部资源变更（由 Runner 从 ReplayContext 转换注入）
+type StateChangeForVerify struct {
+	ResourceType string
+	ResourceID   string
+	Operation    string
+	ExternalRef  string
+}
+
+// WithStateChangesByStep 将 Replay 的「按 node_id 的 state_changed」放入 ctx，供 Tool 节点 Confirmation 时校验
+func WithStateChangesByStep(ctx context.Context, m map[string][]StateChangeForVerify) context.Context {
+	return context.WithValue(ctx, theStateChangesByStepContextKey, m)
+}
+
+// StateChangesByStepFromContext 从 context 取出按 step 的 state_changes
+func StateChangesByStepFromContext(ctx context.Context) map[string][]StateChangeForVerify {
+	v := ctx.Value(theStateChangesByStepContextKey)
+	if v == nil {
+		return nil
+	}
+	m, _ := v.(map[string][]StateChangeForVerify)
 	return m
 }
 

@@ -77,6 +77,9 @@ type StateChangeItem struct {
 	Operation    string `json:"operation"`
 	StepID       string `json:"step_id,omitempty"`
 	ToolName     string `json:"tool_name,omitempty"`
+	Version      string `json:"version,omitempty"`
+	Etag         string `json:"etag,omitempty"`
+	ExternalRef  string `json:"external_ref,omitempty"`
 }
 
 // StateDiff is memory before/after step (from state_checkpointed).
@@ -507,6 +510,15 @@ func parseStateChanges(v interface{}) []StateChangeItem {
 		}
 		if s, _ := m["tool_name"].(string); s != "" {
 			item.ToolName = s
+		}
+		if s, _ := m["version"].(string); s != "" {
+			item.Version = s
+		}
+		if s, _ := m["etag"].(string); s != "" {
+			item.Etag = s
+		}
+		if s, _ := m["external_ref"].(string); s != "" {
+			item.ExternalRef = s
 		}
 		if item.ResourceType != "" || item.ResourceID != "" || item.Operation != "" {
 			out = append(out, item)

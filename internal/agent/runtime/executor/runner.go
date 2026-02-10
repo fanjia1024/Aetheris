@@ -418,6 +418,15 @@ runLoop:
 		if replayCtx != nil && len(replayCtx.CompletedToolInvocations) > 0 {
 			ctx = WithCompletedToolInvocations(ctx, replayCtx.CompletedToolInvocations)
 		}
+		if replayCtx != nil && len(replayCtx.StateChangesByStep) > 0 {
+			m := make(map[string][]StateChangeForVerify)
+			for nodeID, recs := range replayCtx.StateChangesByStep {
+				for _, r := range recs {
+					m[nodeID] = append(m[nodeID], StateChangeForVerify{ResourceType: r.ResourceType, ResourceID: r.ResourceID, Operation: r.Operation, ExternalRef: r.ExternalRef})
+				}
+			}
+			ctx = WithStateChangesByStep(ctx, m)
+		}
 		var runErr error
 		payload, runErr = step.Run(ctx, payload)
 		durationMs := time.Since(stepStart).Milliseconds()

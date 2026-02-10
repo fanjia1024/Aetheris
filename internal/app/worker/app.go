@@ -126,7 +126,7 @@ func NewApp(cfg *config.Config) (*App, error) {
 		}
 		nodeEventSink := api.NewNodeEventSink(pgEventStore)
 		invocationStore := agentexec.NewToolInvocationStoreMem()
-		dagCompiler := api.NewDAGCompiler(llmClient, toolsReg, engine, nodeEventSink, nodeEventSink, invocationStore)
+		dagCompiler := api.NewDAGCompiler(llmClient, toolsReg, engine, nodeEventSink, nodeEventSink, invocationStore, nil)
 		dagRunner := api.NewDAGRunner(dagCompiler)
 		checkpointStore := runtime.NewCheckpointStoreMem()
 		agentStateStore, errState := runtime.NewAgentStateStorePg(context.Background(), dsn)

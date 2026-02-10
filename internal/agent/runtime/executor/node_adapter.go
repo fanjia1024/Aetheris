@@ -125,18 +125,40 @@ func (a *LLMNodeAdapter) ToNodeRunner(task *planner.TaskNode, agent *runtime.Age
 // ToolNodeAdapter 将 tool 型 TaskNode 转为 DAG 节点
 type ToolNodeAdapter struct {
 	Tools             ToolExec
-	ToolEventSink     ToolEventSink     // 可选；Tool 执行前后写 ToolCalled/ToolReturned
-	CommandEventSink CommandEventSink // 可选；执行成功后立即写 command_committed，保证副作用安全
+	ToolEventSink     ToolEventSink       // 可选；Tool 执行前后写 ToolCalled/ToolReturned
+	CommandEventSink  CommandEventSink   // 可选；执行成功后立即写 command_committed，保证副作用安全
 	InvocationStore   ToolInvocationStore // 可选；持久化存储，先查再执行，跨进程防 double-commit
+	ResourceVerifier  ResourceVerifier   // 可选；Confirmation Replay 时校验外部资源仍存在，不通过则失败 job
+}
+
+// runConfirmation 在注入前校验本步的 StateChanged；若 verifier 存在且有待校验项且任一项失败则返回永久失败错误
+func (a *ToolNodeAdapter) runConfirmation(ctx context.Context, jobID, taskID string, stepChanges []StateChangeForVerify) error {
+	if a.ResourceVerifier == nil || len(stepChanges) == 0 {
+		return nil
+	}
+	for _, c := range stepChanges {
+		ok, err := a.ResourceVerifier.Verify(ctx, jobID, taskID, c.ResourceType, c.ResourceID, c.Operation, c.ExternalRef)
+		if err != nil {
+			return &StepFailure{Type: StepResultPermanentFailure, Inner: err, NodeID: taskID}
+		}
+		if !ok {
+			return &StepFailure{Type: StepResultPermanentFailure, Inner: fmt.Errorf("confirmation failed: resource %s %s %s", c.ResourceType, c.ResourceID, c.Operation), NodeID: taskID}
+		}
+	}
+	return nil
 }
 
 func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, cfg map[string]any, agent *runtime.Agent, p *AgentDAGPayload) (*AgentDAGPayload, error) {
 	jobID := JobIDFromContext(ctx)
 	idempotencyKey := IdempotencyKey(jobID, taskID, toolName, cfg)
-	// 1) 持久化存储优先：已 committed 且 success 则直接注入，不执行
+	stepChanges := StateChangesByStepFromContext(ctx)[taskID]
+	// 1) 持久化存储优先：已 committed 且 success 则先 Confirmation 再注入，不执行
 	if a.InvocationStore != nil && jobID != "" {
 		rec, _ := a.InvocationStore.GetByJobAndIdempotencyKey(ctx, jobID, idempotencyKey)
 		if rec != nil && rec.Committed && rec.Status == ToolInvocationStatusSuccess && len(rec.Result) > 0 {
+			if err := a.runConfirmation(ctx, jobID, taskID, stepChanges); err != nil {
+				return nil, err
+			}
 			var nodeResult map[string]any
 			_ = json.Unmarshal(rec.Result, &nodeResult)
 			if nodeResult == nil {
@@ -149,9 +171,12 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 			return p, nil
 		}
 	}
-	// 2) 幂等重放：事件流中已有成功完成的同 idempotency_key 调用则注入结果、不执行（无 store 或 store 未命中时）
+	// 2) 幂等重放：事件流中已有成功完成的同 idempotency_key 调用则先 Confirmation 再注入结果、不执行（无 store 或 store 未命中时）
 	if completed := CompletedToolInvocationsFromContext(ctx); completed != nil {
 		if resultJSON, ok := completed[idempotencyKey]; ok {
+			if err := a.runConfirmation(ctx, jobID, taskID, stepChanges); err != nil {
+				return nil, err
+			}
 			var nodeResult map[string]any
 			if len(resultJSON) > 0 {
 				_ = json.Unmarshal(resultJSON, &nodeResult)
