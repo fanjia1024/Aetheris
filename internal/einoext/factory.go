@@ -18,11 +18,11 @@ import (
 	"context"
 	"fmt"
 
+	redisindexer "github.com/cloudwego/eino-ext/components/indexer/redis"
+	redisretriever "github.com/cloudwego/eino-ext/components/retriever/redis"
 	einoembed "github.com/cloudwego/eino/components/embedding"
 	einoindexer "github.com/cloudwego/eino/components/indexer"
 	einoretriever "github.com/cloudwego/eino/components/retriever"
-	redisindexer "github.com/cloudwego/eino-ext/components/indexer/redis"
-	redisretriever "github.com/cloudwego/eino-ext/components/retriever/redis"
 	"github.com/redis/go-redis/v9"
 
 	"rag-platform/internal/pipeline/ingest"
@@ -32,9 +32,9 @@ import (
 )
 
 const (
-	defaultBatchSize   = 100
-	defaultTopK        = 10
-	defaultThreshold   = 0.3
+	defaultBatchSize  = 100
+	defaultTopK       = 10
+	defaultThreshold  = 0.3
 	defaultCollection = "default"
 )
 
@@ -73,10 +73,10 @@ func NewIndexer(ctx context.Context, cfg config.VectorConfig, vectorStore vector
 			coll = defaultCollection
 		}
 		idx, err := redisindexer.NewIndexer(ctx, &redisindexer.IndexerConfig{
-			Client:     client,
-			KeyPrefix:  coll,
-			BatchSize:  defaultBatchSize,
-			Embedding:  embedder,
+			Client:    client,
+			KeyPrefix: coll,
+			BatchSize: defaultBatchSize,
+			Embedding: embedder,
 		})
 		if err != nil {
 			_ = client.Close()

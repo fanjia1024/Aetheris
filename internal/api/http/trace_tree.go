@@ -26,18 +26,18 @@ import (
 // ExecutionNode is a node in the execution tree (see design/execution-trace.md).
 // Input/Output are set for type=tool from tool_called/tool_returned payloads.
 type ExecutionNode struct {
-	SpanID        string           `json:"span_id"`
-	ParentID      *string          `json:"parent_id,omitempty"`
-	Type          string           `json:"type"` // job | plan | node | tool
-	NodeID        string           `json:"node_id,omitempty"`
-	ToolName      string           `json:"tool_name,omitempty"`
-	StartTime     *time.Time       `json:"start_time,omitempty"`
-	EndTime       *time.Time       `json:"end_time,omitempty"`
-	StepIndex     int              `json:"step_index,omitempty"`
-	Input         json.RawMessage  `json:"input,omitempty"`          // tool_called payload input (type=tool)
-	Output        json.RawMessage  `json:"output,omitempty"`         // tool_returned payload output (type=tool)
-	PayloadSummary string          `json:"payload_summary,omitempty"` // one-line summary for type=node (e.g. llm/workflow)
-	Children      []*ExecutionNode `json:"children,omitempty"`
+	SpanID         string           `json:"span_id"`
+	ParentID       *string          `json:"parent_id,omitempty"`
+	Type           string           `json:"type"` // job | plan | node | tool
+	NodeID         string           `json:"node_id,omitempty"`
+	ToolName       string           `json:"tool_name,omitempty"`
+	StartTime      *time.Time       `json:"start_time,omitempty"`
+	EndTime        *time.Time       `json:"end_time,omitempty"`
+	StepIndex      int              `json:"step_index,omitempty"`
+	Input          json.RawMessage  `json:"input,omitempty"`           // tool_called payload input (type=tool)
+	Output         json.RawMessage  `json:"output,omitempty"`          // tool_returned payload output (type=tool)
+	PayloadSummary string           `json:"payload_summary,omitempty"` // one-line summary for type=node (e.g. llm/workflow)
+	Children       []*ExecutionNode `json:"children,omitempty"`
 }
 
 // BuildExecutionTree 从事件流推导执行树（兼容无 trace_span_id 的旧事件）

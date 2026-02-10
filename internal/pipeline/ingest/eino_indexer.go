@@ -27,16 +27,16 @@ import (
 
 // MemoryIndexer 基于 vector.Store 实现的 Eino indexer.Indexer（memory 后端）
 type MemoryIndexer struct {
-	vectorStore      vector.Store
+	vectorStore       vector.Store
 	defaultCollection string
-	batchSize        int
+	batchSize         int
 }
 
 // MemoryIndexerConfig MemoryIndexer 构造参数
 type MemoryIndexerConfig struct {
-	VectorStore      vector.Store
+	VectorStore       vector.Store
 	DefaultCollection string
-	BatchSize        int
+	BatchSize         int
 }
 
 // NewMemoryIndexer 创建基于 vector.Store 的 Eino Indexer
@@ -53,9 +53,9 @@ func NewMemoryIndexer(cfg *MemoryIndexerConfig) (*MemoryIndexer, error) {
 		collection = "default"
 	}
 	return &MemoryIndexer{
-		vectorStore:      cfg.VectorStore,
+		vectorStore:       cfg.VectorStore,
 		defaultCollection: collection,
-		batchSize:        batchSize,
+		batchSize:         batchSize,
 	}, nil
 }
 

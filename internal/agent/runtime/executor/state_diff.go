@@ -26,9 +26,9 @@ type StateChanged struct {
 	Operation    string `json:"operation"`     // e.g. created, updated, deleted
 	StepID       string `json:"step_id,omitempty"`
 	ToolName     string `json:"tool_name,omitempty"`
-	Version      string `json:"version,omitempty"`       // 可选，资源版本
+	Version      string `json:"version,omitempty"`      // 可选，资源版本
 	Etag         string `json:"etag,omitempty"`         // 可选，校验用
-	ExternalRef  string `json:"external_ref,omitempty"`  // 可选，外部 URL 或 ID，供验证与审计
+	ExternalRef  string `json:"external_ref,omitempty"` // 可选，外部 URL 或 ID，供验证与审计
 }
 
 // StateCheckpointOpts 可选扩展字段，供 state_checkpointed 事件与 Trace UI「本步变更」展示

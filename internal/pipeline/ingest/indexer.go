@@ -30,14 +30,14 @@ import (
 
 // DocumentIndexer 文档索引器（支持直接使用 vector.Store 或 Eino indexer.Indexer）
 type DocumentIndexer struct {
-	name               string
-	vectorStore        vector.Store
-	metadataStore      metadata.Store
-	einoIndexer        einoindexer.Indexer // 非空时优先使用 Eino Indexer.Store
-	concurrency        int
-	batchSize          int
-	defaultIndexName   string // 默认索引/集合名，空则用 "default"
-	vectorStoreType    string // 向量库类型，写入 doc.Metadata["vector_store"]，空则 "memory"
+	name             string
+	vectorStore      vector.Store
+	metadataStore    metadata.Store
+	einoIndexer      einoindexer.Indexer // 非空时优先使用 Eino Indexer.Store
+	concurrency      int
+	batchSize        int
+	defaultIndexName string // 默认索引/集合名，空则用 "default"
+	vectorStoreType  string // 向量库类型，写入 doc.Metadata["vector_store"]，空则 "memory"
 }
 
 // NewDocumentIndexer 创建新的文档索引器。defaultIndexName 为空时使用 "default"；vectorStoreType 为空时使用 "memory"。
@@ -57,10 +57,10 @@ func NewDocumentIndexer(vectorStore vector.Store, metadataStore metadata.Store, 
 
 	return &DocumentIndexer{
 		name:             "index_builder",
-		vectorStore:     vectorStore,
-		metadataStore:   metadataStore,
-		concurrency:     concurrency,
-		batchSize:       batchSize,
+		vectorStore:      vectorStore,
+		metadataStore:    metadataStore,
+		concurrency:      concurrency,
+		batchSize:        batchSize,
 		defaultIndexName: defaultIndexName,
 		vectorStoreType:  vectorStoreType,
 	}
@@ -76,9 +76,9 @@ func NewDocumentIndexerFromEino(einoIndexer einoindexer.Indexer, metadataStore m
 	}
 	return &DocumentIndexer{
 		name:             "index_builder",
-		einoIndexer:     einoIndexer,
-		metadataStore:   metadataStore,
-		batchSize:       100,
+		einoIndexer:      einoIndexer,
+		metadataStore:    metadataStore,
+		batchSize:        100,
 		defaultIndexName: defaultIndexName,
 		vectorStoreType:  vectorStoreType,
 	}

@@ -62,7 +62,7 @@ type JobSchedulerConfig struct {
 	MaxConcurrency int      `mapstructure:"max_concurrency"` // 最大并发执行数，<=0 使用默认 2
 	RetryMax       int      `mapstructure:"retry_max"`       // 失败后最大重试次数（不含首次），<0 使用默认 2
 	Backoff        string   `mapstructure:"backoff"`         // 重试前等待时间，如 "1s"，空则默认 1s
-	Queues         []string `mapstructure:"queues"`        // 按优先级轮询的队列列表，如 ["realtime","default","background"]；空则不区分队列
+	Queues         []string `mapstructure:"queues"`          // 按优先级轮询的队列列表，如 ["realtime","default","background"]；空则不区分队列
 }
 
 // APIConfig API 服务配置
@@ -105,8 +105,8 @@ type WorkerConfig struct {
 	RetryDelay   string   `mapstructure:"retry_delay"`
 	Timeout      string   `mapstructure:"timeout"`
 	PollInterval string   `mapstructure:"poll_interval"` // Agent Job Claim 轮询间隔，如 "2s"
-	MaxAttempts  int      `mapstructure:"max_attempts"`   // Agent Job 最大执行次数（含首次），达此后标记 Failed 不再调度；<=0 时默认 3
-	Capabilities []string `mapstructure:"capabilities"`   // Worker 能力列表（如 llm, tool, rag）；Scheduler 仅派发 RequiredCapabilities 满足的 Job；空表示接受任意 Job
+	MaxAttempts  int      `mapstructure:"max_attempts"`  // Agent Job 最大执行次数（含首次），达此后标记 Failed 不再调度；<=0 时默认 3
+	Capabilities []string `mapstructure:"capabilities"`  // Worker 能力列表（如 llm, tool, rag）；Scheduler 仅派发 RequiredCapabilities 满足的 Job；空表示接受任意 Job
 }
 
 // ModelConfig 模型配置

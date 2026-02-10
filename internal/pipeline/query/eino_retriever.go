@@ -18,8 +18,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cloudwego/eino/schema"
 	einoretriever "github.com/cloudwego/eino/components/retriever"
+	"github.com/cloudwego/eino/schema"
 
 	"rag-platform/internal/storage/vector"
 )

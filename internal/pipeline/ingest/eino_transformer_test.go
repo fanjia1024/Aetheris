@@ -30,8 +30,8 @@ func TestSplitterTransformer_Transform(t *testing.T) {
 	// One doc with enough content to split into multiple chunks
 	src := []*schema.Document{
 		{
-			ID:      "doc1",
-			Content: "First paragraph here.\n\nSecond paragraph there.\n\nThird paragraph and more text to exceed chunk size so we get at least two chunks from the splitter.",
+			ID:       "doc1",
+			Content:  "First paragraph here.\n\nSecond paragraph there.\n\nThird paragraph and more text to exceed chunk size so we get at least two chunks from the splitter.",
 			MetaData: map[string]any{"_source": "test.txt"},
 		},
 	}

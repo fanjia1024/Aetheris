@@ -42,15 +42,19 @@ func (m *mockLLMClient) ChatWithContext(ctx context.Context, messages []llm.Mess
 	return `{"nodes":[{"id":"n1","type":"tool","tool_name":"knowledge.search"},{"id":"n2","type":"llm","config":{"goal":"summarize"}}],"edges":[{"from":"n1","to":"n2"}]}`, nil
 }
 
-func (m *mockLLMClient) Generate(prompt string, opts llm.GenerateOptions) (string, error) { return "", nil }
+func (m *mockLLMClient) Generate(prompt string, opts llm.GenerateOptions) (string, error) {
+	return "", nil
+}
 func (m *mockLLMClient) GenerateWithContext(ctx context.Context, prompt string, opts llm.GenerateOptions) (string, error) {
 	return "", nil
 }
-func (m *mockLLMClient) Chat(messages []llm.Message, opts llm.GenerateOptions) (string, error) { return "", nil }
-func (m *mockLLMClient) Model() string                                                         { return "mock" }
-func (m *mockLLMClient) Provider() string                                                       { return "mock" }
-func (m *mockLLMClient) SetModel(model string)                                                  {}
-func (m *mockLLMClient) SetAPIKey(apiKey string)                                               {}
+func (m *mockLLMClient) Chat(messages []llm.Message, opts llm.GenerateOptions) (string, error) {
+	return "", nil
+}
+func (m *mockLLMClient) Model() string           { return "mock" }
+func (m *mockLLMClient) Provider() string        { return "mock" }
+func (m *mockLLMClient) SetModel(model string)   {}
+func (m *mockLLMClient) SetAPIKey(apiKey string) {}
 
 func TestLLMPlanner_PlanGoal_NilClient(t *testing.T) {
 	p := NewLLMPlanner(nil)

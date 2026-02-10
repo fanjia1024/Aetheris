@@ -1,0 +1,11 @@
+#!/bin/sh
+# Pre-commit hook: format staged Go files with gofmt and re-stage them.
+exec 1>&2
+
+staged_go=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$')
+[ -z "$staged_go" ] && exit 0
+
+echo "$staged_go" | xargs gofmt -w
+echo "$staged_go" | xargs git add
+
+exit 0

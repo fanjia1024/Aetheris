@@ -35,7 +35,7 @@ type AgentJobRunner struct {
 	jobEventStore   jobstore.JobStore
 	jobStore        job.JobStore
 	runJob          func(ctx context.Context, j *job.Job) error
-	capabilities    []string   // Worker 能力列表；非空时按能力从 jobStore 选 Job 再在 eventStore 占租约
+	capabilities    []string // Worker 能力列表；非空时按能力从 jobStore 选 Job 再在 eventStore 占租约
 	pollInterval    time.Duration
 	leaseDuration   time.Duration
 	heartbeatTicker time.Duration

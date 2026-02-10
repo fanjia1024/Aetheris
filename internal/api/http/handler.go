@@ -680,10 +680,10 @@ func (h *Handler) AgentResumeCheckpoint(ctx context.Context, c *app.RequestConte
 		}
 	}
 	resp := map[string]interface{}{
-		"status":       "success",
+		"status":        "success",
 		"checkpoint_id": req.CheckPointID,
-		"answer":       lastContent,
-		"steps":        steps,
+		"answer":        lastContent,
+		"steps":         steps,
 	}
 	if req.SessionID != "" && h.sessionManager != nil {
 		if sess, err := h.sessionManager.GetOrCreate(ctx, req.SessionID); err == nil {

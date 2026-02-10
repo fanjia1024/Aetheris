@@ -23,12 +23,12 @@ import (
 
 // TimelineSegment is one segment on the horizontal timeline (plan, step, retry, recover).
 type TimelineSegment struct {
-	Type       string     `json:"type"`        // plan | node | tool | recovery
+	Type       string     `json:"type"` // plan | node | tool | recovery
 	Label      string     `json:"label"`
 	NodeID     string     `json:"node_id,omitempty"`
 	StartTime  *time.Time `json:"start_time,omitempty"`
 	EndTime    *time.Time `json:"end_time,omitempty"`
-	DurationMs int64     `json:"duration_ms,omitempty"`
+	DurationMs int64      `json:"duration_ms,omitempty"`
 	Status     string     `json:"status,omitempty"` // ok | failed | retryable
 	Attempt    int        `json:"attempt,omitempty"`
 	WorkerID   string     `json:"worker_id,omitempty"`
@@ -55,7 +55,7 @@ type StepNarrative struct {
 
 // ReasoningItem is one agent thought or decision (from agent_thought_recorded, decision_made, tool_selected).
 type ReasoningItem struct {
-	Role    string `json:"role,omitempty"`    // reasoning | decision | tool_selected
+	Role    string `json:"role,omitempty"` // reasoning | decision | tool_selected
 	Content string `json:"content"`
 	Kind    string `json:"kind,omitempty"`
 }
@@ -160,9 +160,9 @@ func BuildNarrative(events []jobstore.JobEvent) *Narrative {
 				Status:    "ok",
 			})
 			out.Steps = append(out.Steps, StepNarrative{
-				SpanID: "plan",
-				Type:   "plan",
-				Label:  "Plan",
+				SpanID:    "plan",
+				Type:      "plan",
+				Label:     "Plan",
 				StartTime: &startAt,
 				EndTime:   &startAt,
 			})
@@ -189,12 +189,12 @@ func BuildNarrative(events []jobstore.JobEvent) *Narrative {
 			}
 			out.TimelineSegments = append(out.TimelineSegments, seg)
 			out.Steps = append(out.Steps, StepNarrative{
-				SpanID:   nodeID,
-				Type:     "node",
-				Label:    "Node " + nodeID,
-				NodeID:   nodeID,
-				Attempts: seg.Attempt,
-				WorkerID: seg.WorkerID,
+				SpanID:    nodeID,
+				Type:      "node",
+				Label:     "Node " + nodeID,
+				NodeID:    nodeID,
+				Attempts:  seg.Attempt,
+				WorkerID:  seg.WorkerID,
 				StartTime: &e.CreatedAt,
 			})
 			spanToStepIndex[nodeID] = len(out.Steps) - 1

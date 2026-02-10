@@ -79,7 +79,7 @@ type ToolInvocationFinishedPayload struct {
 	InvocationID   string          `json:"invocation_id"`
 	IdempotencyKey string          `json:"idempotency_key"`
 	Outcome        string          `json:"outcome"` // success | failure | timeout
-	Result         json.RawMessage  `json:"result,omitempty"`
+	Result         json.RawMessage `json:"result,omitempty"`
 	Error          string          `json:"error,omitempty"`
 	FinishedAt     string          `json:"finished_at"` // RFC3339
 }

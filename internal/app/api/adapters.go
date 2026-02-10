@@ -88,8 +88,8 @@ func (a *retrieverAdapter) Retrieve(ctx context.Context, queryText, collection s
 // EinoRetrieverQueryAdapter 将 Eino retriever.Retriever 适配为 query 工作流使用的检索器（实现 eino.QueryRetrieverForWorkflow）
 type EinoRetrieverQueryAdapter struct {
 	EinoRetriever einoretriever.Retriever
-	Embedder     Embedder
-	TopK         int
+	Embedder      Embedder
+	TopK          int
 }
 
 // SetTopK 设置返回结果数量

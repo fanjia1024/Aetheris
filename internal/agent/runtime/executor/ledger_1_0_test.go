@@ -273,4 +273,3 @@ func (c *countToolExec) Execute(ctx context.Context, toolName string, input map[
 	atomic.AddInt32(c.count, 1)
 	return ToolResult{Done: true, Output: "called"}, nil
 }
-

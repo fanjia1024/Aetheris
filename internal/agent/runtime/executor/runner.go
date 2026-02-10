@@ -31,13 +31,13 @@ import (
 type StepResultType string
 
 const (
-	StepResultSuccess                StepResultType = "success"                 // 通用成功；非 tool 步会记为 StepResultPure
-	StepResultPure                   StepResultType = "pure"                   // 无副作用完成（纯计算，如 LLM 步）；replay 可安全重放
-	StepResultSideEffectCommitted    StepResultType = "side_effect_committed"   // 外部世界已改变，replay 不得重放
-	StepResultRetryableFailure       StepResultType = "retryable_failure"
-	StepResultPermanentFailure       StepResultType = "permanent_failure"
-	StepResultCompensatableFailure   StepResultType = "compensatable_failure"
-	StepResultCompensated            StepResultType = "compensated"             // 已回滚，视为终态
+	StepResultSuccess              StepResultType = "success"               // 通用成功；非 tool 步会记为 StepResultPure
+	StepResultPure                 StepResultType = "pure"                  // 无副作用完成（纯计算，如 LLM 步）；replay 可安全重放
+	StepResultSideEffectCommitted  StepResultType = "side_effect_committed" // 外部世界已改变，replay 不得重放
+	StepResultRetryableFailure     StepResultType = "retryable_failure"
+	StepResultPermanentFailure     StepResultType = "permanent_failure"
+	StepResultCompensatableFailure StepResultType = "compensatable_failure"
+	StepResultCompensated          StepResultType = "compensated" // 已回滚，视为终态
 )
 
 // Sentinel errors for adapters to mark failure kind; Runner uses these to set result_type.

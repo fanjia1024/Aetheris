@@ -21,7 +21,7 @@ import (
 
 // ToolInvocationStoreMem 内存实现，单进程有效；多 worker 时需用 PG 等持久化实现
 type ToolInvocationStoreMem struct {
-	mu   sync.RWMutex
+	mu    sync.RWMutex
 	byKey map[string]*ToolInvocationRecord // idempotency_key -> record
 }
 

@@ -19,7 +19,7 @@ const (
 	QueueRealtime   = "realtime"   // 实时对话等低延迟
 	QueueDefault    = "default"    // 默认
 	QueueBackground = "background" // 知识构建等后台
-	QueueHeavy      = "heavy"     // 批处理等重任务
+	QueueHeavy      = "heavy"      // 批处理等重任务
 )
 
 // DefaultPriority 默认优先级（QueueDefault 使用）
@@ -28,9 +28,9 @@ const DefaultPriority = 0
 // Priority 数值越大越优先（realtime 高，heavy 低）
 const (
 	PriorityRealtime   = 10
-	PriorityDefault   = 0
+	PriorityDefault    = 0
 	PriorityBackground = -5
-	PriorityHeavy     = -10
+	PriorityHeavy      = -10
 )
 
 // PriorityForQueue 返回队列类型对应的默认优先级

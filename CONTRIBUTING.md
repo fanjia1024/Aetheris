@@ -16,6 +16,16 @@ Thank you for your interest in contributing to Aetheris!
 - Run `golangci-lint` before submitting PRs
 - Maintain existing module and package structure
 
+### Git hooks
+
+To run `gofmt` automatically on staged Go files before each commit, enable the project hooks (local to this repo only):
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Or run the install script once: `./scripts/install-hooks.sh`
+
 ## Reporting Issues
 
 - Check existing issues before creating a new one

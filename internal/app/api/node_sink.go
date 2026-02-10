@@ -84,12 +84,12 @@ func (s *nodeEventSinkImpl) AppendNodeFinished(ctx context.Context, jobID string
 		stepIDVal = nodeID
 	}
 	pl := map[string]interface{}{
-		"node_id":       nodeID,
-		"step_id":       stepIDVal,
-		"trace_span_id": nodeID,
+		"node_id":        nodeID,
+		"step_id":        stepIDVal,
+		"trace_span_id":  nodeID,
 		"parent_span_id": "plan",
-		"step_index":    stepIndex,
-		"result_type":   string(resultType), // required for Replay; default "" treated as success for old events
+		"step_index":     stepIndex,
+		"result_type":    string(resultType), // required for Replay; default "" treated as success for old events
 	}
 	if len(payloadResults) > 0 {
 		pl["payload_results"] = json.RawMessage(payloadResults)
@@ -222,8 +222,8 @@ func (s *nodeEventSinkImpl) AppendToolResultSummarized(ctx context.Context, jobI
 	}
 	stepIndex := ver + 1
 	pl := map[string]interface{}{
-		"node_id":   nodeID,
-		"tool_name": toolName,
+		"node_id":    nodeID,
+		"tool_name":  toolName,
 		"step_index": stepIndex,
 	}
 	if summary != "" {
@@ -254,10 +254,10 @@ func (s *nodeEventSinkImpl) AppendToolInvocationStarted(ctx context.Context, job
 	}
 	pl := map[string]interface{}{
 		"node_id":         nodeID,
-		"invocation_id":  payload.InvocationID,
-		"tool_name":      payload.ToolName,
+		"invocation_id":   payload.InvocationID,
+		"tool_name":       payload.ToolName,
 		"idempotency_key": payload.IdempotencyKey,
-		"started_at":     payload.StartedAt,
+		"started_at":      payload.StartedAt,
 	}
 	if payload.ArgumentsHash != "" {
 		pl["arguments_hash"] = payload.ArgumentsHash
@@ -282,11 +282,11 @@ func (s *nodeEventSinkImpl) AppendToolInvocationFinished(ctx context.Context, jo
 		return err
 	}
 	pl := map[string]interface{}{
-		"node_id":          nodeID,
-		"invocation_id":    payload.InvocationID,
-		"idempotency_key":  payload.IdempotencyKey,
-		"outcome":          payload.Outcome,
-		"finished_at":      payload.FinishedAt,
+		"node_id":         nodeID,
+		"invocation_id":   payload.InvocationID,
+		"idempotency_key": payload.IdempotencyKey,
+		"outcome":         payload.Outcome,
+		"finished_at":     payload.FinishedAt,
 	}
 	if len(payload.Result) > 0 {
 		pl["result"] = json.RawMessage(payload.Result)
@@ -341,11 +341,11 @@ func (s *nodeEventSinkImpl) AppendCommandCommitted(ctx context.Context, jobID st
 	}
 	stepIndex := ver + 1
 	pl := map[string]interface{}{
-		"node_id":     nodeID,
-		"command_id":  commandID,
-		"step_id":     commandID, // 单命令节点下 command_id = step_id
-		"result":      json.RawMessage(result),
-		"step_index":  stepIndex,
+		"node_id":    nodeID,
+		"command_id": commandID,
+		"step_id":    commandID, // 单命令节点下 command_id = step_id
+		"result":     json.RawMessage(result),
+		"step_index": stepIndex,
 	}
 	if inputHash != "" {
 		pl["input_hash"] = inputHash

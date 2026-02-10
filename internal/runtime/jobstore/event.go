@@ -20,30 +20,30 @@ import "time"
 type EventType string
 
 const (
-	JobCreated       EventType = "job_created"
-	PlanGenerated    EventType = "plan_generated"
-	NodeStarted      EventType = "node_started"
-	NodeFinished     EventType = "node_finished"
-	CommandEmitted   EventType = "command_emitted"
-	CommandCommitted EventType = "command_committed"
-	ToolCalled               EventType = "tool_called"
-	ToolReturned             EventType = "tool_returned"
-	ToolInvocationStarted   EventType = "tool_invocation_started"
-	ToolInvocationFinished  EventType = "tool_invocation_finished"
-	JobCompleted            EventType = "job_completed"
-	JobFailed        EventType = "job_failed"
-	JobCancelled     EventType = "job_cancelled"
+	JobCreated             EventType = "job_created"
+	PlanGenerated          EventType = "plan_generated"
+	NodeStarted            EventType = "node_started"
+	NodeFinished           EventType = "node_finished"
+	CommandEmitted         EventType = "command_emitted"
+	CommandCommitted       EventType = "command_committed"
+	ToolCalled             EventType = "tool_called"
+	ToolReturned           EventType = "tool_returned"
+	ToolInvocationStarted  EventType = "tool_invocation_started"
+	ToolInvocationFinished EventType = "tool_invocation_finished"
+	JobCompleted           EventType = "job_completed"
+	JobFailed              EventType = "job_failed"
+	JobCancelled           EventType = "job_cancelled"
 
 	// Semantic events for Trace narrative (v0.9); see design/trace-event-schema-v0.9.md
-	StateCheckpointed      EventType = "state_checkpointed"
-	AgentThoughtRecorded   EventType = "agent_thought_recorded"
-	DecisionMade           EventType = "decision_made"
-	ToolSelected           EventType = "tool_selected"
-	ToolResultSummarized   EventType = "tool_result_summarized"
-	RecoveryStarted        EventType = "recovery_started"
-	RecoveryCompleted      EventType = "recovery_completed"
-	StepCompensated        EventType = "step_compensated"
-	StateChanged           EventType = "state_changed" // 外部资源变更（resource_type, resource_id, operation）供审计
+	StateCheckpointed    EventType = "state_checkpointed"
+	AgentThoughtRecorded EventType = "agent_thought_recorded"
+	DecisionMade         EventType = "decision_made"
+	ToolSelected         EventType = "tool_selected"
+	ToolResultSummarized EventType = "tool_result_summarized"
+	RecoveryStarted      EventType = "recovery_started"
+	RecoveryCompleted    EventType = "recovery_completed"
+	StepCompensated      EventType = "step_compensated"
+	StateChanged         EventType = "state_changed" // 外部资源变更（resource_type, resource_id, operation）供审计
 )
 
 // JobEvent 单条不可变事件；Job 的真实形态是事件流

@@ -32,7 +32,7 @@ func TestMemoryIndexer_Store(t *testing.T) {
 	}
 
 	idx, err := NewMemoryIndexer(&MemoryIndexerConfig{
-		VectorStore:        store,
+		VectorStore:       store,
 		DefaultCollection: "default",
 		BatchSize:         10,
 	})
