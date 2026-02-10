@@ -62,43 +62,87 @@ graph TD
 
 ## 3. 2.0 总览整合图（模块 + 依赖 + 阶段）
 
-下图在同一视图中体现 **时间阶段**、**各阶段关键模块** 与 **依赖关系**：从左到右为阶段顺序，箭头表示依赖或交付顺序。
+### 3.1 Roadmap 甘特图
+
+下图展示 2.0 各阶段与时间线。
 
 ```mermaid
-flowchart LR
-    subgraph Phase1 ["阶段 1 · 1–2 个月"]
-        P1A[Job Scheduler and Runner]
-        P1B[Planner and DAG Executor]
-        P1C[Multi-Agent Messaging]
+gantt
+    title Aetheris 2.0 Roadmap
+    dateFormat  YYYY-MM-DD
+    axisFormat  %b
+    section Phase 1: 核心增强
+    Scheduler & Runner           :done,    s1, 2026-02-15, 30d
+    Planner / DAG Executor       :active,  p1, 2026-02-15, 30d
+    Multi-Agent Messaging        :         m1, 2026-02-15, 30d
+    section Phase 2: RAG & 扩展节点
+    RAG / Knowledge Nodes        :         r1, 2026-03-17, 45d
+    Tool & Workflow Nodes        :         t1, 2026-03-17, 45d
+    Custom Task Plugins          :         c1, 2026-03-17, 45d
+    section Phase 3: 可视化与监控
+    Job / Task Dashboard         :         j1, 2026-05-01, 30d
+    Event Stream Visualization   :         e1, 2026-05-01, 30d
+    Debug / Replay Tools         :         d1, 2026-05-01, 30d
+    section Phase 4: 安全与治理
+    RBAC / Access Control        :         a1, 2026-06-01, 30d
+    Audit Logs                   :         a2, 2026-06-01, 30d
+    Multi-Tenant Isolation       :         a3, 2026-06-01, 30d
+```
+
+### 3.2 模块依赖结构图
+
+下图展示模块间依赖与扩展、监控、安全关系。
+
+```mermaid
+graph TD
+    U[User / API] --> A[Agent Core]
+
+    A --> B[Scheduler & Runner]
+    A --> C[Planner / DAG Executor]
+    A --> D[JobStore / EventStore]
+    A --> E[Tool & Workflow Nodes]
+    A --> F[RAG / Knowledge Nodes]
+    A --> G[Monitoring & Visualization]
+    A --> H[Security & Governance]
+
+    B -->|depends on| D
+    C -->|depends on| D
+    E -->|optional| F
+    G -->|reads| D
+    H -->|controls access| B
+    H -->|controls access| C
+    H -->|controls access| E
+
+    subgraph agentCollab [Agent Collaboration]
+        A --> I[Multi-Agent Messaging]
+        A --> J[Event-Driven Triggers]
+        I --> B
+        J --> C
     end
 
-    subgraph Phase2 ["阶段 2 · 2–3 个月"]
-        P2A[RAG and Knowledge Nodes]
-        P2B[Tool and Workflow Nodes]
-        P2C[Custom Task Plugins]
+    subgraph perfStability [Performance and Stability]
+        B --> K[Dynamic Worker Pool]
+        B --> L[Task Prioritization and Timeout]
+        D --> M[Distributed JobStore]
+        C --> N[Async DAG Execution]
     end
 
-    subgraph Phase3 ["阶段 3 · 2 个月"]
-        P3A[Monitoring and Visualization]
-        P3B[Event Stream and Debug Tools]
+    subgraph extensibility [Extensibility]
+        E --> O[Custom Task Plugins]
+        F --> P[Custom Knowledge Sources]
     end
 
-    subgraph Phase4 ["阶段 4 · 1–2 个月"]
-        P4A[RBAC and Access Control]
-        P4B[Audit Logs and Multi-Tenant]
+    subgraph monitoring [Monitoring]
+        G --> Q[Job / Task Dashboard]
+        G --> R[Event Stream Visualization]
+        G --> S[Debug / Replay Tools]
     end
 
-    User[User and API] --> P1A
-    User --> P1B
-    P1A --> P1C
-    P1B --> P2A
-    P1B --> P2B
-    P2B --> P2C
-    P1A --> P3A
-    P1B --> P3B
-    P3A --> P4A
-    P3B --> P4B
-    P4A --> P4B
+    subgraph security [Security]
+        H --> T[RBAC / Access Control]
+        H --> U1[Audit Logs]
+        H --> V[Multi-Tenant Isolation]
+    end
 ```
 
 ---
