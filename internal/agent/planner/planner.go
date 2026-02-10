@@ -54,14 +54,27 @@ type Planner interface {
 	PlanGoal(ctx context.Context, goal string, mem memory.Memory) (*TaskGraph, error)
 }
 
+// toolSchemaItem 用于解析 SchemasForLLM 输出的单项（仅取 name、description 注入 PlanGoal prompt）
+type toolSchemaItem struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 // LLMPlanner 基于 LLM 的最小实现：生成 JSON Plan
 type LLMPlanner struct {
-	client llm.Client
+	client             llm.Client
+	toolsSchemaForGoal []byte // 可选；由应用层通过 SetToolsSchemaForGoal 注入，PlanGoal 时写入 prompt 便于 LLM 选择工具
 }
 
 // NewLLMPlanner 创建基于 LLM 的 Planner
 func NewLLMPlanner(client llm.Client) *LLMPlanner {
 	return &LLMPlanner{client: client}
+}
+
+// SetToolsSchemaForGoal 设置用于 PlanGoal 的可用工具列表（JSON，如 tools.Registry.SchemasForLLM() 的返回值）。
+// 传入非空时，PlanGoal 的 system prompt 会追加工具名与描述，便于 LLM 生成含 knowledge.search 等节点的 TaskGraph。
+func (p *LLMPlanner) SetToolsSchemaForGoal(schemaJSON []byte) {
+	p.toolsSchemaForGoal = schemaJSON
 }
 
 // Plan 实现 Planner
@@ -175,6 +188,24 @@ func (p *LLMPlanner) PlanGoal(ctx context.Context, goal string, mem memory.Memor
 		contextStr += it.Content + "\n"
 	}
 	systemPrompt := `根据用户目标生成任务图（JSON）。格式：{"nodes":[{"id":"n1","type":"tool|workflow|llm","tool_name":"xxx 或 workflow 名"}],"edges":[{"from":"n1","to":"n2"}]}。若单步可完成，一个节点即可。`
+	if len(p.toolsSchemaForGoal) > 0 {
+		var toolList []toolSchemaItem
+		if err := json.Unmarshal(p.toolsSchemaForGoal, &toolList); err == nil && len(toolList) > 0 {
+			var parts []string
+			for _, t := range toolList {
+				if t.Name != "" {
+					desc := t.Description
+					if len(desc) > 80 {
+						desc = desc[:77] + "..."
+					}
+					parts = append(parts, t.Name+" - "+desc)
+				}
+			}
+			if len(parts) > 0 {
+				systemPrompt += "\n可用工具（type=tool 时 tool_name 取以下之一）：" + strings.Join(parts, "；")
+			}
+		}
+	}
 	messages := []llm.Message{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: "目标：" + goal + "\n上下文：\n" + contextStr},

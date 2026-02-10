@@ -26,6 +26,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/schema"
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
@@ -74,6 +76,9 @@ type Handler struct {
 	agent          AgentRunner
 	sessionManager SessionManager
 
+	// adkRunner 主 ADK Runner；非空时 POST /api/agent/run 与 resume/stream 使用 ADK
+	adkRunner *adk.Runner
+
 	// ingestQueue 可选；postgres 时用于异步入库入队与状态查询
 	ingestQueue IngestQueueForAPI
 
@@ -110,6 +115,11 @@ func (h *Handler) SetIngestQueue(q IngestQueueForAPI) {
 // SetSessionManager 设置 Session 管理器（用于 /api/agent/run 的 session 生命周期）
 func (h *Handler) SetSessionManager(m SessionManager) {
 	h.sessionManager = m
+}
+
+// SetADKRunner 设置主 ADK Runner；设置后 /api/agent/run、/api/agent/resume、/api/agent/stream 使用 ADK 执行
+func (h *Handler) SetADKRunner(runner *adk.Runner) {
+	h.adkRunner = runner
 }
 
 // SetAgentRuntime 设置 v1 Agent Manager、Scheduler 与可选 Creator（用于 /api/agents 系列）
@@ -520,11 +530,176 @@ type AgentRunRequest struct {
 	History   []llm.Message `json:"history"`
 }
 
-// AgentRun Agent 入口：找到或创建 session，在 session 上执行 Agent，保存后返回
-func (h *Handler) AgentRun(ctx context.Context, c *app.RequestContext) {
-	if h.agent == nil {
+// sessionToADKMessages 将 session 历史转为 adk.Message 列表（最近 maxRounds 轮；0 表示不限制）
+func sessionToADKMessages(sess *session.Session, maxRounds int) []adk.Message {
+	if sess == nil {
+		return nil
+	}
+	msgs := sess.CopyMessages()
+	if len(msgs) == 0 {
+		return nil
+	}
+	if maxRounds > 0 {
+		rounds := 0
+		for i := len(msgs) - 1; i >= 0 && rounds < maxRounds; i-- {
+			if msgs[i].Role == "user" || msgs[i].Role == "assistant" {
+				rounds++
+			}
+		}
+		start := 0
+		for i, m := range msgs {
+			if m.Role == "user" || m.Role == "assistant" {
+				rounds--
+				if rounds < 0 {
+					start = i
+					break
+				}
+			}
+		}
+		msgs = msgs[start:]
+	}
+	out := make([]adk.Message, 0, len(msgs))
+	for _, m := range msgs {
+		var role schema.RoleType
+		switch m.Role {
+		case "user":
+			role = schema.User
+		case "assistant":
+			role = schema.Assistant
+		case "system":
+			role = schema.System
+		default:
+			role = schema.RoleType(m.Role)
+		}
+		out = append(out, &schema.Message{Role: role, Content: m.Content})
+	}
+	return out
+}
+
+// runADK 使用 ADK Runner 执行一次对话；stream 为 false 时收集最终回复并写 JSON，为 true 时以 SSE 流式写出
+func runADK(ctx context.Context, c *app.RequestContext, runner *adk.Runner, sess *session.Session, query string, sessionManager SessionManager, stream bool) {
+	history := sessionToADKMessages(sess, 20)
+	messages := make([]adk.Message, 0, len(history)+1)
+	messages = append(messages, history...)
+	messages = append(messages, schema.UserMessage(query))
+	iter := runner.Run(ctx, messages)
+	var lastContent string
+	var steps int
+	for {
+		event, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if event.Err != nil {
+			hlog.CtxErrorf(ctx, "ADK Run 事件错误: %v", event.Err)
+			c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+				"error":   "Agent 执行失败",
+				"details": event.Err.Error(),
+			})
+			return
+		}
+		if event.Action != nil && event.Action.Interrupted != nil {
+			// 中断：可返回 checkpoint 等，此处简化为返回已生成内容
+			break
+		}
+		msg, _, err := adk.GetMessage(event)
+		if err == nil && msg != nil && msg.Content != "" {
+			lastContent = msg.Content
+			steps++
+		}
+	}
+	sess.AddMessage("user", query)
+	sess.AddMessage("assistant", lastContent)
+	if sessionManager != nil {
+		_ = sessionManager.Save(ctx, sess)
+	}
+	if stream {
+		c.Header("Content-Type", "text/event-stream")
+		c.SetStatusCode(consts.StatusOK)
+		c.WriteString("data: " + jsonString(map[string]interface{}{"answer": lastContent, "session_id": sess.ID}) + "\n\n")
+		return
+	}
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"status":      "success",
+		"session_id":  sess.ID,
+		"answer":      lastContent,
+		"steps":       steps,
+		"duration_ms": 0,
+	})
+}
+
+// AgentResumeCheckpointRequest POST /api/agent/resume 请求体（ADK checkpoint 恢复）
+type AgentResumeCheckpointRequest struct {
+	CheckPointID string `json:"checkpoint_id" binding:"required"`
+	SessionID    string `json:"session_id"`
+}
+
+// AgentResumeCheckpoint 从 checkpoint 恢复 ADK 执行
+func (h *Handler) AgentResumeCheckpoint(ctx context.Context, c *app.RequestContext) {
+	if h.adkRunner == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{
-			"error": "Agent 未配置",
+			"error": "ADK Runner 未配置，无法 Resume",
+		})
+		return
+	}
+	var req AgentResumeCheckpointRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(consts.StatusBadRequest, map[string]string{
+			"error": "请求参数错误，需要 checkpoint_id",
+		})
+		return
+	}
+	iter, err := h.adkRunner.Resume(ctx, req.CheckPointID)
+	if err != nil {
+		hlog.CtxErrorf(ctx, "ADK Resume 失败: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"error":   "Resume 失败",
+			"details": err.Error(),
+		})
+		return
+	}
+	var lastContent string
+	var steps int
+	for {
+		event, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if event.Err != nil {
+			hlog.CtxErrorf(ctx, "ADK Resume 事件错误: %v", event.Err)
+			c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+				"error":   "Agent 执行失败",
+				"details": event.Err.Error(),
+			})
+			return
+		}
+		msg, _, getErr := adk.GetMessage(event)
+		if getErr == nil && msg != nil && msg.Content != "" {
+			lastContent = msg.Content
+			steps++
+		}
+	}
+	resp := map[string]interface{}{
+		"status":       "success",
+		"checkpoint_id": req.CheckPointID,
+		"answer":       lastContent,
+		"steps":        steps,
+	}
+	if req.SessionID != "" && h.sessionManager != nil {
+		if sess, err := h.sessionManager.GetOrCreate(ctx, req.SessionID); err == nil {
+			sess.AddMessage("assistant", lastContent)
+			_ = h.sessionManager.Save(ctx, sess)
+			resp["session_id"] = sess.ID
+		}
+	}
+	c.JSON(consts.StatusOK, resp)
+}
+
+// AgentStream 流式执行（与 AgentRun 相同请求体，响应为 SSE）
+func (h *Handler) AgentStream(ctx context.Context, c *app.RequestContext) {
+	if h.adkRunner == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{
+			"error": "ADK Runner 未配置",
 		})
 		return
 	}
@@ -547,6 +722,48 @@ func (h *Handler) AgentRun(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
 			"error":   "获取或创建 Session 失败",
 			"details": err.Error(),
+		})
+		return
+	}
+	runADK(ctx, c, h.adkRunner, sess, req.Query, h.sessionManager, true)
+}
+
+func jsonString(v interface{}) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
+// AgentRun Agent 入口：找到或创建 session，在 session 上执行 Agent，保存后返回；优先使用 ADK Runner
+func (h *Handler) AgentRun(ctx context.Context, c *app.RequestContext) {
+	if h.sessionManager == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{
+			"error": "SessionManager 未配置",
+		})
+		return
+	}
+	var req AgentRunRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(consts.StatusBadRequest, map[string]string{
+			"error": "请求参数错误",
+		})
+		return
+	}
+	sess, err := h.sessionManager.GetOrCreate(ctx, req.SessionID)
+	if err != nil {
+		hlog.CtxErrorf(ctx, "Session GetOrCreate 失败: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"error":   "获取或创建 Session 失败",
+			"details": err.Error(),
+		})
+		return
+	}
+	if h.adkRunner != nil {
+		runADK(ctx, c, h.adkRunner, sess, req.Query, h.sessionManager, false)
+		return
+	}
+	if h.agent == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{
+			"error": "Agent 未配置",
 		})
 		return
 	}

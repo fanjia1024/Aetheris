@@ -85,12 +85,16 @@ func (r *Router) Build(addr string, opts ...config.Option) *server.Hertz {
 	agentGroup := api.Group("/agent")
 	{
 		agentGroup.POST("/run", authHandler, r.handler.AgentRun)
+		agentGroup.POST("/resume", authHandler, r.handler.AgentResumeCheckpoint)
+		agentGroup.POST("/stream", authHandler, r.handler.AgentStream)
 	}
 
-	// v1 Agent 中心 API
+	// v1 Agent 中心 API（POST/GET 同时注册 "" 与 "/" 以兼容带/不带尾部斜杠的请求）
 	agents := api.Group("/agents")
 	{
+		agents.POST("", authHandler, r.handler.CreateAgent)
 		agents.POST("/", authHandler, r.handler.CreateAgent)
+		agents.GET("", authHandler, r.handler.ListAgents)
 		agents.GET("/", authHandler, r.handler.ListAgents)
 		agents.POST("/:id/message", authHandler, r.handler.AgentMessage)
 		agents.GET("/:id/state", authHandler, r.handler.AgentState)

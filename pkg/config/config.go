@@ -46,6 +46,13 @@ type JobStoreConfig struct {
 // AgentConfig Agent 与 Job 调度相关配置
 type AgentConfig struct {
 	JobScheduler JobSchedulerConfig `mapstructure:"job_scheduler"`
+	ADK          AgentADKConfig     `mapstructure:"adk"` // Eino ADK 主 Runner（对话 run/resume/stream）
+}
+
+// AgentADKConfig ADK Runner 配置（主对话入口）
+type AgentADKConfig struct {
+	Enabled         *bool  `mapstructure:"enabled"`          // 为 false 时禁用 ADK，使用原 Plan→Execute Agent；未配置时默认 true
+	CheckpointStore string `mapstructure:"checkpoint_store"` // memory | 留空；后续可扩展 postgres/redis
 }
 
 // JobSchedulerConfig Scheduler 并发、重试与 backoff
@@ -153,6 +160,13 @@ type StorageConfig struct {
 	Vector   VectorConfig   `mapstructure:"vector"`
 	Object   ObjectConfig   `mapstructure:"object"`
 	Cache    CacheConfig    `mapstructure:"cache"`
+	Ingest   IngestConfig   `mapstructure:"ingest"`
+}
+
+// IngestConfig 入库管线配置（索引批大小、并发等）
+type IngestConfig struct {
+	BatchSize   int `mapstructure:"batch_size"`
+	Concurrency int `mapstructure:"concurrency"`
 }
 
 // MetadataConfig 元数据存储配置
@@ -162,12 +176,13 @@ type MetadataConfig struct {
 	PoolSize int    `mapstructure:"pool_size"`
 }
 
-// VectorConfig 向量存储配置
+// VectorConfig 向量存储配置（memory 为内置内存；redis/milvus2/es8 等使用 eino-ext 对应组件）
 type VectorConfig struct {
 	Type       string `mapstructure:"type"`
 	Addr       string `mapstructure:"addr"`
-	DB         string `mapstructure:"db"`
-	Collection string `mapstructure:"collection"`
+	DB         string `mapstructure:"db"`         // memory 忽略；Redis 为 DB 编号，如 "0"
+	Collection string `mapstructure:"collection"` // 默认索引/集合名，ingest 与 query 共用
+	Password   string `mapstructure:"password"`   // Redis 等后端密码，可选
 }
 
 // ObjectConfig 对象存储配置

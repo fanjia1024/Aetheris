@@ -52,11 +52,15 @@ func NewBootstrap(cfg *config.Config) (*Bootstrap, error) {
 		}
 	}
 
+	// type=memory 或空时创建 vector.Store；type=redis 等由 einoext 工厂创建，不创建 Store
 	var vecStore vector.Store
 	if cfg != nil {
-		vecStore, err = vector.NewStore(cfg.Storage.Vector)
-		if err != nil {
-			return nil, fmt.Errorf("初始化向量存储失败: %w", err)
+		t := cfg.Storage.Vector.Type
+		if t == "" || t == "memory" {
+			vecStore, err = vector.NewStore(cfg.Storage.Vector)
+			if err != nil {
+				return nil, fmt.Errorf("初始化向量存储失败: %w", err)
+			}
 		}
 	}
 

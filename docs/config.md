@@ -44,6 +44,21 @@ Only when `jobstore.type=memory`; with `postgres` the API does not start the Sch
 | retry_max | Max retries after failure (excluding first attempt) |
 | backoff | Wait before retry |
 
+### agent.adk (Eino ADK 主 Runner)
+
+当 **agent.adk.enabled** 未配置或为 true 时，对话入口 **POST /api/agent/run**、**POST /api/agent/resume**、**POST /api/agent/stream** 使用 Eino ADK Runner 执行（ChatModelAgent + 检索/生成/文档等工具）。设为 **false** 时改用原 Plan→Execute Agent。
+
+| Field | Description |
+|-------|-------------|
+| enabled | Optional. When `false`, disable ADK and use legacy agent for /api/agent/run. Unset or true → use ADK. |
+| checkpoint_store | `memory` (default) for in-process checkpoint; reserved for future postgres/redis. |
+
+**Resume**：请求体 `{"checkpoint_id":"..."}`，用于从 ADK 中断点恢复。**Stream**：与 run 相同请求体，响应为 SSE（`text/event-stream`）。详见 [docs/adk.md](adk.md).
+
+### storage (API)
+
+When present, the API uses it for ingest_pipeline and query_pipeline. Same structure as worker storage: **storage.vector** (type, collection, addr, db) and **storage.ingest** (batch_size, concurrency). See [worker.yaml — storage](#storage) for field descriptions. If api.yaml does not define storage, merged config may fall back to zero values (type `""` → treated as memory; collection `""` → `"default"`).
+
 ### service
 
 Service discovery: agent_service, index_service addr and timeout.
@@ -103,7 +118,18 @@ Must match the API jobstore (type and dsn). When sharing Postgres with the API, 
 
 ### storage
 
-Metadata, vector, object, cache currently support `memory`; mysql, milvus, s3, redis require future implementations. metadata can have dsn, pool_size.
+- **metadata**: type, dsn, pool_size. Currently only `memory` is fully supported; MySQL etc. require future implementations.
+- **vector**: Vector store used by ingest (index) and query (retrieve). Implemented via [internal/einoext](../internal/einoext) factory (memory uses [internal/storage/vector](../internal/storage/vector); redis uses eino-ext components).
+  - **type**: `memory` (default) or `redis`. With `memory`, a process-local in-memory store is used. With `redis`, Indexer and Retriever are created from eino-ext Redis components; **Redis Stack** is required (vector search via FT.SEARCH), and the index must be created separately (see eino-ext docs).
+  - **addr**: For `redis`, Redis server address (e.g. `localhost:6379`). Ignored for `memory`.
+  - **db**: For `redis`, Redis logical DB number as string (e.g. `"0"`). Ignored for `memory`.
+  - **collection**: Default index/collection name. Ingest writes to this name; query retrieves from it. Empty means `"default"`. For `redis`, this is used as the index name / key prefix. API and Worker should use the same value when sharing a vector store.
+  - **password**: Optional. For `redis`, Redis AUTH password. Omit or leave empty if not used.
+- **ingest**: Optional tuning for the ingest pipeline (API and Worker).
+  - **batch_size**: Vectors per batch when writing to the vector store (default 100).
+  - **concurrency**: Concurrency for embedding and indexing (default 4).
+
+Document metadata written by the indexer includes `vector_store` (the configured type) and `collection` (the index name used).
 
 ### splitter
 

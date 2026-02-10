@@ -47,6 +47,7 @@ Recommended **Go 1.25.7+**, aligned with go.mod and CI.
 - [CLI (cli.md)](cli.md) — corag subcommands, install and run, REST API mapping
 - [E2E testing (test-e2e.md)](test-e2e.md) — Upload → parse → split → index → retrieve (PDF / AGENTS.md)
 - [Tracing (tracing.md)](tracing.md) — OpenTelemetry config, OTEL_EXPORTER_OTLP_ENDPOINT, local Jaeger
+- [Eino Dev (devops.md)](devops.md) — Eino Dev IDE 插件、可视化编排与调试、cmd/devops 使用说明
 
 ## Examples and deployment
 

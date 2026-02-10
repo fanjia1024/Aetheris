@@ -52,8 +52,9 @@ func NewIngestWorkflowExecutor(loader *ingest.DocumentLoader, parser *ingest.Doc
 // Execute 实现 WorkflowExecutor
 // 请求 context 已带 HTTP 层 span，可在此处用 otel trace.SpanFromContext(ctx) 为 loader/parser/splitter/embedding/indexer 创建子 span 以细化链路。
 func (e *ingestWorkflowExecutor) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	ingestID := fmt.Sprintf("ingest-%d", time.Now().UnixNano())
 	if e.logger != nil {
-		e.logger.Info("执行 ingest_pipeline")
+		e.logger.Info("ingest_pipeline 开始", "ingest_id", ingestID)
 	}
 
 	var loaderInput interface{}
@@ -65,7 +66,7 @@ func (e *ingestWorkflowExecutor) Execute(ctx context.Context, params map[string]
 		return nil, fmt.Errorf("ingest_pipeline 需要 params[\"file\"] (*multipart.FileHeader) 或 params[\"content\"] ([]byte)")
 	}
 
-	pipeCtx := common.NewPipelineContext(ctx, fmt.Sprintf("ingest-%d", time.Now().UnixNano()))
+	pipeCtx := common.NewPipelineContext(ctx, ingestID)
 	if e.loader == nil {
 		e.loader = ingest.NewDocumentLoader()
 	}
@@ -77,59 +78,112 @@ func (e *ingestWorkflowExecutor) Execute(ctx context.Context, params map[string]
 	}
 
 	// loader
+	if e.logger != nil {
+		e.logger.Info("ingest 阶段开始", "ingest_id", ingestID, "ingest_step", "loader")
+	}
+	loaderStart := time.Now()
 	out, err := e.loader.Execute(pipeCtx, loaderInput)
 	if err != nil {
+		if e.logger != nil {
+			e.logger.Error("ingest 阶段失败", "ingest_id", ingestID, "ingest_step", "loader", "error", err)
+		}
 		return nil, fmt.Errorf("ingest loader: %w", err)
 	}
 	doc, ok := out.(*common.Document)
 	if !ok {
 		return nil, fmt.Errorf("ingest loader 未返回 *common.Document")
 	}
+	if e.logger != nil {
+		e.logger.Info("ingest 阶段完成", "ingest_id", ingestID, "ingest_step", "loader", "doc_id", doc.ID, "chunks", len(doc.Chunks), "duration_ms", time.Since(loaderStart).Milliseconds())
+	}
 
 	// parser
+	if e.logger != nil {
+		e.logger.Info("ingest 阶段开始", "ingest_id", ingestID, "ingest_step", "parser")
+	}
+	parserStart := time.Now()
 	out, err = e.parser.Execute(pipeCtx, doc)
 	if err != nil {
+		if e.logger != nil {
+			e.logger.Error("ingest 阶段失败", "ingest_id", ingestID, "ingest_step", "parser", "doc_id", doc.ID, "error", err)
+		}
 		return nil, fmt.Errorf("ingest parser: %w", err)
 	}
 	doc, ok = out.(*common.Document)
 	if !ok {
 		return nil, fmt.Errorf("ingest parser 未返回 *common.Document")
 	}
+	if e.logger != nil {
+		e.logger.Info("ingest 阶段完成", "ingest_id", ingestID, "ingest_step", "parser", "doc_id", doc.ID, "chunks", len(doc.Chunks), "duration_ms", time.Since(parserStart).Milliseconds())
+	}
 
 	// splitter
+	if e.logger != nil {
+		e.logger.Info("ingest 阶段开始", "ingest_id", ingestID, "ingest_step", "splitter")
+	}
+	splitterStart := time.Now()
 	out, err = e.splitter.Execute(pipeCtx, doc)
 	if err != nil {
+		if e.logger != nil {
+			e.logger.Error("ingest 阶段失败", "ingest_id", ingestID, "ingest_step", "splitter", "doc_id", doc.ID, "error", err)
+		}
 		return nil, fmt.Errorf("ingest splitter: %w", err)
 	}
 	doc, ok = out.(*common.Document)
 	if !ok {
 		return nil, fmt.Errorf("ingest splitter 未返回 *common.Document")
 	}
+	if e.logger != nil {
+		e.logger.Info("ingest 阶段完成", "ingest_id", ingestID, "ingest_step", "splitter", "doc_id", doc.ID, "chunks", len(doc.Chunks), "duration_ms", time.Since(splitterStart).Milliseconds())
+	}
 
 	// embedding（可选）
 	if e.embedding != nil {
+		if e.logger != nil {
+			e.logger.Info("ingest 阶段开始", "ingest_id", ingestID, "ingest_step", "embedding")
+		}
+		embedStart := time.Now()
 		out, err = e.embedding.Execute(pipeCtx, doc)
 		if err != nil {
+			if e.logger != nil {
+				e.logger.Error("ingest 阶段失败", "ingest_id", ingestID, "ingest_step", "embedding", "doc_id", doc.ID, "error", err)
+			}
 			return nil, fmt.Errorf("ingest embedding: %w", err)
 		}
 		doc, ok = out.(*common.Document)
 		if !ok {
 			return nil, fmt.Errorf("ingest embedding 未返回 *common.Document")
 		}
+		if e.logger != nil {
+			e.logger.Info("ingest 阶段完成", "ingest_id", ingestID, "ingest_step", "embedding", "doc_id", doc.ID, "chunks", len(doc.Chunks), "duration_ms", time.Since(embedStart).Milliseconds())
+		}
 	}
 
 	// indexer（可选）
 	if e.indexer != nil {
+		if e.logger != nil {
+			e.logger.Info("ingest 阶段开始", "ingest_id", ingestID, "ingest_step", "indexer")
+		}
+		indexerStart := time.Now()
 		out, err = e.indexer.Execute(pipeCtx, doc)
 		if err != nil {
+			if e.logger != nil {
+				e.logger.Error("ingest 阶段失败", "ingest_id", ingestID, "ingest_step", "indexer", "doc_id", doc.ID, "error", err)
+			}
 			return nil, fmt.Errorf("ingest indexer: %w", err)
 		}
 		doc, ok = out.(*common.Document)
 		if !ok {
 			return nil, fmt.Errorf("ingest indexer 未返回 *common.Document")
 		}
+		if e.logger != nil {
+			e.logger.Info("ingest 阶段完成", "ingest_id", ingestID, "ingest_step", "indexer", "doc_id", doc.ID, "chunks", len(doc.Chunks), "duration_ms", time.Since(indexerStart).Milliseconds())
+		}
 	}
 
+	if e.logger != nil {
+		e.logger.Info("ingest_pipeline 完成", "ingest_id", ingestID, "doc_id", doc.ID, "chunks", len(doc.Chunks))
+	}
 	return map[string]interface{}{
 		"status":   "success",
 		"doc_id":   doc.ID,
@@ -138,16 +192,22 @@ func (e *ingestWorkflowExecutor) Execute(ctx context.Context, params map[string]
 	}, nil
 }
 
+// QueryRetrieverForWorkflow 供 query 工作流使用的检索器（*query.Retriever 或 Eino Retriever 适配器均实现此接口）
+type QueryRetrieverForWorkflow interface {
+	SetTopK(topK int)
+	Execute(ctx *common.PipelineContext, input interface{}) (interface{}, error)
+}
+
 // queryWorkflowExecutor 执行 query 工作流（可注入 retriever + generator + queryEmbedder）
 type queryWorkflowExecutor struct {
-	retriever     *query.Retriever
+	retriever     QueryRetrieverForWorkflow
 	generator     *query.Generator
 	queryEmbedder *embedding.Embedder
 	logger        *log.Logger
 }
 
 // NewQueryWorkflowExecutor 创建可执行的 query 工作流（由 app 装配后注册到 Engine）
-func NewQueryWorkflowExecutor(retriever *query.Retriever, generator *query.Generator, queryEmbedder *embedding.Embedder, logger *log.Logger) WorkflowExecutor {
+func NewQueryWorkflowExecutor(retriever QueryRetrieverForWorkflow, generator *query.Generator, queryEmbedder *embedding.Embedder, logger *log.Logger) WorkflowExecutor {
 	return &queryWorkflowExecutor{
 		retriever:     retriever,
 		generator:     generator,

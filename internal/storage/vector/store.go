@@ -20,12 +20,14 @@ import (
 	"rag-platform/pkg/config"
 )
 
-// NewStore 根据配置创建向量存储（当前仅支持 memory）
+// NewStore 根据配置创建向量存储。type 为空或 "memory" 时返回内存实现；
+// 其他类型（如 pgvector、milvus）需在此处扩展 case 并实现对应 Store。
+// cfg.Addr/cfg.DB/cfg.Collection 供扩展后端连接与默认集合名使用。
 func NewStore(cfg config.VectorConfig) (Store, error) {
 	switch cfg.Type {
 	case "", "memory":
 		return NewMemoryStore(), nil
 	default:
-		return nil, fmt.Errorf("不支持的向量存储类型: %s", cfg.Type)
+		return nil, fmt.Errorf("不支持的向量存储类型: %s（当前支持: memory）", cfg.Type)
 	}
 }

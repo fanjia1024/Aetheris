@@ -38,6 +38,40 @@ agent:
     max_concurrency: 2   # 最大并发执行 Job 数
     retry_max: 2       # 失败后最大重试次数（不含首次）
     backoff: "1s"      # 重试前等待时间
+  # Eino ADK 主 Runner：未配置或 enabled 不为 false 时，POST /api/agent/run、/api/agent/resume、/api/agent/stream 使用 ADK 执行
+  adk:
+    # enabled: true     # 设为 false 时禁用 ADK，改用原 Plan→Execute Agent
+    checkpoint_store: "memory"   # 内存；后续可扩展 postgres/redis
+
+# 存储配置（与 worker 对齐；API 单机时也用于 ingest/query 的向量与元数据）
+storage:
+  metadata:
+    type: "memory"
+    dsn: ""
+    pool_size: 0
+  # 向量库：type=memory 为内置内存；type=redis 使用 eino-ext Redis Indexer/Retriever（需 Redis Stack，并预先创建向量索引）
+  # collection 为默认索引/集合名，ingest 与 query 共用
+  vector:
+    type: "memory"
+    addr: ""
+    db: ""
+    collection: "default"
+    password: ""   # Redis 时可选
+  # Redis 示例（需 Redis Stack 并预先创建向量索引）：
+  # vector:
+  #   type: "redis"
+  #   addr: "localhost:6379"
+  #   db: "0"
+  #   collection: "default"
+  #   password: ""
+  object:
+    type: "memory"
+  cache:
+    type: "memory"
+  # 入库管线可选：batch_size/concurrency 未配置时使用默认 100/4
+  ingest:
+    batch_size: 100
+    concurrency: 4
 
 # 服务发现
 service:

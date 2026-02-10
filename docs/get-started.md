@@ -222,7 +222,24 @@ curl -s http://localhost:8080/api/jobs/<job_id>/replay
 
 ---
 
-## 8. 控制：取消 Job、Resume
+## 8. RAG 检索智能体场景
+
+在「文档与知识库」上传文档后，通过 v1 Agent 发送与文档相关的问题，由 Planner 生成含 `knowledge.search`（知识库检索）的 TaskGraph，再经 LLM 节点汇总回答，即 RAG 检索智能体流程。
+
+**建议步骤**：
+
+1. 先完成 [5. 文档与知识库](#5-文档与知识库rag) 中的上传与列表。
+2. 创建 Agent（同 [6. v1 Agent 端到端](#6-v1-agent-端到端核心)）。
+3. 发送与文档内容相关的问题，例如：「总结这份文档的要点」「文档里对 Agent 的规范有哪些」。
+4. 轮询 Job 至 `completed` 后，打开 `GET /api/jobs/<job_id>/trace` 或 `/trace/page`，确认执行图中出现 **knowledge.search** 节点（或 events 中含 `tool_called` / `tool_name` 为 knowledge.search）；回答内容应与已上传文档相关。
+
+与直接调用「已弃用」的 `POST /api/query` 相比：RAG 智能体走 Agent 规划与 DAG 执行，可多步（先检索再总结）、可观测（Trace 中可见检索与生成节点），适合复杂问答与验收测试。一键脚本见 [scripts/test-e2e-rag-agent.sh](../scripts/test-e2e-rag-agent.sh)，文档见 [test-e2e.md](test-e2e.md) 第 7 节。
+
+**多步/多工具场景**：若问题需要「先检索再总结」，Planner 会生成多节点 TaskGraph（如 n1: knowledge.search → n2: llm）。在 Trace 页面或 `GET /api/jobs/:id/trace` 的 `execution_tree` / `nodes` 中可验证节点顺序与类型（tool vs llm）。
+
+---
+
+## 9. 控制：取消 Job、Resume
 
 ### 取消运行中的 Job
 
@@ -244,7 +261,7 @@ curl -s -X POST http://localhost:8080/api/agents/<agent_id>/resume \
 
 ---
 
-## 9. 可选：单次 / 批量 Query（已弃用）
+## 10. 可选：单次 / 批量 Query（已弃用）
 
 推荐使用 Agent 发消息代替；以下仅用于快速验证 RAG 管线。
 
@@ -266,7 +283,7 @@ curl -X POST http://localhost:8080/api/query/batch \
 
 ---
 
-## 10. 一键脚本
+## 11. 一键脚本
 
 ### 快速 E2E（无需 Postgres）
 
@@ -291,7 +308,7 @@ curl -X POST http://localhost:8080/api/query/batch \
 
 ---
 
-## 11. CLI 速查
+## 12. CLI 速查
 
 CLI 用于调试与管理：创建 Agent、发消息、查 Job、Trace、Replay、取消。详见 [CLI (cli.md)](cli.md)。
 
@@ -309,7 +326,7 @@ CLI 用于调试与管理：创建 Agent、发消息、查 Job、Trace、Replay�
 
 ---
 
-## 12. 故障排查
+## 13. 故障排查
 
 - **Job 一直 pending**：若 `jobstore.type=postgres`，必须至少启动一个 Worker，否则没有进程从 Postgres Claim 执行；检查 Worker 是否在运行、DSN 是否正确。
 - **API 启动报错连不上 Postgres**：先起 Postgres 并执行 schema，或将 [configs/api.yaml](../configs/api.yaml) 中 `jobstore.type` 改为 `memory` 做快速体验。

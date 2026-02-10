@@ -112,6 +112,34 @@ Recommended flow: create an agent, send a message, poll job status, optionally v
 
 Full API and flows: [usage.md](usage.md); CLI: [cli.md](cli.md).
 
+## 7. RAG 检索智能体 E2E
+
+验证「上传文档 → 通过 Agent 提问 → 执行路径含知识库检索」的完整流程。适用于 RAG 检索智能体场景的回归测试。
+
+**流程**：健康检查 → 上传文档（如 AGENTS.md）→ 创建 Agent → 发送与文档内容相关的问题 → 轮询 Job 至 completed → 校验 Trace/Events 中出现 `knowledge.search` 或工具调用事件。
+
+**推荐问题示例**（针对已上传文档）：
+
+- 「总结这份文档的要点」
+- 「文档里对 Agent 的规范有哪些」
+- 「根据文档简要回答：项目使用什么技术栈？」
+
+**预期**：Job 状态变为 `completed`；`GET /api/jobs/<job_id>/trace` 或 `GET /api/jobs/<job_id>/events` 的响应中含 `knowledge.search` 或 `tool_called`（表示 Planner 选择了检索工具）；回答内容应与文档相关。
+
+**前提**：API 已启动；若 `jobstore.type=postgres` 需至少 1 个 Worker。LLM 与 Embedding 已配置（见 [usage.md](usage.md)）。
+
+### RAG E2E 脚本
+
+[scripts/test-e2e-rag-agent.sh](../scripts/test-e2e-rag-agent.sh) 自动化上述步骤并输出 PASS/FAIL：
+
+```bash
+./scripts/test-e2e-rag-agent.sh ./AGENTS.md "总结这份文档的要点"
+# 或指定其他文件与问题
+./scripts/test-e2e-rag-agent.sh /path/to/your.pdf "你的问题"
+```
+
+环境变量：`BASE_URL`（默认 `http://localhost:8080`）、`RAG_POLL_MAX`（轮询次数，默认 90）、`RAG_POLL_INTERVAL`（轮询间隔秒数，默认 2）。
+
 ## Optional: E2E script
 
 The script `scripts/test-e2e.sh` runs health check → upload → list → query when the API is already running. Example:

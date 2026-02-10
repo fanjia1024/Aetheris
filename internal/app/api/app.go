@@ -45,6 +45,7 @@ import (
 	"rag-platform/internal/api/http"
 	"rag-platform/internal/api/http/middleware"
 	"rag-platform/internal/app"
+	"rag-platform/internal/einoext"
 	"rag-platform/internal/ingestqueue"
 	"rag-platform/internal/model/llm"
 	"rag-platform/internal/pipeline/ingest"
@@ -113,52 +114,115 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	var llmClientForAgent llm.Client
 	var generatorForAgent eino.Generator
 
-	// 装配并注册 query_pipeline（Retriever + Generator + queryEmbedder）
-	if bootstrap.Config != nil && bootstrap.VectorStore != nil {
+	// 默认向量集合名（与 storage.vector.collection 一致，空则 "default"）
+	defaultCollection := "default"
+	if bootstrap.Config != nil && bootstrap.Config.Storage.Vector.Collection != "" {
+		defaultCollection = bootstrap.Config.Storage.Vector.Collection
+	}
+
+	// 装配并注册 query_pipeline（Retriever + Generator + queryEmbedder）；memory 或 redis 等由 einoext 工厂创建
+	vecCfg := bootstrap.Config.Storage.Vector
+	queryPipelineEnabled := bootstrap.Config != nil && (bootstrap.VectorStore != nil || (vecCfg.Type != "" && vecCfg.Type != "memory"))
+	if queryPipelineEnabled {
 		llmClient, errLLM := app.NewLLMClientFromConfig(bootstrap.Config)
 		queryEmbedder, errEmb := app.NewQueryEmbedderFromConfig(bootstrap.Config)
 		if errLLM == nil && errEmb == nil && llmClient != nil && queryEmbedder != nil {
-			retriever := query.NewRetriever(bootstrap.VectorStore, "default", 10, 0.3)
 			generator := query.NewGenerator(llmClient, 4096, 0.1)
-			qwf := eino.NewQueryWorkflowExecutor(retriever, generator, queryEmbedder, bootstrap.Logger)
-			if err := engine.RegisterWorkflow("query_pipeline", qwf); err != nil {
-				bootstrap.Logger.Info("注册 query_pipeline 失败，将使用占位实现", "error", err)
+			einoEmbedder := NewEinoEmbedderAdapter(queryEmbedder)
+			einoRetriever, errRet := einoext.NewRetriever(context.Background(), vecCfg, bootstrap.VectorStore, einoEmbedder)
+			if errRet != nil {
+				bootstrap.Logger.Info("einoext NewRetriever 失败，回退 memory", "error", errRet)
+				if bootstrap.VectorStore != nil {
+					einoRetriever, errRet = query.NewMemoryRetriever(&query.MemoryRetrieverConfig{
+						VectorStore: bootstrap.VectorStore, DefaultIndex: defaultCollection, DefaultTopK: 10, DefaultThreshold: 0.3,
+					})
+					if errRet == nil {
+						retrieverForWorkflow := query.NewRetriever(bootstrap.VectorStore, defaultCollection, 10, 0.3)
+						qwf := eino.NewQueryWorkflowExecutor(retrieverForWorkflow, generator, queryEmbedder, bootstrap.Logger)
+						_ = engine.RegisterWorkflow("query_pipeline", qwf)
+						retrieverAdapter := NewRetrieverAdapter(queryEmbedder, einoRetriever, 0.3)
+						ragGen := NewRAGGeneratorAdapter(retrieverAdapter, generator, queryEmbedder, defaultCollection)
+						engine.SetQueryComponents(retrieverAdapter, ragGen)
+						generatorForAgent = ragGen
+					}
+				}
+			} else {
+				retrieverForWorkflow := &EinoRetrieverQueryAdapter{EinoRetriever: einoRetriever, Embedder: queryEmbedder, TopK: 10}
+				qwf := eino.NewQueryWorkflowExecutor(retrieverForWorkflow, generator, queryEmbedder, bootstrap.Logger)
+				if err := engine.RegisterWorkflow("query_pipeline", qwf); err != nil {
+					bootstrap.Logger.Info("注册 query_pipeline 失败，将使用占位实现", "error", err)
+				}
+				retrieverAdapter := NewRetrieverAdapter(queryEmbedder, einoRetriever, 0.3)
+				ragGen := NewRAGGeneratorAdapter(retrieverAdapter, generator, queryEmbedder, defaultCollection)
+				engine.SetQueryComponents(retrieverAdapter, ragGen)
+				generatorForAgent = ragGen
 			}
-			// 注入 eino 工具链用组件（qa_agent 检索/生成工具对接真实实现）
-			retrieverAdapter := NewRetrieverAdapter(queryEmbedder, bootstrap.VectorStore, 0.3)
-			ragGen := NewRAGGeneratorAdapter(retrieverAdapter, generator, queryEmbedder)
-			engine.SetQueryComponents(retrieverAdapter, ragGen)
 			llmClientForAgent = llmClient
-			generatorForAgent = ragGen
 		}
 	}
 
-	// 装配并注册 ingest_pipeline（loader → parser → splitter → embedding → indexer）
-	if bootstrap.Config != nil && bootstrap.VectorStore != nil && bootstrap.MetadataStore != nil {
+	// 装配并注册 ingest_pipeline（loader → parser → splitter → embedding → indexer）；Indexer 由 einoext 工厂创建
+	ingestPipelineEnabled := bootstrap.Config != nil && bootstrap.MetadataStore != nil && (bootstrap.VectorStore != nil || (vecCfg.Type != "" && vecCfg.Type != "memory"))
+	if ingestPipelineEnabled {
 		ingestEmbedder, errEmb := app.NewQueryEmbedderFromConfig(bootstrap.Config)
 		if errEmb == nil && ingestEmbedder != nil {
-			docEmbedding := ingest.NewDocumentEmbedding(ingestEmbedder, 4)
-			docIndexer := ingest.NewDocumentIndexer(bootstrap.VectorStore, bootstrap.MetadataStore, 4, 100)
-			if err := vector.EnsureIndex(context.Background(), bootstrap.VectorStore, "default", ingestEmbedder.Dimension(), "cosine"); err != nil {
-				bootstrap.Logger.Info("创建 default 向量索引失败（首次写入时可能再创建）", "error", err)
+			ingestConcurrency := 4
+			ingestBatchSize := 100
+			if bootstrap.Config.Storage.Ingest.Concurrency > 0 {
+				ingestConcurrency = bootstrap.Config.Storage.Ingest.Concurrency
 			}
-			loader := ingest.NewDocumentLoader()
-			parser := ingest.NewDocumentParser()
-			docSplitter := ingest.NewDocumentSplitter(1000, 100, 1000)
-			splitterEngine := splitter.NewEngine(ingestEmbedder)
-			docSplitter.SetEngine(splitterEngine, "structural")
-			iwf := eino.NewIngestWorkflowExecutor(loader, parser, docSplitter, docEmbedding, docIndexer, bootstrap.Logger)
-			if err := engine.RegisterWorkflow("ingest_pipeline", iwf); err != nil {
-				bootstrap.Logger.Info("注册 ingest_pipeline 失败，将使用占位实现", "error", err)
+			if bootstrap.Config.Storage.Ingest.BatchSize > 0 {
+				ingestBatchSize = bootstrap.Config.Storage.Ingest.BatchSize
 			}
-			// 注入 eino 工具链用组件（ingest_agent 文档工具对接真实实现）
-			engine.SetIngestComponents(
-				NewLoaderAdapter(loader),
-				NewParserAdapter(parser),
-				NewSplitterAdapter(docSplitter),
-				NewEmbeddingAdapter(docEmbedding),
-				NewIndexerAdapter(docIndexer),
-			)
+			vectorStoreType := vecCfg.Type
+			if vectorStoreType == "" {
+				vectorStoreType = "memory"
+			}
+			docEmbedding := ingest.NewDocumentEmbedding(ingestEmbedder, ingestConcurrency)
+			einoEmbedder := NewEinoEmbedderAdapter(ingestEmbedder)
+			einoIndexer, errIdx := einoext.NewIndexer(context.Background(), vecCfg, bootstrap.VectorStore, einoEmbedder)
+			var docIndexer *ingest.DocumentIndexer
+			if errIdx != nil {
+				bootstrap.Logger.Info("einoext NewIndexer 失败，回退 memory", "error", errIdx)
+				if bootstrap.VectorStore != nil {
+					if memoryIndexer, errM := ingest.NewMemoryIndexer(&ingest.MemoryIndexerConfig{
+						VectorStore: bootstrap.VectorStore, DefaultCollection: defaultCollection, BatchSize: ingestBatchSize,
+					}); errM == nil {
+						docIndexer = ingest.NewDocumentIndexerFromEino(memoryIndexer, bootstrap.MetadataStore, defaultCollection, vectorStoreType)
+					} else {
+						docIndexer = ingest.NewDocumentIndexer(bootstrap.VectorStore, bootstrap.MetadataStore, ingestConcurrency, ingestBatchSize, defaultCollection, vectorStoreType)
+					}
+				}
+			} else {
+				docIndexer = ingest.NewDocumentIndexerFromEino(einoIndexer, bootstrap.MetadataStore, defaultCollection, vectorStoreType)
+			}
+			if docIndexer != nil {
+				if bootstrap.VectorStore != nil {
+					if err := vector.EnsureIndex(context.Background(), bootstrap.VectorStore, defaultCollection, ingestEmbedder.Dimension(), "cosine"); err != nil {
+						bootstrap.Logger.Info("创建向量索引失败（首次写入时可能再创建）", "collection", defaultCollection, "error", err)
+					}
+				}
+				loader := ingest.NewDocumentLoader()
+				parser := ingest.NewDocumentParser()
+				docSplitter := ingest.NewDocumentSplitter(1000, 100, 1000)
+				splitterEngine := splitter.NewEngine(ingestEmbedder)
+				docSplitter.SetEngine(splitterEngine, "structural")
+				iwf := eino.NewIngestWorkflowExecutor(loader, parser, docSplitter, docEmbedding, docIndexer, bootstrap.Logger)
+				if err := engine.RegisterWorkflow("ingest_pipeline", iwf); err != nil {
+					bootstrap.Logger.Info("注册 ingest_pipeline 失败，将使用占位实现", "error", err)
+				}
+				engine.SetIngestComponents(
+					NewLoaderAdapter(loader),
+					NewParserAdapter(parser),
+					NewSplitterAdapter(docSplitter),
+					NewEmbeddingAdapter(docEmbedding),
+					NewIndexerAdapter(docIndexer),
+				)
+				engine.SetEinoDocumentComponents(
+					ingest.NewURIDocumentLoader(loader),
+					ingest.NewSplitterTransformer(parser, docSplitter),
+				)
+			}
 		}
 	}
 
@@ -174,6 +238,22 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	handler := http.NewHandler(engine, docService)
 	handler.SetAgent(agentRunner)
 	handler.SetSessionManager(sessionManager)
+	// 主 ADK Runner：当启用时 /api/agent/run、resume、stream 使用 ADK 执行
+	if engine != nil {
+		adkEnabled := true
+		if bootstrap.Config != nil && bootstrap.Config.Agent.ADK.Enabled != nil {
+			adkEnabled = *bootstrap.Config.Agent.ADK.Enabled
+		}
+		if adkEnabled {
+			cps := NewMemoryCheckPointStore()
+			adkRunner, errADK := NewMainADKRunner(context.Background(), engine, cps)
+			if errADK == nil && adkRunner != nil {
+				handler.SetADKRunner(adkRunner)
+			} else if errADK != nil {
+				bootstrap.Logger.Info("创建主 ADK Runner 失败，将使用原 Agent", "error", errADK)
+			}
+		}
+	}
 
 	// v1 Agent Runtime：Manager + Scheduler + Creator（POST /api/agents 等）
 	agentRuntimeManager := runtime.NewManager()
@@ -183,7 +263,11 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		v1Planner = planner.NewRulePlanner()
 		bootstrap.Logger.Info("v1 Agent 使用规则规划器（RulePlanner）")
 	} else {
-		v1Planner = planner.NewLLMPlanner(llmClientForAgent)
+		llmPlanner := planner.NewLLMPlanner(llmClientForAgent)
+		if schema, err := toolsReg.SchemasForLLM(); err == nil && len(schema) > 0 {
+			llmPlanner.SetToolsSchemaForGoal(schema)
+		}
+		v1Planner = llmPlanner
 	}
 	var dagCompiler *agentexec.Compiler
 	var dagRunner *agentexec.Runner

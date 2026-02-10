@@ -25,6 +25,8 @@ import (
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/components/document"
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 )
@@ -46,6 +48,10 @@ type Engine struct {
 	DocumentSplitter  DocumentSplitter
 	DocumentEmbedding DocumentEmbedding
 	DocumentIndexer   DocumentIndexer
+
+	// EinoDocLoader / EinoDocTransformer 为 Eino 编排用（Load Source.URI → []*schema.Document；Transform 解析+切片）
+	EinoDocLoader      document.Loader
+	EinoDocTransformer document.Transformer
 }
 
 // NewEngine 创建新的 eino 引擎实例
@@ -90,6 +96,14 @@ func (e *Engine) SetIngestComponents(loader DocumentLoader, parser DocumentParse
 	e.DocumentSplitter = splitter
 	e.DocumentEmbedding = embedding
 	e.DocumentIndexer = indexer
+}
+
+// SetEinoDocumentComponents 设置 Eino Document Loader / Transformer，供 Eino 链式编排（compose.AppendLoader / AppendDocumentTransformer）使用
+func (e *Engine) SetEinoDocumentComponents(loader document.Loader, transformer document.Transformer) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.EinoDocLoader = loader
+	e.EinoDocTransformer = transformer
 }
 
 // ensureRunner 懒创建并注册 Runner
@@ -213,6 +227,15 @@ func parseDefaultKey(key string) (provider, modelKey string, err error) {
 		return "", "", fmt.Errorf("default key 格式应为 provider.model_key，如 openai.gpt_35_turbo，当前: %q", key)
 	}
 	return parts[0], parts[1], nil
+}
+
+// CreateChatModel 根据配置创建 ChatModel（供 app 层构建主 ADK Agent 等复用）
+func (e *Engine) CreateChatModel(ctx context.Context) (model.ToolCallingChatModel, error) {
+	cm, err := e.createChatModel(ctx)
+	if err != nil || cm == nil {
+		return nil, err
+	}
+	return cm, nil
 }
 
 // GetRunner 获取 Runner 实例（qa_agent / ingest_agent 懒创建）

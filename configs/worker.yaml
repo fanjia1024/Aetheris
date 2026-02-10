@@ -20,13 +20,21 @@ storage:
     type: "memory"
     dsn: ""
     pool_size: 0
-  # 当前仅支持 memory；milvus/s3/redis 等需后续实现
+  # 向量库：type=memory 为内存；collection 为默认索引/集合名（ingest 写入与 query 检索共用）
+  # 其他 type（如 pgvector/milvus）需实现对应 Store 后在 store.go 中扩展
   vector:
     type: "memory"
+    addr: ""
+    db: ""
+    collection: "default"
   object:
     type: "memory"
   cache:
     type: "memory"
+  # 入库管线：batch_size（每批写入向量数）、concurrency（embedding/索引并发）
+  ingest:
+    batch_size: 100
+    concurrency: 4
 
 # 模型配置（LLM/Embedding/Vision）由 configs/model.yaml 合并提供，Worker 使用 LoadWorkerConfigWithModel 加载
 

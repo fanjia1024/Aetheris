@@ -16,12 +16,16 @@ package api
 
 import (
 	"context"
+	"fmt"
+	"strconv"
+	"time"
+
+	einoretriever "github.com/cloudwego/eino/components/retriever"
 
 	"rag-platform/internal/pipeline/common"
 	"rag-platform/internal/pipeline/ingest"
 	"rag-platform/internal/pipeline/query"
 	"rag-platform/internal/runtime/eino"
-	"rag-platform/internal/storage/vector"
 )
 
 // Embedder 用于查询向量化的接口（与 model/embedding.Embedder 一致）
@@ -29,58 +33,163 @@ type Embedder interface {
 	Embed(ctx context.Context, texts []string) ([][]float64, error)
 }
 
-// retrieverAdapter 将 query.Retriever + Embedder 适配为 eino.Retriever
+// retrieverAdapter 将 Eino retriever.Retriever 适配为 eino.Retriever（供 agent 使用）
 type retrieverAdapter struct {
-	embedder    Embedder
-	vectorStore vector.Store
-	scoreThresh float64
+	einoRetriever einoretriever.Retriever
+	einoEmbedder  *EinoEmbedderAdapter
+	scoreThresh   float64
 }
 
-// NewRetrieverAdapter 创建检索适配器（每次 Retrieve 使用传入的 collection/topK 创建临时 Retriever）
-func NewRetrieverAdapter(embedder Embedder, vectorStore vector.Store, scoreThreshold float64) eino.Retriever {
+// NewRetrieverAdapter 创建检索适配器（基于 Eino retriever.Retriever，需传入 Embedder 用于 WithEmbedding）
+func NewRetrieverAdapter(embedder Embedder, einoRetriever einoretriever.Retriever, scoreThreshold float64) eino.Retriever {
 	if scoreThreshold <= 0 {
 		scoreThreshold = 0.3
 	}
-	return &retrieverAdapter{embedder: embedder, vectorStore: vectorStore, scoreThresh: scoreThreshold}
+	return &retrieverAdapter{
+		einoRetriever: einoRetriever,
+		einoEmbedder:  NewEinoEmbedderAdapter(embedder),
+		scoreThresh:   scoreThreshold,
+	}
 }
 
 // Retrieve 实现 eino.Retriever
 func (a *retrieverAdapter) Retrieve(ctx context.Context, queryText, collection string, topK int) ([]eino.Chunk, error) {
-	if a.embedder == nil || a.vectorStore == nil {
+	if a.einoRetriever == nil || a.einoEmbedder == nil {
 		return nil, nil
 	}
-	vecs, err := a.embedder.Embed(ctx, []string{queryText})
-	if err != nil || len(vecs) == 0 {
-		return nil, err
+	opts := []einoretriever.Option{
+		einoretriever.WithIndex(collection),
+		einoretriever.WithTopK(topK),
+		einoretriever.WithScoreThreshold(a.scoreThresh),
+		einoretriever.WithEmbedding(a.einoEmbedder),
 	}
-	r := query.NewRetriever(a.vectorStore, collection, topK, a.scoreThresh)
-	q := &common.Query{Text: queryText, Embedding: vecs[0]}
-	result, err := r.ProcessQuery(q)
+	docs, err := a.einoRetriever.Retrieve(ctx, queryText, opts...)
 	if err != nil {
 		return nil, err
 	}
-	chunks := make([]eino.Chunk, len(result.Chunks))
-	for i, c := range result.Chunks {
+	chunks := make([]eino.Chunk, len(docs))
+	for i, d := range docs {
+		docID := ""
+		if d.MetaData != nil {
+			if id, ok := d.MetaData["document_id"].(string); ok {
+				docID = id
+			}
+		}
 		chunks[i] = eino.Chunk{
-			ID:         c.ID,
-			Content:    c.Content,
-			DocumentID: c.DocumentID,
-			Metadata:   c.Metadata,
+			ID:         d.ID,
+			Content:    d.Content,
+			DocumentID: docID,
+			Metadata:   d.MetaData,
 		}
 	}
 	return chunks, nil
 }
 
-// ragGeneratorAdapter 将 query.Generator + eino.Retriever 适配为 eino.Generator（RAG）
-type ragGeneratorAdapter struct {
-	retriever eino.Retriever
-	generator *query.Generator
-	embedder  Embedder
+// EinoRetrieverQueryAdapter 将 Eino retriever.Retriever 适配为 query 工作流使用的检索器（实现 eino.QueryRetrieverForWorkflow）
+type EinoRetrieverQueryAdapter struct {
+	EinoRetriever einoretriever.Retriever
+	Embedder     Embedder
+	TopK         int
 }
 
-// NewRAGGeneratorAdapter 创建 RAG 生成适配器
-func NewRAGGeneratorAdapter(retriever eino.Retriever, generator *query.Generator, embedder Embedder) eino.Generator {
-	return &ragGeneratorAdapter{retriever: retriever, generator: generator, embedder: embedder}
+// SetTopK 设置返回结果数量
+func (a *EinoRetrieverQueryAdapter) SetTopK(topK int) {
+	if topK > 0 {
+		a.TopK = topK
+	}
+}
+
+// Execute 执行检索，返回 *common.RetrievalResult
+func (a *EinoRetrieverQueryAdapter) Execute(ctx *common.PipelineContext, input interface{}) (interface{}, error) {
+	q, ok := input.(*common.Query)
+	if !ok {
+		return nil, common.NewPipelineError("eino_retriever", "输入类型错误", fmt.Errorf("expected *common.Query, got %T", input))
+	}
+	if q == nil {
+		return nil, common.ErrInvalidInput
+	}
+	opts := []einoretriever.Option{
+		einoretriever.WithTopK(a.TopK),
+		einoretriever.WithEmbedding(NewEinoEmbedderAdapter(a.Embedder)),
+	}
+	var reqCtx context.Context
+	if ctx != nil {
+		reqCtx = ctx.Context
+	} else {
+		reqCtx = context.Background()
+	}
+	docs, err := a.EinoRetriever.Retrieve(reqCtx, q.Text, opts...)
+	if err != nil {
+		return nil, common.NewPipelineError("eino_retriever", "检索失败", err)
+	}
+	chunks := make([]common.Chunk, len(docs))
+	scores := make([]float64, len(docs))
+	for i, d := range docs {
+		meta := make(map[string]interface{})
+		if d.MetaData != nil {
+			for k, v := range d.MetaData {
+				meta[k] = v
+			}
+		}
+		docID := ""
+		if d.MetaData != nil {
+			if id, ok := d.MetaData["document_id"].(string); ok {
+				docID = id
+			}
+		}
+		idx := 0
+		if d.MetaData != nil && d.MetaData["index"] != nil {
+			switch v := d.MetaData["index"].(type) {
+			case int:
+				idx = v
+			case string:
+				idx, _ = strconv.Atoi(v)
+			}
+		}
+		tokenCount := 0
+		if d.MetaData != nil && d.MetaData["token_count"] != nil {
+			switch v := d.MetaData["token_count"].(type) {
+			case int:
+				tokenCount = v
+			case string:
+				tokenCount, _ = strconv.Atoi(v)
+			}
+		}
+		chunks[i] = common.Chunk{
+			ID:         d.ID,
+			Content:    d.Content,
+			Metadata:   meta,
+			DocumentID: docID,
+			Index:      idx,
+			TokenCount: tokenCount,
+		}
+		scores[i] = 1.0
+	}
+	return &common.RetrievalResult{
+		Chunks:      chunks,
+		Scores:      scores,
+		TotalCount:  len(chunks),
+		ProcessTime: time.Duration(0),
+	}, nil
+}
+
+// Ensure *EinoRetrieverQueryAdapter 实现 eino.QueryRetrieverForWorkflow
+var _ eino.QueryRetrieverForWorkflow = (*EinoRetrieverQueryAdapter)(nil)
+
+// ragGeneratorAdapter 将 query.Generator + eino.Retriever 适配为 eino.Generator（RAG）
+type ragGeneratorAdapter struct {
+	retriever         eino.Retriever
+	generator         *query.Generator
+	embedder          Embedder
+	defaultCollection string // 默认检索集合名，空则 "default"
+}
+
+// NewRAGGeneratorAdapter 创建 RAG 生成适配器。defaultCollection 为空时使用 "default"。
+func NewRAGGeneratorAdapter(retriever eino.Retriever, generator *query.Generator, embedder Embedder, defaultCollection string) eino.Generator {
+	if defaultCollection == "" {
+		defaultCollection = "default"
+	}
+	return &ragGeneratorAdapter{retriever: retriever, generator: generator, embedder: embedder, defaultCollection: defaultCollection}
 }
 
 // Generate 实现 eino.Generator：先检索再生成
@@ -88,7 +197,11 @@ func (a *ragGeneratorAdapter) Generate(ctx context.Context, prompt string) (stri
 	if a.retriever == nil || a.generator == nil {
 		return "", nil
 	}
-	chunks, err := a.retriever.Retrieve(ctx, prompt, "default", 10)
+	collection := a.defaultCollection
+	if collection == "" {
+		collection = "default"
+	}
+	chunks, err := a.retriever.Retrieve(ctx, prompt, collection, 10)
 	if err != nil {
 		return "", err
 	}

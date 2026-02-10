@@ -36,7 +36,8 @@ For debugging and admin; subcommands and usage are in [CLI (cli.md)](cli.md).
 - **API Key**: In `configs/model.yaml` use `api_key: "${OPENAI_API_KEY}"`; it is substituted at runtime.
 - **Planner (v1 Agent)**: When `PLANNER_TYPE=rule`, new v1 agents use the **rule planner** (no LLM, fixed TaskGraph) for stable Executor debugging; otherwise the **LLM planner** is used. Startup logs indicate which planner is active.
 - **Secrets**: Do not commit real API keys; use environment variables or a secrets manager.
-- **Storage**: API defaults to memory storage (data lost on restart); for production configure MySQL/Milvus etc. (implement the corresponding Store).
+- **Storage**: API defaults to memory storage (data lost on restart); for production configure MySQL/Milvus etc. (implement the corresponding Store). The **vector store** is configurable via `storage.vector` (type, collection); the default collection name is used for both ingest and query. Optional `storage.ingest` (batch_size, concurrency) tunes the ingest pipeline. See [config.md](config.md) for full storage and ingest options.
+- **Ingest logging**: The ingest pipeline logs each step (loader, parser, splitter, embedding, indexer) with `ingest_id`, `ingest_step`, `doc_id`, `chunks`, and `duration_ms` for observability.
 - **Tracing**: Enable OpenTelemetry under `monitoring.tracing` in `configs/api.yaml`; when `export_endpoint` is unset, the **OTEL_EXPORTER_OTLP_ENDPOINT** env var is used. See [Tracing (tracing.md)](tracing.md).
 - For per-file config reference see [Configuration (config.md)](config.md).
 

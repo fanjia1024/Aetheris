@@ -20,35 +20,67 @@ import (
 	"strconv"
 	"time"
 
+	einoindexer "github.com/cloudwego/eino/components/indexer"
+	"github.com/cloudwego/eino/schema"
+
 	"rag-platform/internal/pipeline/common"
 	"rag-platform/internal/storage/metadata"
 	"rag-platform/internal/storage/vector"
 )
 
-// DocumentIndexer 文档索引器
+// DocumentIndexer 文档索引器（支持直接使用 vector.Store 或 Eino indexer.Indexer）
 type DocumentIndexer struct {
-	name          string
-	vectorStore   vector.Store
-	metadataStore metadata.Store
-	concurrency   int
-	batchSize     int
+	name               string
+	vectorStore        vector.Store
+	metadataStore      metadata.Store
+	einoIndexer        einoindexer.Indexer // 非空时优先使用 Eino Indexer.Store
+	concurrency        int
+	batchSize          int
+	defaultIndexName   string // 默认索引/集合名，空则用 "default"
+	vectorStoreType    string // 向量库类型，写入 doc.Metadata["vector_store"]，空则 "memory"
 }
 
-// NewDocumentIndexer 创建新的文档索引器
-func NewDocumentIndexer(vectorStore vector.Store, metadataStore metadata.Store, concurrency, batchSize int) *DocumentIndexer {
+// NewDocumentIndexer 创建新的文档索引器。defaultIndexName 为空时使用 "default"；vectorStoreType 为空时使用 "memory"。
+func NewDocumentIndexer(vectorStore vector.Store, metadataStore metadata.Store, concurrency, batchSize int, defaultIndexName, vectorStoreType string) *DocumentIndexer {
 	if concurrency <= 0 {
 		concurrency = 4
 	}
 	if batchSize <= 0 {
 		batchSize = 100
 	}
+	if defaultIndexName == "" {
+		defaultIndexName = "default"
+	}
+	if vectorStoreType == "" {
+		vectorStoreType = "memory"
+	}
 
 	return &DocumentIndexer{
-		name:          "index_builder",
-		vectorStore:   vectorStore,
-		metadataStore: metadataStore,
-		concurrency:   concurrency,
-		batchSize:     batchSize,
+		name:             "index_builder",
+		vectorStore:     vectorStore,
+		metadataStore:   metadataStore,
+		concurrency:     concurrency,
+		batchSize:       batchSize,
+		defaultIndexName: defaultIndexName,
+		vectorStoreType:  vectorStoreType,
+	}
+}
+
+// NewDocumentIndexerFromEino 基于 Eino indexer.Indexer 创建文档索引器（内部委托 Store）
+func NewDocumentIndexerFromEino(einoIndexer einoindexer.Indexer, metadataStore metadata.Store, defaultIndexName, vectorStoreType string) *DocumentIndexer {
+	if defaultIndexName == "" {
+		defaultIndexName = "default"
+	}
+	if vectorStoreType == "" {
+		vectorStoreType = "memory"
+	}
+	return &DocumentIndexer{
+		name:             "index_builder",
+		einoIndexer:     einoIndexer,
+		metadataStore:   metadataStore,
+		batchSize:       100,
+		defaultIndexName: defaultIndexName,
+		vectorStoreType:  vectorStoreType,
 	}
 }
 
@@ -89,8 +121,8 @@ func (i *DocumentIndexer) Validate(input interface{}) error {
 		return fmt.Errorf("不支持的输入类型: %T", input)
 	}
 
-	if i.vectorStore == nil {
-		return fmt.Errorf("未初始化向量存储")
+	if i.einoIndexer == nil && i.vectorStore == nil {
+		return fmt.Errorf("未初始化向量存储或 Eino Indexer")
 	}
 
 	if i.metadataStore == nil {
@@ -119,15 +151,39 @@ func (i *DocumentIndexer) ProcessDocument(ctx *common.PipelineContext, doc *comm
 		return nil, common.NewPipelineError(i.name, "存储文档元数据失败", err)
 	}
 
-	// 批量索引切片
-	if err := i.indexChunks(doc); err != nil {
-		return nil, common.NewPipelineError(i.name, "索引切片失败", err)
+	if i.einoIndexer != nil {
+		// 使用 Eino Indexer：common.Document -> []*schema.Document -> Store
+		einoDocs := make([]*schema.Document, 0, len(doc.Chunks))
+		for idx, chunk := range doc.Chunks {
+			meta := make(map[string]any)
+			meta["document_id"] = doc.ID
+			meta["content"] = chunk.Content
+			meta["index"] = strconv.Itoa(idx)
+			meta["token_count"] = strconv.Itoa(chunk.TokenCount)
+			sd := &schema.Document{
+				ID:       chunk.ID,
+				Content:  chunk.Content,
+				MetaData: meta,
+			}
+			sd.WithDenseVector(chunk.Embedding)
+			einoDocs = append(einoDocs, sd)
+		}
+		_, err := i.einoIndexer.Store(ctx.Context, einoDocs, einoindexer.WithSubIndexes([]string{i.defaultIndexName}))
+		if err != nil {
+			return nil, common.NewPipelineError(i.name, "Eino Indexer Store 失败", err)
+		}
+	} else {
+		// 批量索引切片（原有 vector.Store 路径）
+		if err := i.indexChunks(doc); err != nil {
+			return nil, common.NewPipelineError(i.name, "索引切片失败", err)
+		}
 	}
 
-	// 更新文档元数据
+	// 更新文档元数据（记录实际使用的向量库类型与集合名）
 	doc.Metadata["indexed"] = true
 	doc.Metadata["indexer"] = i.name
-	doc.Metadata["vector_store"] = "memory"
+	doc.Metadata["vector_store"] = i.vectorStoreType
+	doc.Metadata["collection"] = i.defaultIndexName
 
 	return doc, nil
 }
@@ -195,7 +251,10 @@ func (i *DocumentIndexer) indexBatch(chunks []common.Chunk, documentID string) e
 	if len(chunks) == 0 {
 		return nil
 	}
-	indexName := "default"
+	indexName := i.defaultIndexName
+	if indexName == "" {
+		indexName = "default"
+	}
 	vecs := make([]*vector.Vector, 0, len(chunks))
 	for idx, chunk := range chunks {
 		meta := make(map[string]string)
