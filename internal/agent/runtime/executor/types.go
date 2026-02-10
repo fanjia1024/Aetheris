@@ -26,8 +26,12 @@ type agentContextKey struct{}
 // jobIDContextKey 用于在 context 中传递 jobID，供 Tool 节点写入 ToolCalled/ToolReturned
 type jobIDContextKey struct{}
 
+// replayContextKey 用于在 context 中传递 Replay 已完成的工具调用结果（idempotency_key -> result JSON），供 Tool 节点幂等跳过
+type replayContextKey struct{}
+
 var theAgentContextKey = agentContextKey{}
 var theJobIDContextKey = jobIDContextKey{}
+var theReplayContextKey = replayContextKey{}
 
 // WithAgent 将 agent 放入 ctx，供 Runner.Invoke 时传入节点
 func WithAgent(ctx context.Context, agent *runtime.Agent) context.Context {
@@ -57,6 +61,21 @@ func JobIDFromContext(ctx context.Context) string {
 	}
 	s, _ := v.(string)
 	return s
+}
+
+// WithCompletedToolInvocations 将 Replay 得到的已完成工具调用结果放入 ctx（idempotency_key -> result JSON），供 Tool 节点幂等跳过
+func WithCompletedToolInvocations(ctx context.Context, m map[string][]byte) context.Context {
+	return context.WithValue(ctx, theReplayContextKey, m)
+}
+
+// CompletedToolInvocationsFromContext 从 context 取出已完成工具调用结果
+func CompletedToolInvocationsFromContext(ctx context.Context) map[string][]byte {
+	v := ctx.Value(theReplayContextKey)
+	if v == nil {
+		return nil
+	}
+	m, _ := v.(map[string][]byte)
+	return m
 }
 
 // AgentDAGPayload DAG 统一载荷：整图节点入参/出参一致，便于多前驱时合并结果

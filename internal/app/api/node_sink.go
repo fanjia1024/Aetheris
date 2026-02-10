@@ -111,8 +111,8 @@ func (s *nodeEventSinkImpl) AppendNodeFinished(ctx context.Context, jobID string
 	return err
 }
 
-// AppendStateCheckpointed 实现 NodeEventSink；v0.9 语义事件，供 Trace 展示 state diff
-func (s *nodeEventSinkImpl) AppendStateCheckpointed(ctx context.Context, jobID string, nodeID string, stateBefore, stateAfter []byte) error {
+// AppendStateCheckpointed 实现 NodeEventSink；v0.9 语义事件，供 Trace 展示 state diff；opts 可选携带 changed_keys、tool_side_effects、resource_refs
+func (s *nodeEventSinkImpl) AppendStateCheckpointed(ctx context.Context, jobID string, nodeID string, stateBefore, stateAfter []byte, opts *agentexec.StateCheckpointOpts) error {
 	if s.store == nil {
 		return nil
 	}
@@ -122,12 +122,23 @@ func (s *nodeEventSinkImpl) AppendStateCheckpointed(ctx context.Context, jobID s
 	}
 	stepIndex := ver + 1
 	pl := map[string]interface{}{
-		"node_id":      nodeID,
-		"step_index":   stepIndex,
-		"state_after":  json.RawMessage(stateAfter),
+		"node_id":     nodeID,
+		"step_index":  stepIndex,
+		"state_after": json.RawMessage(stateAfter),
 	}
 	if len(stateBefore) > 0 {
 		pl["state_before"] = json.RawMessage(stateBefore)
+	}
+	if opts != nil {
+		if len(opts.ChangedKeys) > 0 {
+			pl["changed_keys"] = opts.ChangedKeys
+		}
+		if len(opts.ToolSideEffects) > 0 {
+			pl["tool_side_effects"] = opts.ToolSideEffects
+		}
+		if len(opts.ResourceRefs) > 0 {
+			pl["resource_refs"] = opts.ResourceRefs
+		}
 	}
 	payload, err := json.Marshal(pl)
 	if err != nil {
@@ -220,6 +231,67 @@ func (s *nodeEventSinkImpl) AppendToolResultSummarized(ctx context.Context, jobI
 	}
 	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{
 		JobID: jobID, Type: jobstore.ToolResultSummarized, Payload: payload,
+	})
+	return err
+}
+
+// AppendToolInvocationStarted 实现 ToolEventSink；写入 tool_invocation_started，含 idempotency_key 供 Replay 查找
+func (s *nodeEventSinkImpl) AppendToolInvocationStarted(ctx context.Context, jobID string, nodeID string, payload *agentexec.ToolInvocationStartedPayload) error {
+	if s.store == nil || payload == nil {
+		return nil
+	}
+	_, ver, err := s.store.ListEvents(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	pl := map[string]interface{}{
+		"node_id":         nodeID,
+		"invocation_id":  payload.InvocationID,
+		"tool_name":      payload.ToolName,
+		"idempotency_key": payload.IdempotencyKey,
+		"started_at":     payload.StartedAt,
+	}
+	if payload.ArgumentsHash != "" {
+		pl["arguments_hash"] = payload.ArgumentsHash
+	}
+	payloadBytes, err := json.Marshal(pl)
+	if err != nil {
+		return err
+	}
+	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{
+		JobID: jobID, Type: jobstore.ToolInvocationStarted, Payload: payloadBytes,
+	})
+	return err
+}
+
+// AppendToolInvocationFinished 实现 ToolEventSink；outcome 为 success 时 Replay 会加入 CompletedToolInvocations
+func (s *nodeEventSinkImpl) AppendToolInvocationFinished(ctx context.Context, jobID string, nodeID string, payload *agentexec.ToolInvocationFinishedPayload) error {
+	if s.store == nil || payload == nil {
+		return nil
+	}
+	_, ver, err := s.store.ListEvents(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	pl := map[string]interface{}{
+		"node_id":          nodeID,
+		"invocation_id":    payload.InvocationID,
+		"idempotency_key":  payload.IdempotencyKey,
+		"outcome":          payload.Outcome,
+		"finished_at":      payload.FinishedAt,
+	}
+	if len(payload.Result) > 0 {
+		pl["result"] = json.RawMessage(payload.Result)
+	}
+	if payload.Error != "" {
+		pl["error"] = payload.Error
+	}
+	payloadBytes, err := json.Marshal(pl)
+	if err != nil {
+		return err
+	}
+	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{
+		JobID: jobID, Type: jobstore.ToolInvocationFinished, Payload: payloadBytes,
 	})
 	return err
 }

@@ -72,9 +72,11 @@ type ToolInvocationSummary struct {
 
 // StateDiff is memory before/after step (from state_checkpointed).
 type StateDiff struct {
-	StateBefore json.RawMessage   `json:"state_before,omitempty"`
-	StateAfter  json.RawMessage   `json:"state_after,omitempty"`
-	ChangedKeys []string          `json:"changed_keys,omitempty"`
+	StateBefore     json.RawMessage `json:"state_before,omitempty"`
+	StateAfter      json.RawMessage `json:"state_after,omitempty"`
+	ChangedKeys     []string        `json:"changed_keys,omitempty"`
+	ToolSideEffects []string        `json:"tool_side_effects,omitempty"`
+	ResourceRefs    []string        `json:"resource_refs,omitempty"`
 }
 
 // Narrative is the full narrative model for the Trace UI (timeline segments + step details).
@@ -307,10 +309,24 @@ func BuildNarrative(events []jobstore.JobEvent) *Narrative {
 				}
 			}
 			changed := diffKeys(stateBefore, stateAfter)
+			if payloadChanged, ok := pl["changed_keys"]; ok {
+				if arr, ok := payloadChanged.([]interface{}); ok {
+					changed = make([]string, 0, len(arr))
+					for _, v := range arr {
+						if s, ok := v.(string); ok {
+							changed = append(changed, s)
+						}
+					}
+				}
+			}
+			toolSideEffects := parseStringSlice(pl, "tool_side_effects")
+			resourceRefs := parseStringSlice(pl, "resource_refs")
 			out.Steps[idx].StateDiff = &StateDiff{
-				StateBefore: stateBefore,
-				StateAfter:  stateAfter,
-				ChangedKeys: changed,
+				StateBefore:     stateBefore,
+				StateAfter:      stateAfter,
+				ChangedKeys:     changed,
+				ToolSideEffects: toolSideEffects,
+				ResourceRefs:    resourceRefs,
 			}
 		case jobstore.AgentThoughtRecorded, jobstore.DecisionMade:
 			nodeID := getStr("node_id")
@@ -416,6 +432,27 @@ func BuildNarrative(events []jobstore.JobEvent) *Narrative {
 
 func ptrTime(t time.Time) *time.Time {
 	return &t
+}
+
+func parseStringSlice(pl map[string]interface{}, key string) []string {
+	if pl == nil {
+		return nil
+	}
+	v, ok := pl[key]
+	if !ok {
+		return nil
+	}
+	arr, ok := v.([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, x := range arr {
+		if s, ok := x.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // diffKeys returns keys that differ between two JSON objects (new or value changed in after).

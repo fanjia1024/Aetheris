@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/compose"
+	"github.com/google/uuid"
 
 	"rag-platform/internal/agent/planner"
 	"rag-platform/internal/agent/runtime"
@@ -129,6 +130,25 @@ type ToolNodeAdapter struct {
 }
 
 func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, cfg map[string]any, agent *runtime.Agent, p *AgentDAGPayload) (*AgentDAGPayload, error) {
+	jobID := JobIDFromContext(ctx)
+	idempotencyKey := IdempotencyKey(jobID, taskID, toolName, cfg)
+	// 幂等重放：事件流中已有成功完成的同 idempotency_key 调用则注入结果、不执行
+	if completed := CompletedToolInvocationsFromContext(ctx); completed != nil {
+		if resultJSON, ok := completed[idempotencyKey]; ok {
+			var nodeResult map[string]any
+			if len(resultJSON) > 0 {
+				_ = json.Unmarshal(resultJSON, &nodeResult)
+			}
+			if nodeResult == nil {
+				nodeResult = make(map[string]any)
+			}
+			if p.Results == nil {
+				p.Results = make(map[string]any)
+			}
+			p.Results[taskID] = nodeResult
+			return p, nil
+		}
+	}
 	// 1.0 短路：Replay 已注入的节点结果不再执行真实 Tool，避免二次副作用
 	if prev, ok := p.Results[taskID]; ok {
 		if m, ok := prev.(map[string]any); ok {
@@ -146,30 +166,43 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 			state = m["state"]
 		}
 	}
-	if a.CommandEventSink != nil {
-		if jobID := JobIDFromContext(ctx); jobID != "" {
-			inputBytes, _ := json.Marshal(cfg)
-			_ = a.CommandEventSink.AppendCommandEmitted(ctx, jobID, taskID, taskID, "tool", inputBytes)
-		}
+	invocationID := uuid.New().String()
+	startedAt := time.Now().UTC()
+	if a.ToolEventSink != nil && jobID != "" {
+		_ = a.ToolEventSink.AppendToolInvocationStarted(ctx, jobID, taskID, &ToolInvocationStartedPayload{
+			InvocationID:   invocationID,
+			ToolName:       toolName,
+			ArgumentsHash:  ArgumentsHash(cfg),
+			IdempotencyKey: idempotencyKey,
+			StartedAt:      FormatStartedAt(startedAt),
+		})
 	}
-	if a.ToolEventSink != nil {
-		if jobID := JobIDFromContext(ctx); jobID != "" {
-			inputBytes, _ := json.Marshal(cfg)
-			_ = a.ToolEventSink.AppendToolCalled(ctx, jobID, taskID, toolName, inputBytes)
-		}
+	if a.CommandEventSink != nil && jobID != "" {
+		inputBytes, _ := json.Marshal(cfg)
+		_ = a.CommandEventSink.AppendCommandEmitted(ctx, jobID, taskID, taskID, "tool", inputBytes)
+	}
+	if a.ToolEventSink != nil && jobID != "" {
+		inputBytes, _ := json.Marshal(cfg)
+		_ = a.ToolEventSink.AppendToolCalled(ctx, jobID, taskID, toolName, inputBytes)
 	}
 	result, err := a.Tools.Execute(ctx, toolName, cfg, state)
+	finishedAt := time.Now().UTC()
 	if err != nil {
 		if p.Results == nil {
 			p.Results = make(map[string]any)
 		}
 		p.Results[taskID] = map[string]any{"error": err.Error(), "at": time.Now()}
-		if a.ToolEventSink != nil {
-			if jobID := JobIDFromContext(ctx); jobID != "" {
-				outBytes, _ := json.Marshal(map[string]interface{}{"error": err.Error()})
-				_ = a.ToolEventSink.AppendToolReturned(ctx, jobID, taskID, outBytes)
-				_ = a.ToolEventSink.AppendToolResultSummarized(ctx, jobID, taskID, toolName, truncateStr(err.Error(), 200), err.Error(), false)
-			}
+		if a.ToolEventSink != nil && jobID != "" {
+			_ = a.ToolEventSink.AppendToolInvocationFinished(ctx, jobID, taskID, &ToolInvocationFinishedPayload{
+				InvocationID:   invocationID,
+				IdempotencyKey: idempotencyKey,
+				Outcome:        ToolInvocationOutcomeFailure,
+				Error:          err.Error(),
+				FinishedAt:     FormatStartedAt(finishedAt),
+			})
+			outBytes, _ := json.Marshal(map[string]interface{}{"error": err.Error()})
+			_ = a.ToolEventSink.AppendToolReturned(ctx, jobID, taskID, outBytes)
+			_ = a.ToolEventSink.AppendToolResultSummarized(ctx, jobID, taskID, toolName, truncateStr(err.Error(), 200), err.Error(), false)
 		}
 		if agent != nil && agent.Session != nil {
 			inputStr := ""
@@ -184,27 +217,32 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 	nodeResult := map[string]any{
 		"done": result.Done, "state": result.State, "output": result.Output, "error": result.Err,
 	}
+	resultBytes, _ := json.Marshal(nodeResult)
+	if a.ToolEventSink != nil && jobID != "" {
+		_ = a.ToolEventSink.AppendToolInvocationFinished(ctx, jobID, taskID, &ToolInvocationFinishedPayload{
+			InvocationID:   invocationID,
+			IdempotencyKey: idempotencyKey,
+			Outcome:        ToolInvocationOutcomeSuccess,
+			Result:         resultBytes,
+			FinishedAt:     FormatStartedAt(finishedAt),
+		})
+	}
 	// 副作用安全：执行成功后立即写 command_committed，再更新内存与 ToolReturned
-	if a.CommandEventSink != nil {
-		if jobID := JobIDFromContext(ctx); jobID != "" {
-			resultBytes, _ := json.Marshal(nodeResult)
-			_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, resultBytes)
-		}
+	if a.CommandEventSink != nil && jobID != "" {
+		_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, resultBytes)
 	}
 	if p.Results == nil {
 		p.Results = make(map[string]any)
 	}
 	p.Results[taskID] = nodeResult
-	if a.ToolEventSink != nil {
-		if jobID := JobIDFromContext(ctx); jobID != "" {
-			outBytes, _ := json.Marshal(map[string]interface{}{"output": result.Output, "error": result.Err, "done": result.Done})
-			_ = a.ToolEventSink.AppendToolReturned(ctx, jobID, taskID, outBytes)
-			summary := truncateStr(result.Output, 200)
-			if result.Err != "" {
-				summary = truncateStr("error: "+result.Err, 200)
-			}
-			_ = a.ToolEventSink.AppendToolResultSummarized(ctx, jobID, taskID, toolName, summary, result.Err, false)
+	if a.ToolEventSink != nil && jobID != "" {
+		outBytes, _ := json.Marshal(map[string]interface{}{"output": result.Output, "error": result.Err, "done": result.Done})
+		_ = a.ToolEventSink.AppendToolReturned(ctx, jobID, taskID, outBytes)
+		summary := truncateStr(result.Output, 200)
+		if result.Err != "" {
+			summary = truncateStr("error: "+result.Err, 200)
 		}
+		_ = a.ToolEventSink.AppendToolResultSummarized(ctx, jobID, taskID, toolName, summary, result.Err, false)
 	}
 	msg := result.Output
 	if result.Err != "" {

@@ -17,11 +17,13 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"sync"
 	"time"
 
 	"rag-platform/internal/agent/job"
+	agentexec "rag-platform/internal/agent/runtime/executor"
 	"rag-platform/internal/runtime/jobstore"
 	"rag-platform/pkg/log"
 	"rag-platform/pkg/metrics"
@@ -192,6 +194,19 @@ func (r *AgentJobRunner) executeJob(ctx context.Context, jobID string) {
 		r.logger.Info("Job 执行失败", "job_id", jobID, "error", err)
 		metrics.JobTotal.WithLabelValues("failed").Inc()
 		metrics.JobFailTotal.WithLabelValues("failed").Inc()
+		// Append job_failed so event stream has terminal event; include result_type when available
+		if r.jobEventStore != nil {
+			_, ver, _ := r.jobEventStore.ListEvents(ctx, jobID)
+			pl := map[string]interface{}{"goal": j.Goal, "error": err.Error()}
+			var sf *agentexec.StepFailure
+			if errors.As(err, &sf) {
+				pl["result_type"] = string(sf.Type)
+				pl["node_id"] = sf.FailedNodeID()
+				pl["reason"] = err.Error()
+			}
+			payload, _ := json.Marshal(pl)
+			_, _ = r.jobEventStore.Append(ctx, jobID, ver, jobstore.JobEvent{JobID: jobID, Type: jobstore.JobFailed, Payload: payload})
+		}
 		return
 	}
 	metrics.JobTotal.WithLabelValues("completed").Inc()

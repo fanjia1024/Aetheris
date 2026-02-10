@@ -43,10 +43,11 @@ var (
 	ErrCompensatable = errors.New("compensatable")
 )
 
-// StepFailure wraps an error with a StepResultType for classification.
+// StepFailure wraps an error with a StepResultType for classification; NodeID is the step that failed (for compensation).
 type StepFailure struct {
-	Type  StepResultType
-	Inner error
+	Type   StepResultType
+	Inner  error
+	NodeID string
 }
 
 func (e *StepFailure) Error() string {
@@ -57,6 +58,9 @@ func (e *StepFailure) Error() string {
 }
 
 func (e *StepFailure) Unwrap() error { return e.Inner }
+
+// FailedNodeID returns the node_id of the step that failed (for compensation hook).
+func (e *StepFailure) FailedNodeID() string { return e.NodeID }
 
 // ClassifyError maps runErr to (resultType, reason). Default is PermanentFailure.
 func ClassifyError(runErr error) (StepResultType, string) {
@@ -93,17 +97,22 @@ type PlanGeneratedSink interface {
 
 // NodeEventSink 节点级事件写入：RunForJob 每步前后写入 NodeStarted/NodeFinished，供 Replay 重建上下文
 // resultType/reason 为 Phase A 失败语义；仅 result_type==success 时 Replay 将节点视为完成
+// AppendStateCheckpointed 的 opts 可选携带 changed_keys、tool_side_effects、resource_refs 供 Trace UI「本步变更」展示
 type NodeEventSink interface {
 	AppendNodeStarted(ctx context.Context, jobID string, nodeID string, attempt int, workerID string) error
 	AppendNodeFinished(ctx context.Context, jobID string, nodeID string, payloadResults []byte, durationMs int64, state string, attempt int, resultType StepResultType, reason string) error
-	AppendStateCheckpointed(ctx context.Context, jobID string, nodeID string, stateBefore, stateAfter []byte) error
+	AppendStateCheckpointed(ctx context.Context, jobID string, nodeID string, stateBefore, stateAfter []byte, opts *StateCheckpointOpts) error
 }
 
-// ToolEventSink 工具调用事件写入：Tool 节点执行前后写入 ToolCalled/ToolReturned，供 Trace/审计与恢复短路
+// ToolEventSink 工具调用事件写入：Tool 节点执行前后写入 ToolCalled/ToolReturned 与 tool_invocation_started/finished，供 Trace/审计与幂等重放
 type ToolEventSink interface {
 	AppendToolCalled(ctx context.Context, jobID string, nodeID string, toolName string, input []byte) error
 	AppendToolReturned(ctx context.Context, jobID string, nodeID string, output []byte) error
 	AppendToolResultSummarized(ctx context.Context, jobID string, nodeID string, toolName string, summary string, errMsg string, idempotent bool) error
+	// AppendToolInvocationStarted 写入 tool_invocation_started，含 idempotency_key 供 Replay 查找
+	AppendToolInvocationStarted(ctx context.Context, jobID string, nodeID string, payload *ToolInvocationStartedPayload) error
+	// AppendToolInvocationFinished 写入 tool_invocation_finished，outcome 为 success 时 Replay 会加入 CompletedToolInvocations
+	AppendToolInvocationFinished(ctx context.Context, jobID string, nodeID string, payload *ToolInvocationFinishedPayload) error
 }
 
 // NodeAndToolEventSink 同时支持节点与工具事件（同一实现可传 Runner 与 Compiler）
@@ -394,6 +403,9 @@ runLoop:
 		}
 		stepStart := time.Now()
 		ctx = WithAgent(ctx, agent)
+		if replayCtx != nil && len(replayCtx.CompletedToolInvocations) > 0 {
+			ctx = WithCompletedToolInvocations(ctx, replayCtx.CompletedToolInvocations)
+		}
 		var runErr error
 		payload, runErr = step.Run(ctx, payload)
 		durationMs := time.Since(stepStart).Milliseconds()
@@ -411,10 +423,13 @@ runLoop:
 		}
 		if resultType != StepResultSuccess {
 			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
-			return fmt.Errorf("executor: 节点 %s 执行失败 (%s): %w", step.NodeID, resultType, runErr)
+			// Wrap with StepFailure so Scheduler/Worker can use errors.As to branch on outcome
+			sf := &StepFailure{Type: resultType, Inner: runErr, NodeID: step.NodeID}
+			return fmt.Errorf("executor: 节点 %s 执行失败 (%s): %w", step.NodeID, resultType, sf)
 		}
 		if r.nodeEventSink != nil {
-			_ = r.nodeEventSink.AppendStateCheckpointed(ctx, j.ID, step.NodeID, stateBefore, payloadResults)
+			opts := &StateCheckpointOpts{ChangedKeys: ChangedKeysFromState(stateBefore, payloadResults)}
+			_ = r.nodeEventSink.AppendStateCheckpointed(ctx, j.ID, step.NodeID, stateBefore, payloadResults, opts)
 		}
 		cp := runtime.NewNodeCheckpoint(agent.ID, sessionID, j.ID, step.NodeID, graphBytes, payloadResults, nil)
 		cpID, saveErr := r.checkpointStore.Save(ctx, cp)

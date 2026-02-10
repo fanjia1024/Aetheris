@@ -17,6 +17,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -250,14 +251,18 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		if jobEventStore != nil {
 			_, ver, _ := jobEventStore.ListEvents(ctx, j.ID)
 			evType := jobstore.JobCompleted
+			pl := map[string]interface{}{"goal": j.Goal}
 			if err != nil {
 				evType = jobstore.JobFailed
+				pl["error"] = err.Error()
+				var sf *agentexec.StepFailure
+				if errors.As(err, &sf) {
+					pl["result_type"] = string(sf.Type)
+					pl["node_id"] = sf.FailedNodeID()
+					pl["reason"] = err.Error()
+				}
 			}
-			errStr := ""
-			if err != nil {
-				errStr = err.Error()
-			}
-			payload, _ := json.Marshal(map[string]interface{}{"goal": j.Goal, "error": errStr})
+			payload, _ := json.Marshal(pl)
 			_, _ = jobEventStore.Append(ctx, j.ID, ver, jobstore.JobEvent{JobID: j.ID, Type: evType, Payload: payload})
 		}
 		return err

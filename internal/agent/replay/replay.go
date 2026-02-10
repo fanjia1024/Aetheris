@@ -24,13 +24,14 @@ import (
 
 // ReplayContext 从事件流重建的执行上下文，供 Runner 恢复时使用（不重复执行已完成节点）
 type ReplayContext struct {
-	TaskGraphState       []byte              // PlanGenerated 的 task_graph
-	CursorNode           string              // 最后一条 NodeFinished 的 node_id，兼容 Trace/旧逻辑
-	PayloadResults       []byte              // 最后一条 NodeFinished 的 payload_results（累积状态）
-	CompletedNodeIDs     map[string]struct{} // 所有已出现 NodeFinished 的 node_id 集合，供确定性重放
-	PayloadResultsByNode map[string][]byte   // 按 node_id 的 payload_results，供跳过时合并（可选）
-	CompletedCommandIDs  map[string]struct{} // 所有已出现 command_committed 的 command_id，已提交命令永不重放
-	CommandResults       map[string][]byte   // command_id -> 该命令的 result JSON，Replay 时注入 payload
+	TaskGraphState           []byte              // PlanGenerated 的 task_graph
+	CursorNode               string              // 最后一条 NodeFinished 的 node_id，兼容 Trace/旧逻辑
+	PayloadResults           []byte              // 最后一条 NodeFinished 的 payload_results（累积状态）
+	CompletedNodeIDs         map[string]struct{} // 所有已出现 NodeFinished 的 node_id 集合，供确定性重放
+	PayloadResultsByNode     map[string][]byte   // 按 node_id 的 payload_results，供跳过时合并（可选）
+	CompletedCommandIDs      map[string]struct{} // 所有已出现 command_committed 的 command_id，已提交命令永不重放
+	CommandResults           map[string][]byte   // command_id -> 该命令的 result JSON，Replay 时注入 payload
+	CompletedToolInvocations map[string][]byte   // idempotency_key -> 成功完成的工具调用 result JSON，Replay 时跳过执行并注入
 }
 
 // ReplayContextBuilder 从 JobStore 事件流构建 ReplayContext
@@ -59,10 +60,11 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 		return nil, err
 	}
 	out := ReplayContext{
-		CompletedNodeIDs:     make(map[string]struct{}),
-		PayloadResultsByNode: make(map[string][]byte),
-		CompletedCommandIDs:  make(map[string]struct{}),
-		CommandResults:       make(map[string][]byte),
+		CompletedNodeIDs:         make(map[string]struct{}),
+		PayloadResultsByNode:     make(map[string][]byte),
+		CompletedCommandIDs:      make(map[string]struct{}),
+		CommandResults:           make(map[string][]byte),
+		CompletedToolInvocations: make(map[string][]byte),
 	}
 	for _, e := range events {
 		switch e.Type {
@@ -109,6 +111,23 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 			out.CompletedCommandIDs[cmdID] = struct{}{}
 			if len(payload.Result) > 0 {
 				out.CommandResults[cmdID] = []byte(payload.Result)
+			}
+		case jobstore.ToolInvocationFinished:
+			var pl struct {
+				IdempotencyKey string          `json:"idempotency_key"`
+				Outcome        string          `json:"outcome"`
+				Result         json.RawMessage `json:"result"`
+			}
+			if err := json.Unmarshal(e.Payload, &pl); err != nil {
+				continue
+			}
+			if pl.Outcome != "success" || pl.IdempotencyKey == "" {
+				continue
+			}
+			if len(pl.Result) > 0 {
+				out.CompletedToolInvocations[pl.IdempotencyKey] = []byte(pl.Result)
+			} else {
+				out.CompletedToolInvocations[pl.IdempotencyKey] = []byte("{}")
 			}
 		}
 	}
