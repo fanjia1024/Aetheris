@@ -30,7 +30,13 @@ const (
 	argsH1 = "hash1"
 )
 
-// TestLedger_1_CrashBeforeCommit_ReplayReExecutesAndCommits 证明：无已提交记录时，replay 路径会执行一次并提交；之后仅恢复结果
+// 1.0 致命四场景与测试对应（Runtime 1.0 证明：任意 crash/重启/双 worker/replay 下不重复外部副作用）：
+// (1) Worker 在 tool 执行前崩溃 → TestLedger_1（无已提交记录时 replay 执行一次并 commit，之后仅恢复）
+// (2) Tool 执行后、commit 前崩溃 → TestLedger_2（已有 committed 记录时 Acquire 返回 ReturnRecordedResult，不执行 tool）
+// (3) 两 worker 同时抢同一 step → TestLedger_3（先 Acquire 得 AllowExecute，后 Acquire 得 WaitOtherWorker；仅一次 Commit）
+// (4) Replay 恢复输出 → TestLedger_5 + TestAdapter_Replay_InjectsResult_NoToolCall（replayResult 注入时 ReturnRecordedResult，0 次 tool 调用）
+
+// TestLedger_1_CrashBeforeCommit_ReplayReExecutesAndCommits 证明：(1) 无已提交记录时，replay 路径会执行一次并提交；之后仅恢复结果
 func TestLedger_1_CrashBeforeCommit_ReplayReExecutesAndCommits(t *testing.T) {
 	store := NewToolInvocationStoreMem()
 	ledger := NewInvocationLedgerFromStore(store)

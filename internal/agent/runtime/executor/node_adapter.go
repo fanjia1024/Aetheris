@@ -196,7 +196,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 		}
 	}
 
-	// 无 Ledger：兼容旧逻辑（store 或仅事件重放）
+	// 无 Ledger：仅兼容单进程/旧逻辑；1.0 持久化 job 必须配置 InvocationLedger，否则不保证 at-most-once
 	if a.InvocationStore != nil && jobID != "" {
 		rec, _ := a.InvocationStore.GetByJobAndIdempotencyKey(ctx, jobID, idempotencyKey)
 		if rec != nil && rec.Committed && (rec.Status == ToolInvocationStatusSuccess || rec.Status == ToolInvocationStatusConfirmed) && len(rec.Result) > 0 {

@@ -17,12 +17,13 @@ package executor
 import "context"
 
 // ToolInvocationStatus 持久化记录状态（与常见命名对应：pending→started, running→started, succeeded→success, failed→failure）
+// Ledger 状态机语义：无记录=NEW，started=INFLIGHT，success/confirmed+Committed=COMMITTED；事件流恢复=RECOVERABLE。见 design/1.0-runtime-semantics.md
 const (
-	ToolInvocationStatusStarted   = "started"   // 执行前创建，等价 pending/running
-	ToolInvocationStatusSuccess   = "success"   // 执行成功并已持久化，等价 succeeded
+	ToolInvocationStatusStarted   = "started"   // 执行前创建，等价 INFLIGHT
+	ToolInvocationStatusSuccess   = "success"   // 执行成功并已持久化，等价 COMMITTED
 	ToolInvocationStatusFailure   = "failure"   // 执行失败，等价 failed
 	ToolInvocationStatusTimeout   = "timeout"   // 执行超时
-	ToolInvocationStatusConfirmed = "confirmed" // 已通过 ResourceVerifier 校验，可选策略下后续 replay 可跳过校验
+	ToolInvocationStatusConfirmed = "confirmed" // 已通过 ResourceVerifier 校验，等价 COMMITTED
 )
 
 // ToolInvocationRecord 工具调用持久化记录；committed=true 表示外部世界已改变，replay 不得再执行
