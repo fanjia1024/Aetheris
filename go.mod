@@ -1,6 +1,6 @@
 module rag-platform
 
-go 1.25.1
+go 1.25.7
 
 require (
 	github.com/cloudwego/eino v0.7.29
