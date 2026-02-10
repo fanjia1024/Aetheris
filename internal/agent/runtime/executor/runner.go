@@ -30,10 +30,12 @@ import (
 type StepResultType string
 
 const (
-	StepResultSuccess              StepResultType = "success"
-	StepResultRetryableFailure     StepResultType = "retryable_failure"
-	StepResultPermanentFailure     StepResultType = "permanent_failure"
-	StepResultCompensatableFailure StepResultType = "compensatable_failure"
+	StepResultSuccess                StepResultType = "success"
+	StepResultSideEffectCommitted    StepResultType = "side_effect_committed" // 外部世界已改变，replay 不得重放
+	StepResultRetryableFailure       StepResultType = "retryable_failure"
+	StepResultPermanentFailure       StepResultType = "permanent_failure"
+	StepResultCompensatableFailure   StepResultType = "compensatable_failure"
+	StepResultCompensated            StepResultType = "compensated" // 已回滚，视为终态
 )
 
 // Sentinel errors for adapters to mark failure kind; Runner uses these to set result_type.
@@ -61,6 +63,16 @@ func (e *StepFailure) Unwrap() error { return e.Inner }
 
 // FailedNodeID returns the node_id of the step that failed (for compensation hook).
 func (e *StepFailure) FailedNodeID() string { return e.NodeID }
+
+// isStepFailure 表示该 result_type 为失败，应终止 job 并可能触发重试/补偿
+func isStepFailure(t StepResultType) bool {
+	switch t {
+	case StepResultRetryableFailure, StepResultPermanentFailure, StepResultCompensatableFailure:
+		return true
+	default:
+		return false
+	}
+}
 
 // ClassifyError maps runErr to (resultType, reason). Default is PermanentFailure.
 func ClassifyError(runErr error) (StepResultType, string) {
@@ -410,20 +422,23 @@ runLoop:
 		payload, runErr = step.Run(ctx, payload)
 		durationMs := time.Since(stepStart).Milliseconds()
 		resultType, reason := ClassifyError(runErr)
+		// 成功完成的 tool 步记为 side_effect_committed，事件流明确「世界已改变」
+		if resultType == StepResultSuccess && step.NodeType == "tool" {
+			resultType = StepResultSideEffectCommitted
+		}
 		payloadResults, _ := json.Marshal(payload.Results)
 		if runErr != nil && len(payloadResults) == 0 {
 			payloadResults = []byte("{}")
 		}
 		if r.nodeEventSink != nil {
 			stateStr := "ok"
-			if resultType != StepResultSuccess {
+			if resultType != StepResultSuccess && resultType != StepResultSideEffectCommitted && resultType != StepResultCompensated {
 				stateStr = string(resultType)
 			}
 			_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, durationMs, stateStr, 1, resultType, reason)
 		}
-		if resultType != StepResultSuccess {
+		if isStepFailure(resultType) {
 			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
-			// Wrap with StepFailure so Scheduler/Worker can use errors.As to branch on outcome
 			sf := &StepFailure{Type: resultType, Inner: runErr, NodeID: step.NodeID}
 			return fmt.Errorf("executor: 节点 %s 执行失败 (%s): %w", step.NodeID, resultType, sf)
 		}

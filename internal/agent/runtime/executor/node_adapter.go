@@ -124,15 +124,32 @@ func (a *LLMNodeAdapter) ToNodeRunner(task *planner.TaskNode, agent *runtime.Age
 
 // ToolNodeAdapter 将 tool 型 TaskNode 转为 DAG 节点
 type ToolNodeAdapter struct {
-	Tools            ToolExec
-	ToolEventSink    ToolEventSink    // 可选；Tool 执行前后写 ToolCalled/ToolReturned
+	Tools             ToolExec
+	ToolEventSink     ToolEventSink     // 可选；Tool 执行前后写 ToolCalled/ToolReturned
 	CommandEventSink CommandEventSink // 可选；执行成功后立即写 command_committed，保证副作用安全
+	InvocationStore   ToolInvocationStore // 可选；持久化存储，先查再执行，跨进程防 double-commit
 }
 
 func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, cfg map[string]any, agent *runtime.Agent, p *AgentDAGPayload) (*AgentDAGPayload, error) {
 	jobID := JobIDFromContext(ctx)
 	idempotencyKey := IdempotencyKey(jobID, taskID, toolName, cfg)
-	// 幂等重放：事件流中已有成功完成的同 idempotency_key 调用则注入结果、不执行
+	// 1) 持久化存储优先：已 committed 且 success 则直接注入，不执行
+	if a.InvocationStore != nil && jobID != "" {
+		rec, _ := a.InvocationStore.GetByJobAndIdempotencyKey(ctx, jobID, idempotencyKey)
+		if rec != nil && rec.Committed && rec.Status == ToolInvocationStatusSuccess && len(rec.Result) > 0 {
+			var nodeResult map[string]any
+			_ = json.Unmarshal(rec.Result, &nodeResult)
+			if nodeResult == nil {
+				nodeResult = make(map[string]any)
+			}
+			if p.Results == nil {
+				p.Results = make(map[string]any)
+			}
+			p.Results[taskID] = nodeResult
+			return p, nil
+		}
+	}
+	// 2) 幂等重放：事件流中已有成功完成的同 idempotency_key 调用则注入结果、不执行（无 store 或 store 未命中时）
 	if completed := CompletedToolInvocationsFromContext(ctx); completed != nil {
 		if resultJSON, ok := completed[idempotencyKey]; ok {
 			var nodeResult map[string]any
@@ -168,6 +185,17 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 	}
 	invocationID := uuid.New().String()
 	startedAt := time.Now().UTC()
+	if a.InvocationStore != nil && jobID != "" {
+		_ = a.InvocationStore.SetStarted(ctx, &ToolInvocationRecord{
+			InvocationID:   invocationID,
+			JobID:          jobID,
+			StepID:         taskID,
+			ToolName:       toolName,
+			ArgsHash:       ArgumentsHash(cfg),
+			IdempotencyKey: idempotencyKey,
+			Status:         ToolInvocationStatusStarted,
+		})
+	}
 	if a.ToolEventSink != nil && jobID != "" {
 		_ = a.ToolEventSink.AppendToolInvocationStarted(ctx, jobID, taskID, &ToolInvocationStartedPayload{
 			InvocationID:   invocationID,
@@ -188,6 +216,10 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 	result, err := a.Tools.Execute(ctx, toolName, cfg, state)
 	finishedAt := time.Now().UTC()
 	if err != nil {
+		if a.InvocationStore != nil && jobID != "" {
+			errResult, _ := json.Marshal(map[string]any{"error": err.Error()})
+			_ = a.InvocationStore.SetFinished(ctx, idempotencyKey, ToolInvocationStatusFailure, errResult, false)
+		}
 		if p.Results == nil {
 			p.Results = make(map[string]any)
 		}
@@ -218,6 +250,10 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 		"done": result.Done, "state": result.State, "output": result.Output, "error": result.Err,
 	}
 	resultBytes, _ := json.Marshal(nodeResult)
+	// 先写持久化 store 并设 committed，再写事件，保证跨进程权威
+	if a.InvocationStore != nil && jobID != "" {
+		_ = a.InvocationStore.SetFinished(ctx, idempotencyKey, ToolInvocationStatusSuccess, resultBytes, true)
+	}
 	if a.ToolEventSink != nil && jobID != "" {
 		_ = a.ToolEventSink.AppendToolInvocationFinished(ctx, jobID, taskID, &ToolInvocationFinishedPayload{
 			InvocationID:   invocationID,

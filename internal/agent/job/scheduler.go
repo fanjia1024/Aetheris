@@ -108,6 +108,9 @@ func (s *Scheduler) Start(ctx context.Context) {
 									_ = s.compensate(runCtx, job.ID, sf.FailedNodeID())
 								}
 								_ = s.store.UpdateStatus(runCtx, job.ID, StatusFailed)
+							case agentexec.StepResultSideEffectCommitted, agentexec.StepResultCompensated:
+								// 不应以错误返回；若出现则不再重试，直接失败
+								_ = s.store.UpdateStatus(runCtx, job.ID, StatusFailed)
 							default:
 								_ = s.store.UpdateStatus(runCtx, job.ID, StatusFailed)
 							}

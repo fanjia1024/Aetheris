@@ -22,10 +22,11 @@ import (
 	"rag-platform/internal/agent/runtime"
 )
 
-// SteppableStep 单步：节点 ID + 执行函数（按拓扑序）
+// SteppableStep 单步：节点 ID、类型 + 执行函数（按拓扑序）；NodeType 用于 Runner 区分 success vs side_effect_committed
 type SteppableStep struct {
-	NodeID string
-	Run    NodeRunner
+	NodeID   string // 与 TaskNode.ID 一致
+	NodeType string // planner.NodeTool | NodeLLM | NodeWorkflow
+	Run      NodeRunner
 }
 
 // TopoOrder 从 TaskGraph 计算拓扑序（Kahn）；仅包含业务节点，不含 START/END
@@ -104,7 +105,7 @@ func (c *Compiler) CompileSteppable(ctx context.Context, g *planner.TaskGraph, a
 		if err != nil {
 			return nil, fmt.Errorf("executor: 节点 %s ToNodeRunner 失败: %w", id, err)
 		}
-		steps = append(steps, SteppableStep{NodeID: id, Run: run})
+		steps = append(steps, SteppableStep{NodeID: id, NodeType: node.Type, Run: run})
 	}
 	return steps, nil
 }

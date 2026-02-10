@@ -43,6 +43,7 @@ const (
 	RecoveryStarted        EventType = "recovery_started"
 	RecoveryCompleted      EventType = "recovery_completed"
 	StepCompensated        EventType = "step_compensated"
+	StateChanged           EventType = "state_changed" // 外部资源变更（resource_type, resource_id, operation）供审计
 )
 
 // JobEvent 单条不可变事件；Job 的真实形态是事件流

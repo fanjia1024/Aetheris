@@ -99,14 +99,17 @@ func (a *workflowExecAdapter) ExecuteWorkflow(ctx context.Context, name string, 
 	return a.engine.ExecuteWorkflow(ctx, name, pm)
 }
 
-// NewDAGCompiler 创建 TaskGraph→eino DAG 的编译器（注册 llm/tool/workflow 适配器）；toolEventSink 可选；commandEventSink 可选，用于命令级 command_emitted/command_committed 保证副作用安全
-func NewDAGCompiler(llmClient llm.Client, toolsReg *tools.Registry, engine *eino.Engine, toolEventSink agentexec.ToolEventSink, commandEventSink agentexec.CommandEventSink) *agentexec.Compiler {
+// NewDAGCompiler 创建 TaskGraph→eino DAG 的编译器（注册 llm/tool/workflow 适配器）；toolEventSink/commandEventSink 可选；invocationStore 可选，持久化工具调用防 double-commit
+func NewDAGCompiler(llmClient llm.Client, toolsReg *tools.Registry, engine *eino.Engine, toolEventSink agentexec.ToolEventSink, commandEventSink agentexec.CommandEventSink, invocationStore agentexec.ToolInvocationStore) *agentexec.Compiler {
 	toolAdapter := &agentexec.ToolNodeAdapter{Tools: &toolExecAdapter{reg: toolsReg}}
 	if toolEventSink != nil {
 		toolAdapter.ToolEventSink = toolEventSink
 	}
 	if commandEventSink != nil {
 		toolAdapter.CommandEventSink = commandEventSink
+	}
+	if invocationStore != nil {
+		toolAdapter.InvocationStore = invocationStore
 	}
 	llmAdapter := &agentexec.LLMNodeAdapter{LLM: &llmGenAdapter{client: llmClient}}
 	if commandEventSink != nil {

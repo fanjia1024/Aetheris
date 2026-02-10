@@ -70,13 +70,23 @@ type ToolInvocationSummary struct {
 	Output     json.RawMessage `json:"output,omitempty"`
 }
 
+// StateChangeItem 单条外部资源变更（来自 state_changed 事件），供审计
+type StateChangeItem struct {
+	ResourceType string `json:"resource_type"`
+	ResourceID   string `json:"resource_id"`
+	Operation    string `json:"operation"`
+	StepID       string `json:"step_id,omitempty"`
+	ToolName     string `json:"tool_name,omitempty"`
+}
+
 // StateDiff is memory before/after step (from state_checkpointed).
 type StateDiff struct {
-	StateBefore     json.RawMessage `json:"state_before,omitempty"`
-	StateAfter      json.RawMessage `json:"state_after,omitempty"`
-	ChangedKeys     []string        `json:"changed_keys,omitempty"`
-	ToolSideEffects []string        `json:"tool_side_effects,omitempty"`
-	ResourceRefs    []string        `json:"resource_refs,omitempty"`
+	StateBefore     json.RawMessage   `json:"state_before,omitempty"`
+	StateAfter      json.RawMessage   `json:"state_after,omitempty"`
+	ChangedKeys     []string          `json:"changed_keys,omitempty"`
+	ToolSideEffects []string          `json:"tool_side_effects,omitempty"`
+	ResourceRefs    []string          `json:"resource_refs,omitempty"`
+	StateChanges    []StateChangeItem `json:"state_changes,omitempty"`
 }
 
 // Narrative is the full narrative model for the Trace UI (timeline segments + step details).
@@ -321,13 +331,29 @@ func BuildNarrative(events []jobstore.JobEvent) *Narrative {
 			}
 			toolSideEffects := parseStringSlice(pl, "tool_side_effects")
 			resourceRefs := parseStringSlice(pl, "resource_refs")
+			stateChanges := parseStateChanges(pl["state_changes"])
 			out.Steps[idx].StateDiff = &StateDiff{
 				StateBefore:     stateBefore,
 				StateAfter:      stateAfter,
 				ChangedKeys:     changed,
 				ToolSideEffects: toolSideEffects,
 				ResourceRefs:    resourceRefs,
+				StateChanges:    stateChanges,
 			}
+		case jobstore.StateChanged:
+			nodeID := getStr("node_id")
+			idx, ok := spanToStepIndex[nodeID]
+			if !ok || idx >= len(out.Steps) {
+				continue
+			}
+			stateChanges := parseStateChanges(pl["state_changes"])
+			if len(stateChanges) == 0 {
+				continue
+			}
+			if out.Steps[idx].StateDiff == nil {
+				out.Steps[idx].StateDiff = &StateDiff{}
+			}
+			out.Steps[idx].StateDiff.StateChanges = append(out.Steps[idx].StateDiff.StateChanges, stateChanges...)
 		case jobstore.AgentThoughtRecorded, jobstore.DecisionMade:
 			nodeID := getStr("node_id")
 			content := getStr("content")
@@ -450,6 +476,40 @@ func parseStringSlice(pl map[string]interface{}, key string) []string {
 	for _, x := range arr {
 		if s, ok := x.(string); ok {
 			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func parseStateChanges(v interface{}) []StateChangeItem {
+	arr, ok := v.([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]StateChangeItem, 0, len(arr))
+	for _, x := range arr {
+		m, ok := x.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		item := StateChangeItem{}
+		if s, _ := m["resource_type"].(string); s != "" {
+			item.ResourceType = s
+		}
+		if s, _ := m["resource_id"].(string); s != "" {
+			item.ResourceID = s
+		}
+		if s, _ := m["operation"].(string); s != "" {
+			item.Operation = s
+		}
+		if s, _ := m["step_id"].(string); s != "" {
+			item.StepID = s
+		}
+		if s, _ := m["tool_name"].(string); s != "" {
+			item.ToolName = s
+		}
+		if item.ResourceType != "" || item.ResourceID != "" || item.Operation != "" {
+			out = append(out, item)
 		}
 	}
 	return out

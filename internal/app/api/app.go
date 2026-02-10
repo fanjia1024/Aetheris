@@ -219,7 +219,8 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		jobEventStore = jobstore.NewMemoryStore()
 	}
 	nodeEventSink := NewNodeEventSink(jobEventStore)
-	dagCompiler = NewDAGCompiler(llmClientForAgent, toolsReg, engine, nodeEventSink, nodeEventSink)
+	invocationStore := agentexec.NewToolInvocationStoreMem()
+	dagCompiler = NewDAGCompiler(llmClientForAgent, toolsReg, engine, nodeEventSink, nodeEventSink, invocationStore)
 	dagRunner = NewDAGRunner(dagCompiler)
 	var agentStateStore runtime.AgentStateStore
 	if bootstrap.Config != nil && bootstrap.Config.JobStore.Type == "postgres" && bootstrap.Config.JobStore.DSN != "" {

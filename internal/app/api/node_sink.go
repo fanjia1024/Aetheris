@@ -347,6 +347,31 @@ func (s *nodeEventSinkImpl) AppendCommandCommitted(ctx context.Context, jobID st
 	return err
 }
 
+// AppendStateChanged 实现 StateChangeSink；写入 state_changed 事件，供 Trace 审计「本步改变了什么」
+func (s *nodeEventSinkImpl) AppendStateChanged(ctx context.Context, jobID string, nodeID string, changes []agentexec.StateChanged) error {
+	if s.store == nil || len(changes) == 0 {
+		return nil
+	}
+	_, ver, err := s.store.ListEvents(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	stepIndex := ver + 1
+	pl := map[string]interface{}{
+		"node_id":       nodeID,
+		"step_index":    stepIndex,
+		"state_changes": changes,
+	}
+	payload, err := json.Marshal(pl)
+	if err != nil {
+		return err
+	}
+	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{
+		JobID: jobID, Type: jobstore.StateChanged, Payload: payload,
+	})
+	return err
+}
+
 // NewReplayContextBuilder 创建从事件流重建 ReplayContext 的 Builder（供 Runner 无 Checkpoint 时恢复）
 func NewReplayContextBuilder(store jobstore.JobStore) replay.ReplayContextBuilder {
 	return replay.NewReplayContextBuilder(store)

@@ -14,13 +14,31 @@
 
 package executor
 
-import "encoding/json"
+import (
+	"context"
+	"encoding/json"
+)
+
+// StateChanged 单条外部资源变更，供审计与 Trace UI「本步改变了什么」
+type StateChanged struct {
+	ResourceType string `json:"resource_type"` // e.g. github_issue, file, release
+	ResourceID   string `json:"resource_id"`   // e.g. "51", path, tag
+	Operation    string `json:"operation"`     // e.g. created, updated, deleted
+	StepID       string `json:"step_id,omitempty"`
+	ToolName     string `json:"tool_name,omitempty"`
+}
 
 // StateCheckpointOpts 可选扩展字段，供 state_checkpointed 事件与 Trace UI「本步变更」展示
 type StateCheckpointOpts struct {
-	ChangedKeys     []string // 本步变更的 memory key 列表
-	ToolSideEffects []string // 本步工具调用的副作用摘要（如 "created issue #123"）
-	ResourceRefs    []string // 本步涉及资源引用（如 issue ID、文件路径）
+	ChangedKeys     []string       // 本步变更的 memory key 列表
+	ToolSideEffects []string       // 本步工具调用的副作用摘要（如 "created issue #123"）
+	ResourceRefs    []string       // 本步涉及资源引用（如 issue ID、文件路径）
+	StateChanges    []StateChanged // 结构化外部资源变更，供审计
+}
+
+// StateChangeSink 写入 state_changed 事件；Adapter 在 tool 提交副作用后可调用
+type StateChangeSink interface {
+	AppendStateChanged(ctx context.Context, jobID string, nodeID string, changes []StateChanged) error
 }
 
 // ChangedKeysFromState 比较 state_before 与 state_after JSON，返回发生变化的 key 列表
