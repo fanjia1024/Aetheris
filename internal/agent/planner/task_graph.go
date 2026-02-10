@@ -30,10 +30,10 @@ const (
 
 // WaitKind 等待类型（NodeWait 时 Config["wait_kind"]）
 const (
-	WaitKindUserInput  = "user_input"
-	WaitKindWebhook    = "webhook"
-	WaitKindSchedule   = "schedule"
-	WaitKindCondition  = "condition"
+	WaitKindUserInput = "user_input"
+	WaitKindWebhook   = "webhook"
+	WaitKindSchedule  = "schedule"
+	WaitKindCondition = "condition"
 )
 
 // TaskNode 任务图中的节点

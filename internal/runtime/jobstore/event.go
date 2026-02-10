@@ -35,11 +35,11 @@ const (
 	JobCancelled           EventType = "job_cancelled"
 
 	// Job 状态机事件（见 design/job-state-machine.md）：驱动状态迁移，写入后应更新 metadata status
-	JobQueued    EventType = "job_queued"
-	JobLeased    EventType = "job_leased"
-	JobRunning   EventType = "job_running"
-	JobWaiting   EventType = "job_waiting"
-	JobRequeued  EventType = "job_requeued"
+	JobQueued     EventType = "job_queued"
+	JobLeased     EventType = "job_leased"
+	JobRunning    EventType = "job_running"
+	JobWaiting    EventType = "job_waiting"
+	JobRequeued   EventType = "job_requeued"
 	WaitCompleted EventType = "wait_completed"
 
 	// 以上事件中参与 Replay 的 Effect 事件（见 design/effect-system.md）：

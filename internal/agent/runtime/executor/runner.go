@@ -753,12 +753,12 @@ runLoop:
 			_ = r.nodeEventSink.AppendStateCheckpointed(ctx, j.ID, step.NodeID, stateBefore, payloadResults, opts)
 			// 推理快照：供因果调试（该步的决策上下文）
 			snapshot := map[string]interface{}{
-				"node_id":       step.NodeID,
-				"step_id":       step.NodeID,
-				"node_type":     step.NodeType,
-				"goal":          j.Goal,
-				"duration_ms":   durationMs,
-				"timestamp":     time.Now().Format(time.RFC3339),
+				"node_id":     step.NodeID,
+				"step_id":     step.NodeID,
+				"node_type":   step.NodeType,
+				"goal":        j.Goal,
+				"duration_ms": durationMs,
+				"timestamp":   time.Now().Format(time.RFC3339),
 			}
 			if len(stateBefore) > 0 {
 				snapshot["state_before"] = json.RawMessage(stateBefore)

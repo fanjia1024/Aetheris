@@ -36,22 +36,22 @@ type TimelineSegment struct {
 
 // StepNarrative is the narrative view for one step (Temporal-style minimal debug unit).
 type StepNarrative struct {
-	SpanID         string                 `json:"span_id"`
-	Type           string                 `json:"type"` // plan | node | tool
-	Label          string                 `json:"label"`
-	NodeID         string                 `json:"node_id,omitempty"`
-	State          string                 `json:"state,omitempty"`
-	ResultType     string                 `json:"result_type,omitempty"` // Phase A 世界语义: pure | success | side_effect_committed | retryable_failure | permanent_failure | compensatable_failure | compensated
-	Reason         string                 `json:"reason,omitempty"`
-	Attempts       int                    `json:"attempts,omitempty"`
-	WorkerID       string                 `json:"worker_id,omitempty"`
-	DurationMs     int64                  `json:"duration_ms,omitempty"`
-	StartTime      *time.Time             `json:"start_time,omitempty"`
-	EndTime        *time.Time             `json:"end_time,omitempty"`
-	Reasoning          []ReasoningItem   `json:"reasoning,omitempty"`
-	ToolInvocation     *ToolInvocationSummary `json:"tool_invocation,omitempty"`
-	StateDiff          *StateDiff             `json:"state_diff,omitempty"`
-	ReasoningSnapshot json.RawMessage   `json:"reasoning_snapshot,omitempty"` // 该步的推理快照，供因果调试
+	SpanID            string                 `json:"span_id"`
+	Type              string                 `json:"type"` // plan | node | tool
+	Label             string                 `json:"label"`
+	NodeID            string                 `json:"node_id,omitempty"`
+	State             string                 `json:"state,omitempty"`
+	ResultType        string                 `json:"result_type,omitempty"` // Phase A 世界语义: pure | success | side_effect_committed | retryable_failure | permanent_failure | compensatable_failure | compensated
+	Reason            string                 `json:"reason,omitempty"`
+	Attempts          int                    `json:"attempts,omitempty"`
+	WorkerID          string                 `json:"worker_id,omitempty"`
+	DurationMs        int64                  `json:"duration_ms,omitempty"`
+	StartTime         *time.Time             `json:"start_time,omitempty"`
+	EndTime           *time.Time             `json:"end_time,omitempty"`
+	Reasoning         []ReasoningItem        `json:"reasoning,omitempty"`
+	ToolInvocation    *ToolInvocationSummary `json:"tool_invocation,omitempty"`
+	StateDiff         *StateDiff             `json:"state_diff,omitempty"`
+	ReasoningSnapshot json.RawMessage        `json:"reasoning_snapshot,omitempty"` // 该步的推理快照，供因果调试
 }
 
 // ReasoningItem is one agent thought or decision (from agent_thought_recorded, decision_made, tool_selected).
