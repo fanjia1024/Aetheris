@@ -42,6 +42,8 @@ type JobStore interface {
 	Requeue(ctx context.Context, job *Job) error
 	// RequestCancel 请求取消执行中的 Job；Worker 轮询 Get 时发现 CancelRequestedAt 非零则取消 runCtx
 	RequestCancel(ctx context.Context, jobID string) error
+	// ReclaimOrphanedJobs 将 status=Running 且 updated_at 早于 (now - olderThan) 的 Job 置回 Pending，供其他 Worker 认领；返回回收数量（design/job-state-machine.md）
+	ReclaimOrphanedJobs(ctx context.Context, olderThan time.Duration) (int, error)
 }
 
 // jobMatchesCapabilities 判断 Job 的 RequiredCapabilities 是否被 workerCapabilities 覆盖；jobRequired 为空表示任意 Worker 可执行；workerCapabilities 为空表示不按能力过滤
@@ -232,6 +234,12 @@ func (s *JobStoreMem) RequestCancel(ctx context.Context, jobID string) error {
 	j.CancelRequestedAt = time.Now()
 	j.UpdatedAt = j.CancelRequestedAt
 	return nil
+}
+
+// ReclaimOrphanedJobs 内存实现：单进程无租约过期语义，返回 0
+func (s *JobStoreMem) ReclaimOrphanedJobs(ctx context.Context, olderThan time.Duration) (int, error) {
+	_ = olderThan
+	return 0, nil
 }
 
 // WaitNextPending 阻塞直到有 Pending 或 ctx 取消，然后尝试 Claim；无则返回 nil, nil

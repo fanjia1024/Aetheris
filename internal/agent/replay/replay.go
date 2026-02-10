@@ -189,6 +189,22 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 				continue
 			}
 			out.StateChangesByStep[pl.NodeID] = append(out.StateChangesByStep[pl.NodeID], pl.StateChanges...)
+		case jobstore.WaitCompleted:
+			var pl struct {
+				NodeID  string          `json:"node_id"`
+				Payload json.RawMessage `json:"payload"`
+			}
+			if err := json.Unmarshal(e.Payload, &pl); err != nil || pl.NodeID == "" {
+				continue
+			}
+			out.CompletedNodeIDs[pl.NodeID] = struct{}{}
+			out.CursorNode = pl.NodeID
+			out.CompletedCommandIDs[pl.NodeID] = struct{}{}
+			if len(pl.Payload) > 0 {
+				out.CommandResults[pl.NodeID] = []byte(pl.Payload)
+			} else {
+				out.CommandResults[pl.NodeID] = []byte("{}")
+			}
 		}
 	}
 	// 推导 Phase（plan 3.4）

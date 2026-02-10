@@ -42,4 +42,6 @@ type JobStore interface {
 	Heartbeat(ctx context.Context, workerID string, jobID string) error
 	// Watch 订阅该 job 的新事件；实现层在每次对该 job 成功 Append 后向返回的 channel 发送新事件
 	Watch(ctx context.Context, jobID string) (<-chan JobEvent, error)
+	// ListJobIDsWithExpiredClaim 返回租约已过期的 job_id 列表，供 Scheduler 在 metadata 侧回收孤儿（design/job-state-machine.md）
+	ListJobIDsWithExpiredClaim(ctx context.Context) ([]string, error)
 }

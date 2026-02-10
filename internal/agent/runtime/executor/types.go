@@ -16,9 +16,13 @@ package executor
 
 import (
 	"context"
+	"errors"
 
 	"rag-platform/internal/agent/runtime"
 )
+
+// ErrJobWaiting 表示 Job 在 Wait 节点挂起，等待 signal/continue 后由其他 Worker 认领继续（design/job-state-machine.md）
+var ErrJobWaiting = errors.New("executor: job waiting for signal")
 
 // agentContextKey 用于在 context 中传递 *runtime.Agent（ToolExec 等可从 ctx 取 agent）
 type agentContextKey struct{}

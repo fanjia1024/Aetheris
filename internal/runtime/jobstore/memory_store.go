@@ -170,6 +170,19 @@ func (s *memoryStore) Heartbeat(ctx context.Context, workerID string, jobID stri
 	return nil
 }
 
+func (s *memoryStore) ListJobIDsWithExpiredClaim(ctx context.Context) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	var ids []string
+	for jobID, claim := range s.claims {
+		if claim.ExpiresAt.Before(now) || claim.ExpiresAt.Equal(now) {
+			ids = append(ids, jobID)
+		}
+	}
+	return ids, nil
+}
+
 func (s *memoryStore) Watch(ctx context.Context, jobID string) (<-chan JobEvent, error) {
 	ch := make(chan JobEvent, watchChanBuffer)
 	s.mu.Lock()

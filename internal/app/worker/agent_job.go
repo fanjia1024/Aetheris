@@ -92,6 +92,10 @@ func (r *AgentJobRunner) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case r.limiter <- struct{}{}:
+				// 孤儿回收：将 metadata 中 Running 且超过租约时长的 Job 置回 Pending，供本 Worker 或其他 Worker 认领
+				if reclaimed, err := r.jobStore.ReclaimOrphanedJobs(ctx, r.leaseDuration); err == nil && reclaimed > 0 {
+					r.logger.Info("回收孤儿 Job", "reclaimed", reclaimed)
+				}
 				var jobID string
 				if len(r.capabilities) > 0 {
 					// 按能力派发：先从 metadata store 认领能力匹配的 Job，再在 event store 占租约

@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
+	"time"
 
 	"rag-platform/internal/agent/replay"
 	agentexec "rag-platform/internal/agent/runtime/executor"
@@ -381,6 +382,46 @@ func (s *nodeEventSinkImpl) AppendStateChanged(ctx context.Context, jobID string
 	}
 	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{
 		JobID: jobID, Type: jobstore.StateChanged, Payload: payload,
+	})
+	return err
+}
+
+// AppendJobWaiting 实现 NodeEventSink；写入 job_waiting 事件（design/job-state-machine.md）
+func (s *nodeEventSinkImpl) AppendJobWaiting(ctx context.Context, jobID string, nodeID string, waitKind, reason string, expiresAt time.Time) error {
+	if s.store == nil {
+		return nil
+	}
+	_, ver, err := s.store.ListEvents(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	pl := map[string]interface{}{
+		"node_id":    nodeID,
+		"wait_kind":  waitKind,
+		"reason":     reason,
+		"expires_at": expiresAt.Format(time.RFC3339),
+	}
+	payload, err := json.Marshal(pl)
+	if err != nil {
+		return err
+	}
+	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{
+		JobID: jobID, Type: jobstore.JobWaiting, Payload: payload,
+	})
+	return err
+}
+
+// AppendReasoningSnapshot 实现 NodeEventSink；写入 reasoning_snapshot 事件，供因果调试（Causal Debugging）
+func (s *nodeEventSinkImpl) AppendReasoningSnapshot(ctx context.Context, jobID string, payload []byte) error {
+	if s.store == nil || len(payload) == 0 {
+		return nil
+	}
+	_, ver, err := s.store.ListEvents(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{
+		JobID: jobID, Type: jobstore.ReasoningSnapshot, Payload: payload,
 	})
 	return err
 }

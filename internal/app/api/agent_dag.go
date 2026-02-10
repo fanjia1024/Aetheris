@@ -127,6 +127,7 @@ func NewDAGCompiler(llmClient llm.Client, toolsReg *tools.Registry, engine *eino
 		planner.NodeLLM:      llmAdapter,
 		planner.NodeTool:     toolAdapter,
 		planner.NodeWorkflow: workflowAdapter,
+		planner.NodeWait:     &agentexec.WaitNodeAdapter{},
 	}
 	return agentexec.NewCompiler(adapters)
 }

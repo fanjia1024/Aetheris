@@ -34,6 +34,18 @@ const (
 	JobFailed              EventType = "job_failed"
 	JobCancelled           EventType = "job_cancelled"
 
+	// Job 状态机事件（见 design/job-state-machine.md）：驱动状态迁移，写入后应更新 metadata status
+	JobQueued    EventType = "job_queued"
+	JobLeased    EventType = "job_leased"
+	JobRunning   EventType = "job_running"
+	JobWaiting   EventType = "job_waiting"
+	JobRequeued  EventType = "job_requeued"
+	WaitCompleted EventType = "wait_completed"
+
+	// 以上事件中参与 Replay 的 Effect 事件（见 design/effect-system.md）：
+	// PlanGenerated, CommandCommitted, ToolInvocationFinished, NodeFinished 用于重建 ReplayContext；
+	// Replay 时禁止真实调用 LLM/Tool，只读这些事件注入结果。
+
 	// Semantic events for Trace narrative (v0.9); see design/trace-event-schema-v0.9.md
 	StateCheckpointed    EventType = "state_checkpointed"
 	AgentThoughtRecorded EventType = "agent_thought_recorded"
@@ -44,6 +56,8 @@ const (
 	RecoveryCompleted    EventType = "recovery_completed"
 	StepCompensated      EventType = "step_compensated"
 	StateChanged         EventType = "state_changed" // 外部资源变更（resource_type, resource_id, operation）供审计
+	// ReasoningSnapshot 推理快照：每步完成后的决策上下文，供因果调试（哪个计划步骤、哪次 LLM 输出导致该步）
+	ReasoningSnapshot EventType = "reasoning_snapshot"
 )
 
 // JobEvent 单条不可变事件；Job 的真实形态是事件流

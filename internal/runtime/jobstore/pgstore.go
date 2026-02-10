@@ -224,6 +224,25 @@ func (s *pgStore) Heartbeat(ctx context.Context, workerID string, jobID string) 
 	return nil
 }
 
+// ListJobIDsWithExpiredClaim 返回租约已过期的 job_id 列表，供 metadata 侧回收孤儿
+func (s *pgStore) ListJobIDsWithExpiredClaim(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT job_id FROM job_claims WHERE expires_at <= now() ORDER BY job_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // ListActiveWorkerIDs 返回当前有未过期租约的 worker_id 列表（供运维 CLI / API 展示）
 func (s *pgStore) ListActiveWorkerIDs(ctx context.Context) ([]string, error) {
 	rows, err := s.pool.Query(ctx,

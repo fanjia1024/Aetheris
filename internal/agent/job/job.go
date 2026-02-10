@@ -16,7 +16,7 @@ package job
 
 import "time"
 
-// JobStatus 任务状态
+// JobStatus 任务状态；与 design/job-state-machine.md 一致，可由事件流推导（DeriveStatusFromEvents）
 type JobStatus int
 
 const (
@@ -25,6 +25,10 @@ const (
 	StatusCompleted
 	StatusFailed
 	StatusCancelled
+	// StatusWaiting 在 Wait 节点挂起，等待 signal/continue（见 design/job-state-machine.md）
+	StatusWaiting
+	// StatusRetrying 失败后等待重试（可选显式状态）
+	StatusRetrying
 )
 
 func (s JobStatus) String() string {
@@ -39,6 +43,10 @@ func (s JobStatus) String() string {
 		return "failed"
 	case StatusCancelled:
 		return "cancelled"
+	case StatusWaiting:
+		return "waiting"
+	case StatusRetrying:
+		return "retrying"
 	default:
 		return "unknown"
 	}

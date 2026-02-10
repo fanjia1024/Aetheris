@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -179,6 +180,10 @@ func NewApp(cfg *config.Config) (*App, error) {
 				_ = agentStateStore.SaveAgentState(ctx, j.AgentID, agent.Session.ID, runtime.SessionToAgentState(agent.Session))
 			}
 			_, ver, _ := pgEventStore.ListEvents(ctx, j.ID)
+			if err != nil && errors.Is(err, agentexec.ErrJobWaiting) {
+				// Job 在 Wait 节点挂起，已写 job_waiting 并置为 Waiting；等待 signal 后重新入队，不写终端事件
+				return err
+			}
 			if err != nil {
 				// 毒任务保护：达到 max_attempts 后标记 Failed 并写 job_failed，不再调度；否则 Requeue（不写终端事件）供再次 Claim
 				if j.RetryCount+1 >= maxAttempts {

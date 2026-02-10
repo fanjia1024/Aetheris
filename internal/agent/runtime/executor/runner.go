@@ -112,11 +112,15 @@ type PlanGeneratedSink interface {
 // NodeEventSink 节点级事件写入：RunForJob 每步前后写入 NodeStarted/NodeFinished，供 Replay 重建上下文
 // resultType/reason 为 Phase A 失败语义；仅 result_type==success 时 Replay 将节点视为完成
 // AppendStateCheckpointed 的 opts 可选携带 changed_keys、tool_side_effects、resource_refs 供 Trace UI「本步变更」展示
+// AppendJobWaiting 写入 job_waiting，表示 Job 在 Wait 节点挂起（design/job-state-machine.md）
 type NodeEventSink interface {
 	AppendNodeStarted(ctx context.Context, jobID string, nodeID string, attempt int, workerID string) error
 	// AppendNodeFinished 写入 node_finished；stepID 为空时用 nodeID；inputHash 非空时写入 payload 供 Replay 确定性判定（plan 3.3）
 	AppendNodeFinished(ctx context.Context, jobID string, nodeID string, payloadResults []byte, durationMs int64, state string, attempt int, resultType StepResultType, reason string, stepID string, inputHash string) error
 	AppendStateCheckpointed(ctx context.Context, jobID string, nodeID string, stateBefore, stateAfter []byte, opts *StateCheckpointOpts) error
+	AppendJobWaiting(ctx context.Context, jobID string, nodeID string, waitKind, reason string, expiresAt time.Time) error
+	// AppendReasoningSnapshot 写入 reasoning_snapshot 事件，供因果调试（design：Causal Debugging）
+	AppendReasoningSnapshot(ctx context.Context, jobID string, payload []byte) error
 }
 
 // ToolEventSink 工具调用事件写入：Tool 节点执行前后写入 ToolCalled/ToolReturned 与 tool_invocation_started/finished，供 Trace/审计与幂等重放
@@ -518,7 +522,8 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 			goto runLoop
 		}
 	} else {
-		// 无 Cursor 时优先从事件流重建状态，走事件驱动循环：state → Advance → 再 state（plan 3.2）
+		// 无 Cursor 时优先从事件流重建状态，走事件驱动循环：state → Advance → 再 state（plan 3.2）。
+		// Replay 协议（design/effect-system.md）：禁止真实调用 LLM/Tool/IO，只读 PlanGenerated、CommandCommitted、ToolInvocationFinished 注入结果。
 		if r.replayBuilder != nil {
 			rctx, rerr := r.replayBuilder.BuildFromEvents(ctx, j.ID)
 			if rerr == nil && rctx != nil {
@@ -579,11 +584,12 @@ runLoop:
 
 	ctx = WithJobID(ctx, j.ID)
 	const statusCompleted = 2 // 对应 job.StatusCompleted
+	const statusWaiting = 5   // 对应 job.StatusWaiting（design/job-state-machine.md）
 	graphBytes, _ := taskGraph.Marshal()
 	for i := startIndex; i < len(steps); i++ {
 		step := steps[i]
 		commandID := step.NodeID // 单命令每节点
-		// 命令级跳过：事件流中已 command_committed 的永不重放，仅注入结果并推进游标（或按 ReplayPolicy 决策）
+		// 命令级跳过（design/effect-system.md）：事件流中已 command_committed 的永不重放，仅注入结果并推进游标（或按 ReplayPolicy 决策）
 		if replayCtx != nil {
 			if r.replayPolicy != nil {
 				decision := r.replayPolicy.Decide(step.NodeID, commandID, step.NodeType, replayCtx)
@@ -671,6 +677,35 @@ runLoop:
 		if r.nodeEventSink != nil {
 			_ = r.nodeEventSink.AppendNodeStarted(ctx, j.ID, step.NodeID, 1, "")
 		}
+		// Wait 节点：不执行，写 job_waiting 并置为 Waiting，由 API signal 后重新入队继续（design/job-state-machine.md）
+		if step.NodeType == planner.NodeWait {
+			waitKind, reason := "", ""
+			var expiresAt time.Time
+			for _, n := range taskGraph.Nodes {
+				if n.ID == step.NodeID && n.Config != nil {
+					if k, ok := n.Config["wait_kind"].(string); ok {
+						waitKind = k
+					}
+					if r, ok := n.Config["reason"].(string); ok {
+						reason = r
+					}
+					if e, ok := n.Config["expires_at"].(string); ok {
+						if t, err := time.Parse(time.RFC3339, e); err == nil {
+							expiresAt = t
+						}
+					}
+					break
+				}
+			}
+			if expiresAt.IsZero() {
+				expiresAt = time.Now().Add(24 * time.Hour)
+			}
+			if r.nodeEventSink != nil {
+				_ = r.nodeEventSink.AppendJobWaiting(ctx, j.ID, step.NodeID, waitKind, reason, expiresAt)
+			}
+			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusWaiting)
+			return ErrJobWaiting
+		}
 		stepStart := time.Now()
 		ctx = WithAgent(ctx, agent)
 		if replayCtx != nil && len(replayCtx.CompletedToolInvocations) > 0 {
@@ -716,6 +751,27 @@ runLoop:
 		if r.nodeEventSink != nil {
 			opts := &StateCheckpointOpts{ChangedKeys: ChangedKeysFromState(stateBefore, payloadResults)}
 			_ = r.nodeEventSink.AppendStateCheckpointed(ctx, j.ID, step.NodeID, stateBefore, payloadResults, opts)
+			// 推理快照：供因果调试（该步的决策上下文）
+			snapshot := map[string]interface{}{
+				"node_id":       step.NodeID,
+				"step_id":       step.NodeID,
+				"node_type":     step.NodeType,
+				"goal":          j.Goal,
+				"duration_ms":   durationMs,
+				"timestamp":     time.Now().Format(time.RFC3339),
+			}
+			if len(stateBefore) > 0 {
+				snapshot["state_before"] = json.RawMessage(stateBefore)
+			}
+			if len(payloadResults) > 0 {
+				snapshot["state_after"] = json.RawMessage(payloadResults)
+			}
+			if step.NodeType == "tool" {
+				snapshot["tool_name"] = step.NodeID // 或从 step 取 tool name 若有
+			}
+			if snapshotBytes, err := json.Marshal(snapshot); err == nil {
+				_ = r.nodeEventSink.AppendReasoningSnapshot(ctx, j.ID, snapshotBytes)
+			}
 		}
 		cp := runtime.NewNodeCheckpoint(agent.ID, sessionID, j.ID, step.NodeID, graphBytes, payloadResults, nil)
 		cpID, saveErr := r.checkpointStore.Save(ctx, cp)

@@ -1,0 +1,67 @@
+# Effect System — 确定性边界与 Replay 协议
+
+Agent execution = **Deterministic State Machine + Recorded Effects**。本文档规定哪些行为属于“效应”（必须记录、Replay 时禁止重执行），以及 Replay 的严格规则。参见 [execution-state-machine.md](execution-state-machine.md) 与 [event-replay-recovery.md](event-replay-recovery.md)。
+
+## 目标
+
+- **形式化定义**：执行由确定性状态机 + 已记录效应组成，而不是“一堆步骤 + 存点日志”。
+- **Replay 协议**：Replay 时**禁止**真实调用 LLM、Tool、外部 IO；只读 Effect Log（事件流中的效应事件）注入结果。
+
+## Effect 类型与 Replay 行为
+
+| 类型 | 含义 | Replay 时允许 | 对应事件/机制 |
+|------|------|----------------|----------------|
+| **Pure** | 无副作用的计算（纯函数、无 IO） | 可重新执行 | 无独立事件；节点 result_type=pure 时 Replay 可重算（当前实现中 llm/tool/workflow 均按 SideEffect 处理，Pure 为约定） |
+| **LLM** | 调用大模型得到输出 | 禁止调用；只读已记录结果 | `command_committed`（含 result）；Replay 从 CommandResults 注入 |
+| **Tool** | 调用工具（HTTP/DB/外部系统） | 禁止调用；只读已记录结果 | `tool_invocation_finished`、`command_committed`；Replay 从 CompletedToolInvocations/CommandResults 注入 |
+| **External IO** | 其他外部调用（HTTP/DB 等） | 禁止调用；只读已记录结果 | `command_committed` 或 `state_changed`；Replay 从 CommandResults/StateChangesByStep 注入 |
+| **Time / Random** | 依赖当前时间或随机数 | 禁止重算；只读已记录值 | 未来：`TimerFired`、`RandomRecorded`；Replay 时从事件注入 context |
+
+## Replay 规则（协议）
+
+以下为**系统约束**，所有 Runner/Adapter 实现必须遵守。
+
+### 禁止在 Replay 时执行
+
+- **禁止**调用 LLM（任何 Generate/Complete 类 API）。
+- **禁止**调用 Tool（Tools.Execute）。
+- **禁止**发起外部 HTTP、DB、文件 IO 等会改变外部世界的操作。
+
+### Replay 时只读
+
+- **PlanGenerated**：TaskGraph 为权威，Replay 不重新 Plan。
+- **CommandCommitted**：command_id → result，Replay 仅注入到 payload，不执行节点逻辑。
+- **ToolInvocationFinished**（outcome=success）：idempotency_key → result，Replay 仅注入，不执行 tool。
+- **NodeFinished**：CompletedNodeIDs、PayloadResults，用于恢复游标与累积状态。
+- （若实现）**TimerFired**、**RandomRecorded**：Replay 时仅从事件注入时间/种子到 context。
+
+### 写入顺序（与 execution-state-machine 一致）
+
+对会产生副作用的节点，写入顺序必须为：
+
+1. 执行完成后 **立即** 写 `command_committed`（或 `tool_invocation_finished`）；
+2. 再写 `node_finished`；
+3. 再 checkpoint / UpdateCursor。
+
+这样 Replay 以事件流为权威时，已提交命令永不重放。
+
+## 与现有事件类型映射
+
+| EffectKind（逻辑） | 存储为 EventType | 说明 |
+|-------------------|------------------|------|
+| LLMResponseRecorded | command_committed | node_id, command_id, result |
+| ToolResultRecorded | tool_invocation_finished + command_committed | idempotency_key, result；command_committed 存 node 级 result |
+| ExternalCallRecorded | command_committed 或 state_changed | 视是否需资源审计 |
+| TimerScheduled / TimerFired | （未来）timer_fired | 1.5 后期或 2.0 |
+| RetryDecision | （可选）显式事件或由 Requeue 体现 | 当前由 Scheduler 逻辑体现 |
+
+## 实现位置
+
+- **Replay 构建**：[internal/agent/replay/replay.go](internal/agent/replay/replay.go) — `BuildFromEvents` 解析 PlanGenerated、NodeFinished、CommandCommitted、ToolInvocationFinished。
+- **Replay 决策**：[internal/agent/replay/sandbox/policy.go](internal/agent/replay/sandbox/policy.go) — `ReplayPolicy.Decide` 对 llm/tool/workflow 返回 SideEffect，有记录则 Inject。
+- **Runner**：[internal/agent/runtime/executor/runner.go](internal/agent/runtime/executor/runner.go) — 无 Cursor 时优先从事件流重建；runLoop 内 command_id ∈ CompletedCommandIDs 时只注入、不调用 step.Run。
+- **Adapter**：[internal/agent/runtime/executor/node_adapter.go](internal/agent/runtime/executor/node_adapter.go) — Ledger 路径下仅 `AllowExecute` 才执行 tool；Replay 注入时不调用 tool。
+
+## 断言与测试
+
+- 单测应覆盖：**Replay 路径下不触发真实 LLM/Tool 调用**（mock 验证调用次数为 0）。见 `internal/agent/runtime/executor` 下 Replay 相关测试。

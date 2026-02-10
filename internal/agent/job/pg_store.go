@@ -25,13 +25,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// status 与 JobStatus 一致：0=Pending, 1=Running, 2=Completed, 3=Failed, 4=Cancelled
+// status 与 JobStatus 一致：0=Pending, 1=Running, 2=Completed, 3=Failed, 4=Cancelled, 5=Waiting, 6=Retrying
 const (
 	pgStatusPending   = 0
 	pgStatusRunning   = 1
 	pgStatusCompleted = 2
 	pgStatusFailed    = 3
 	pgStatusCancelled = 4
+	pgStatusWaiting   = 5
+	pgStatusRetrying  = 6
 )
 
 // JobStorePg Postgres 实现：jobs 表，供 API 与 Worker 共享
@@ -73,6 +75,10 @@ func statusToPg(s JobStatus) int {
 		return pgStatusFailed
 	case StatusCancelled:
 		return pgStatusCancelled
+	case StatusWaiting:
+		return pgStatusWaiting
+	case StatusRetrying:
+		return pgStatusRetrying
 	default:
 		return pgStatusPending
 	}
@@ -90,6 +96,10 @@ func pgToStatus(i int) JobStatus {
 		return StatusFailed
 	case pgStatusCancelled:
 		return StatusCancelled
+	case pgStatusWaiting:
+		return StatusWaiting
+	case pgStatusRetrying:
+		return StatusRetrying
 	default:
 		return StatusPending
 	}
@@ -387,4 +397,16 @@ func (s *JobStorePg) RequestCancel(ctx context.Context, jobID string) error {
 		`UPDATE jobs SET cancel_requested_at = now(), updated_at = now() WHERE id = $1`,
 		jobID)
 	return err
+}
+
+// ReclaimOrphanedJobs 将 status=Running 且 updated_at 早于 (now - olderThan) 的 Job 置回 Pending；olderThan 应 ≥ event store 的 lease_ttl
+func (s *JobStorePg) ReclaimOrphanedJobs(ctx context.Context, olderThan time.Duration) (int, error) {
+	cutoff := time.Now().Add(-olderThan)
+	cmd, err := s.pool.Exec(ctx,
+		`UPDATE jobs SET status = $1, updated_at = now() WHERE status = $2 AND updated_at < $3`,
+		pgStatusPending, pgStatusRunning, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return int(cmd.RowsAffected()), nil
 }

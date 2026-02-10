@@ -1176,6 +1176,79 @@ func (h *Handler) JobStop(ctx context.Context, c *app.RequestContext) {
 	})
 }
 
+// JobSignalRequest POST /api/jobs/:id/signal 请求体；唤醒在 Wait 节点挂起的 Job（design/job-state-machine.md）
+type JobSignalRequest struct {
+	Payload map[string]interface{} `json:"payload"`
+}
+
+// JobSignal 向挂起的 Job 发送 signal，写入 wait_completed 事件并将 Job 置回 Pending 供 Worker 认领继续
+func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
+	if h.jobStore == nil || h.jobEventStore == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "Job 或事件存储未启用"})
+		return
+	}
+	jobID := c.Param("id")
+	j, err := h.jobStore.Get(ctx, jobID)
+	if err != nil || j == nil {
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+		return
+	}
+	if j.Status != job.StatusWaiting {
+		c.JSON(consts.StatusBadRequest, map[string]string{"error": "任务未在等待状态，无法 signal"})
+		return
+	}
+	events, ver, err := h.jobEventStore.ListEvents(ctx, jobID)
+	if err != nil {
+		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件失败"})
+		return
+	}
+	var nodeID string
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Type == jobstore.JobWaiting {
+			var pl struct {
+				NodeID string `json:"node_id"`
+			}
+			if _ = json.Unmarshal(events[i].Payload, &pl); pl.NodeID != "" {
+				nodeID = pl.NodeID
+				break
+			}
+		}
+	}
+	if nodeID == "" {
+		c.JSON(consts.StatusBadRequest, map[string]string{"error": "未找到 job_waiting 节点"})
+		return
+	}
+	var req JobSignalRequest
+	if err := c.BindJSON(&req); err != nil {
+		req.Payload = nil
+	}
+	if req.Payload == nil {
+		req.Payload = make(map[string]interface{})
+	}
+	payloadBytes, _ := json.Marshal(req.Payload)
+	evPayload, _ := json.Marshal(map[string]interface{}{
+		"node_id": nodeID,
+		"payload": json.RawMessage(payloadBytes),
+	})
+	_, err = h.jobEventStore.Append(ctx, jobID, ver, jobstore.JobEvent{
+		JobID: jobID, Type: jobstore.WaitCompleted, Payload: evPayload,
+	})
+	if err != nil {
+		hlog.CtxErrorf(ctx, "Append WaitCompleted: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "写入事件失败"})
+		return
+	}
+	if err := h.jobStore.UpdateStatus(ctx, jobID, job.StatusPending); err != nil {
+		hlog.CtxErrorf(ctx, "UpdateStatus Pending: %v", err)
+	}
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"job_id":  jobID,
+		"status":  "pending",
+		"message": "已发送 signal，Job 将重新入队执行",
+	})
+}
+
 // GetJobReplay 返回只读的 Replay 视图（从事件流推导，不触发任何执行）；供 1.0 认证「Replay 一致性」校验
 func (h *Handler) GetJobReplay(ctx context.Context, c *app.RequestContext) {
 	if h.jobEventStore == nil {

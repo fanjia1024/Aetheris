@@ -24,6 +24,16 @@ const (
 	NodeTool     = "tool"
 	NodeWorkflow = "workflow"
 	NodeLLM      = "llm"
+	// NodeWait 等待节点：挂起直到收到 signal/continue（design/job-state-machine.md）；Config 含 wait_kind, reason, expires_at 等
+	NodeWait = "wait"
+)
+
+// WaitKind 等待类型（NodeWait 时 Config["wait_kind"]）
+const (
+	WaitKindUserInput  = "user_input"
+	WaitKindWebhook    = "webhook"
+	WaitKindSchedule   = "schedule"
+	WaitKindCondition  = "condition"
 )
 
 // TaskNode 任务图中的节点

@@ -227,7 +227,8 @@ func TestLedger_Recover_AfterCommit(t *testing.T) {
 	}
 }
 
-// TestAdapter_Replay_InjectsResult_NoToolCall 证明：Adapter 在 Ledger + CompletedToolInvocations 注入时只恢复结果，不调用 tool
+// TestAdapter_Replay_InjectsResult_NoToolCall 证明：Adapter 在 Ledger + CompletedToolInvocations 注入时只恢复结果，不调用 tool。
+// 对应 design/effect-system.md Replay 协议：Replay 时禁止真实调用 Tool，只读已记录结果；本测试用 mock 验证调用次数为 0。
 func TestAdapter_Replay_InjectsResult_NoToolCall(t *testing.T) {
 	store := NewToolInvocationStoreMem()
 	ledger := NewInvocationLedgerFromStore(store)

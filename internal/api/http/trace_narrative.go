@@ -48,9 +48,10 @@ type StepNarrative struct {
 	DurationMs     int64                  `json:"duration_ms,omitempty"`
 	StartTime      *time.Time             `json:"start_time,omitempty"`
 	EndTime        *time.Time             `json:"end_time,omitempty"`
-	Reasoning      []ReasoningItem        `json:"reasoning,omitempty"`
-	ToolInvocation *ToolInvocationSummary `json:"tool_invocation,omitempty"`
-	StateDiff      *StateDiff             `json:"state_diff,omitempty"`
+	Reasoning          []ReasoningItem   `json:"reasoning,omitempty"`
+	ToolInvocation     *ToolInvocationSummary `json:"tool_invocation,omitempty"`
+	StateDiff          *StateDiff             `json:"state_diff,omitempty"`
+	ReasoningSnapshot json.RawMessage   `json:"reasoning_snapshot,omitempty"` // 该步的推理快照，供因果调试
 }
 
 // ReasoningItem is one agent thought or decision (from agent_thought_recorded, decision_made, tool_selected).
@@ -372,6 +373,15 @@ func BuildNarrative(events []jobstore.JobEvent) *Narrative {
 			if nodeID != "" {
 				if idx, ok := spanToStepIndex[nodeID]; ok && idx < len(out.Steps) {
 					out.Steps[idx].Reasoning = append(out.Steps[idx].Reasoning, ReasoningItem{Role: role, Content: content, Kind: kind})
+				}
+			}
+		case jobstore.ReasoningSnapshot:
+			nodeID := getStr("node_id")
+			if nodeID != "" && len(e.Payload) > 0 {
+				if idx, ok := spanToStepIndex[nodeID]; ok && idx < len(out.Steps) {
+					snapshot := make([]byte, len(e.Payload))
+					copy(snapshot, e.Payload)
+					out.Steps[idx].ReasoningSnapshot = snapshot
 				}
 			}
 		case jobstore.ToolSelected:
