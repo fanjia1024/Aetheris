@@ -69,8 +69,8 @@ func (s *nodeEventSinkImpl) AppendNodeStarted(ctx context.Context, jobID string,
 	return err
 }
 
-// AppendNodeFinished 实现 NodeEventSink；resultType/reason 为 Phase A 失败语义，Replay 仅当 result_type==success 时视节点完成
-func (s *nodeEventSinkImpl) AppendNodeFinished(ctx context.Context, jobID string, nodeID string, payloadResults []byte, durationMs int64, state string, attempt int, resultType agentexec.StepResultType, reason string) error {
+// AppendNodeFinished 实现 NodeEventSink；resultType/reason 为 Phase A 失败语义，Replay 仅当 result_type==success 时视节点完成；stepID 为空时用 nodeID，inputHash 供确定性 Replay（plan 3.3）
+func (s *nodeEventSinkImpl) AppendNodeFinished(ctx context.Context, jobID string, nodeID string, payloadResults []byte, durationMs int64, state string, attempt int, resultType agentexec.StepResultType, reason string, stepID string, inputHash string) error {
 	if s.store == nil {
 		return nil
 	}
@@ -79,12 +79,17 @@ func (s *nodeEventSinkImpl) AppendNodeFinished(ctx context.Context, jobID string
 		return err
 	}
 	stepIndex := ver + 1
+	stepIDVal := stepID
+	if stepIDVal == "" {
+		stepIDVal = nodeID
+	}
 	pl := map[string]interface{}{
-		"node_id":      nodeID,
+		"node_id":       nodeID,
+		"step_id":       stepIDVal,
 		"trace_span_id": nodeID,
 		"parent_span_id": "plan",
-		"step_index":   stepIndex,
-		"result_type":  string(resultType), // required for Replay; default "" treated as success for old events
+		"step_index":    stepIndex,
+		"result_type":   string(resultType), // required for Replay; default "" treated as success for old events
 	}
 	if len(payloadResults) > 0 {
 		pl["payload_results"] = json.RawMessage(payloadResults)
@@ -100,6 +105,9 @@ func (s *nodeEventSinkImpl) AppendNodeFinished(ctx context.Context, jobID string
 	}
 	if reason != "" {
 		pl["reason"] = reason
+	}
+	if inputHash != "" {
+		pl["input_hash"] = inputHash
 	}
 	payload, err := json.Marshal(pl)
 	if err != nil {
@@ -322,8 +330,8 @@ func (s *nodeEventSinkImpl) AppendCommandEmitted(ctx context.Context, jobID stri
 	return err
 }
 
-// AppendCommandCommitted 实现 CommandEventSink；命令执行成功后立即写入，Replay 时已提交命令永不重放
-func (s *nodeEventSinkImpl) AppendCommandCommitted(ctx context.Context, jobID string, nodeID string, commandID string, result []byte) error {
+// AppendCommandCommitted 实现 CommandEventSink；命令执行成功后立即写入，Replay 时已提交命令永不重放；inputHash 供确定性 Replay（plan 3.3）
+func (s *nodeEventSinkImpl) AppendCommandCommitted(ctx context.Context, jobID string, nodeID string, commandID string, result []byte, inputHash string) error {
 	if s.store == nil {
 		return nil
 	}
@@ -332,12 +340,17 @@ func (s *nodeEventSinkImpl) AppendCommandCommitted(ctx context.Context, jobID st
 		return err
 	}
 	stepIndex := ver + 1
-	payload, err := json.Marshal(map[string]interface{}{
-		"node_id":    nodeID,
-		"command_id": commandID,
-		"result":     json.RawMessage(result),
-		"step_index": stepIndex,
-	})
+	pl := map[string]interface{}{
+		"node_id":     nodeID,
+		"command_id":  commandID,
+		"step_id":     commandID, // 单命令节点下 command_id = step_id
+		"result":      json.RawMessage(result),
+		"step_index":  stepIndex,
+	}
+	if inputHash != "" {
+		pl["input_hash"] = inputHash
+	}
+	payload, err := json.Marshal(pl)
 	if err != nil {
 		return err
 	}

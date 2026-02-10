@@ -87,7 +87,7 @@ func (a *LLMNodeAdapter) runNode(ctx context.Context, taskID string, cfg map[str
 	if a.CommandEventSink != nil {
 		if jobID := JobIDFromContext(ctx); jobID != "" {
 			resultBytes, _ := json.Marshal(resp)
-			_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, resultBytes)
+			_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, resultBytes, "")
 		}
 	}
 	if p.Results == nil {
@@ -338,7 +338,7 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 		})
 	}
 	if a.CommandEventSink != nil && jobID != "" {
-		_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, resultBytes)
+		_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, resultBytes, argsHash)
 	}
 	if a.InvocationLedger != nil && jobID != "" {
 		_ = a.InvocationLedger.Commit(ctx, invocationID, idempotencyKey, resultBytes)
@@ -438,7 +438,7 @@ func (a *WorkflowNodeAdapter) runNode(ctx context.Context, taskID, name string, 
 	if a.CommandEventSink != nil {
 		if jobID := JobIDFromContext(ctx); jobID != "" {
 			resultBytes, _ := json.Marshal(result)
-			_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, resultBytes)
+			_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, resultBytes, "")
 		}
 	}
 	if p.Results == nil {
