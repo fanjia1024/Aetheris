@@ -37,5 +37,5 @@
 
 ## 扩展（可选）
 
-- 若 LLM 节点可产出「请求/响应摘要」，可写入 snapshot 的 `llm_request`、`llm_response` 字段。
+- **LLM 节点**：Runner 在 node_type=llm 时已写入 snapshot 的 `llm_request`（goal）、`llm_response`（该步结果，即 payload.Results[node_id]）；供执行取证与因果链反推。
 - 若需按 step 存 plan_slice，可在 payload 中增加 `plan_slice`（当前计划片段 JSON）。

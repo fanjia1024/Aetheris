@@ -16,10 +16,13 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
+	"rag-platform/internal/agent/planner"
 	"rag-platform/internal/agent/replay"
 	"rag-platform/internal/agent/runtime"
 	"rag-platform/internal/runtime/jobstore"
@@ -112,5 +115,152 @@ func TestRunForJob_OnlyJobCreated_NoPlanGenerated_FailsAndSetsJobFailed(t *testi
 	const statusFailed = 3
 	if gotStatus != statusFailed {
 		t.Errorf("UpdateStatus status = %d, want %d (Failed)", gotStatus, statusFailed)
+	}
+}
+
+// buildReplayableEventStream 构造含 PlanGenerated + command_committed + NodeFinished 的事件流，使 Replay 时所有步骤均从事件注入（design/effect-system.md）
+func buildReplayableEventStream(t *testing.T, store jobstore.JobStore, jobID string, taskGraph *planner.TaskGraph, nodeResults map[string][]byte) {
+	t.Helper()
+	ctx := context.Background()
+	graphBytes, err := taskGraph.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ver := 0
+	// PlanGenerated
+	planPl, _ := json.Marshal(map[string]interface{}{"task_graph": json.RawMessage(graphBytes), "goal": "test"})
+	_, err = store.Append(ctx, jobID, ver, jobstore.JobEvent{JobID: jobID, Type: jobstore.PlanGenerated, Payload: planPl})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ver++
+	payloadResults := make(map[string]any)
+	for _, n := range taskGraph.Nodes {
+		resultBytes, ok := nodeResults[n.ID]
+		if !ok {
+			resultBytes = []byte(`"ok"`)
+		}
+		// command_committed
+		cmdPl, _ := json.Marshal(map[string]interface{}{"node_id": n.ID, "command_id": n.ID, "result": json.RawMessage(resultBytes)})
+		_, err = store.Append(ctx, jobID, ver, jobstore.JobEvent{JobID: jobID, Type: jobstore.CommandCommitted, Payload: cmdPl})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ver++
+		var nodeResult interface{}
+		_ = json.Unmarshal(resultBytes, &nodeResult)
+		payloadResults[n.ID] = nodeResult
+		payloadResultsBytes, _ := json.Marshal(payloadResults)
+		// NodeFinished
+		nfPl, _ := json.Marshal(map[string]interface{}{
+			"node_id":         n.ID,
+			"step_id":         n.ID,
+			"payload_results": json.RawMessage(payloadResultsBytes),
+			"result_type":     "success",
+		})
+		_, err = store.Append(ctx, jobID, ver, jobstore.JobEvent{JobID: jobID, Type: jobstore.NodeFinished, Payload: nfPl})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ver++
+	}
+}
+
+// TestReplayDeterminism_BuildFromEventsTwice 同一事件流 Replay 两次得到的 ReplayContext 一致（design/effect-system.md 断言与测试）
+func TestReplayDeterminism_BuildFromEventsTwice(t *testing.T) {
+	ctx := context.Background()
+	jobID := "job-replay-twice"
+	store := jobstore.NewMemoryStore()
+	taskGraph := &planner.TaskGraph{
+		Nodes: []planner.TaskNode{{ID: "n1", Type: planner.NodeLLM}, {ID: "n2", Type: planner.NodeTool, ToolName: "t1"}},
+		Edges: []planner.TaskEdge{{From: "n1", To: "n2"}},
+	}
+	buildReplayableEventStream(t, store, jobID, taskGraph, map[string][]byte{
+		"n1": []byte(`"llm-out"`),
+		"n2": []byte(`{"output":"tool-out"}`),
+	})
+	builder := replay.NewReplayContextBuilder(store)
+	rc1, err1 := builder.BuildFromEvents(ctx, jobID)
+	rc2, err2 := builder.BuildFromEvents(ctx, jobID)
+	if err1 != nil || err2 != nil {
+		t.Fatalf("BuildFromEvents: err1=%v err2=%v", err1, err2)
+	}
+	if rc1 == nil || rc2 == nil {
+		t.Fatal("ReplayContext nil")
+	}
+	// CompletedNodeIDs 一致
+	if len(rc1.CompletedNodeIDs) != len(rc2.CompletedNodeIDs) {
+		t.Errorf("CompletedNodeIDs len: %d vs %d", len(rc1.CompletedNodeIDs), len(rc2.CompletedNodeIDs))
+	}
+	for k := range rc1.CompletedNodeIDs {
+		if _, ok := rc2.CompletedNodeIDs[k]; !ok {
+			t.Errorf("CompletedNodeIDs missing in rc2: %q", k)
+		}
+	}
+	// CommandResults 一致
+	if len(rc1.CommandResults) != len(rc2.CommandResults) {
+		t.Errorf("CommandResults len: %d vs %d", len(rc1.CommandResults), len(rc2.CommandResults))
+	}
+	for k, v1 := range rc1.CommandResults {
+		v2, ok := rc2.CommandResults[k]
+		if !ok || string(v1) != string(v2) {
+			t.Errorf("CommandResults[%q]: rc1=%q rc2=%q", k, v1, v2)
+		}
+	}
+	// PayloadResults 一致
+	if string(rc1.PayloadResults) != string(rc2.PayloadResults) {
+		t.Errorf("PayloadResults: %q vs %q", rc1.PayloadResults, rc2.PayloadResults)
+	}
+}
+
+// countingLLM 用于断言 Replay 路径下不调用 LLM（design/effect-system.md）
+type countingLLM struct {
+	generateCalls int64
+}
+
+func (c *countingLLM) Generate(ctx context.Context, prompt string) (string, error) {
+	atomic.AddInt64(&c.generateCalls, 1)
+	return "mock", nil
+}
+
+func (c *countingLLM) Calls() int { return int(atomic.LoadInt64(&c.generateCalls)) }
+
+// TestReplayPath_DoesNotCallLLM 事件流已含全部 command_committed 时 RunForJob 仅注入、不调用 LLM（Replay 不触发副作用）
+func TestReplayPath_DoesNotCallLLM(t *testing.T) {
+	ctx := context.Background()
+	jobID := "job-replay-no-llm"
+	eventStore := jobstore.NewMemoryStore()
+	taskGraph := &planner.TaskGraph{
+		Nodes: []planner.TaskNode{{ID: "n1", Type: planner.NodeLLM}},
+		Edges: []planner.TaskEdge{},
+	}
+	buildReplayableEventStream(t, eventStore, jobID, taskGraph, map[string][]byte{"n1": []byte(`"replayed"`)})
+	replayBuilder := replay.NewReplayContextBuilder(eventStore)
+	fakeJobStore := &fakeJobStoreForRunner{}
+	cpStore := runtime.NewCheckpointStoreMem()
+	mockLLM := &countingLLM{}
+	adapters := map[string]NodeAdapter{
+		planner.NodeLLM: &LLMNodeAdapter{LLM: mockLLM},
+	}
+	compiler := NewCompiler(adapters)
+	runner := NewRunner(compiler)
+	runner.SetCheckpointStores(cpStore, fakeJobStore)
+	runner.SetReplayContextBuilder(replayBuilder)
+	agent := &runtime.Agent{ID: "a1"}
+	j := &JobForRunner{ID: jobID, AgentID: "a1", Goal: "g1", Cursor: ""}
+	err := runner.RunForJob(ctx, agent, j)
+	if err != nil {
+		t.Fatalf("RunForJob: %v", err)
+	}
+	if mockLLM.Calls() != 0 {
+		t.Errorf("Replay path must not call LLM: got %d calls", mockLLM.Calls())
+	}
+	gotJobID, gotStatus := fakeJobStore.getLast()
+	if gotJobID != jobID {
+		t.Errorf("UpdateStatus jobID = %q, want %q", gotJobID, jobID)
+	}
+	const statusCompleted = 2
+	if gotStatus != statusCompleted {
+		t.Errorf("UpdateStatus status = %d, want %d (Completed)", gotStatus, statusCompleted)
 	}
 }

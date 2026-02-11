@@ -38,6 +38,7 @@ import (
 	"rag-platform/internal/agent"
 	"rag-platform/internal/agent/job"
 	"rag-platform/internal/agent/planner"
+	"rag-platform/internal/agent/replay"
 	agentruntime "rag-platform/internal/agent/runtime"
 	"rag-platform/internal/agent/tools"
 	appcore "rag-platform/internal/app"
@@ -1273,7 +1274,7 @@ func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
 	})
 }
 
-// GetJobReplay 返回只读的 Replay 视图（从事件流推导，不触发任何执行）；供 1.0 认证「Replay 一致性」校验
+// GetJobReplay 返回只读的 Replay 视图（从事件流推导，不触发任何执行）；含 current_state 供 Query 语义（design/agent-process-model.md）
 func (h *Handler) GetJobReplay(ctx context.Context, c *app.RequestContext) {
 	if h.jobEventStore == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "事件存储未启用"})
@@ -1311,12 +1312,39 @@ func (h *Handler) GetJobReplay(ctx context.Context, c *app.RequestContext) {
 			goal = j.Goal
 		}
 	}
-	c.JSON(consts.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"job_id":    jobID,
 		"goal":      goal,
 		"read_only": true,
 		"timeline":  timeline,
-	})
+	}
+	// Query 语义：当前执行状态（已完成节点、游标、阶段），不推进执行
+	builder := replay.NewReplayContextBuilder(h.jobEventStore)
+	if rc, errBuild := builder.BuildFromEvents(ctx, jobID); errBuild == nil && rc != nil {
+		completedIDs := make([]string, 0, len(rc.CompletedNodeIDs))
+		for id := range rc.CompletedNodeIDs {
+			completedIDs = append(completedIDs, id)
+		}
+		phaseStr := "unknown"
+		switch rc.Phase {
+		case replay.PhasePlanning:
+			phaseStr = "planning"
+		case replay.PhaseExecuting:
+			phaseStr = "executing"
+		case replay.PhaseCompleted:
+			phaseStr = "completed"
+		case replay.PhaseFailed:
+			phaseStr = "failed"
+		case replay.PhaseCancelled:
+			phaseStr = "cancelled"
+		}
+		resp["current_state"] = map[string]interface{}{
+			"completed_node_ids": completedIDs,
+			"cursor_node":        rc.CursorNode,
+			"phase":              phaseStr,
+		}
+	}
+	c.JSON(consts.StatusOK, resp)
 }
 
 // GetJobEvents 返回该 Job 的原始事件列表

@@ -99,8 +99,8 @@ func (a *workflowExecAdapter) ExecuteWorkflow(ctx context.Context, name string, 
 	return a.engine.ExecuteWorkflow(ctx, name, pm)
 }
 
-// NewDAGCompiler 创建 TaskGraph→eino DAG 的编译器（注册 llm/tool/workflow 适配器）；toolEventSink/commandEventSink 可选；invocationStore 可选；resourceVerifier 可选，Confirmation Replay 时校验外部资源
-func NewDAGCompiler(llmClient llm.Client, toolsReg *tools.Registry, engine *eino.Engine, toolEventSink agentexec.ToolEventSink, commandEventSink agentexec.CommandEventSink, invocationStore agentexec.ToolInvocationStore, resourceVerifier agentexec.ResourceVerifier) *agentexec.Compiler {
+// NewDAGCompiler 创建 TaskGraph→eino DAG 的编译器（注册 llm/tool/workflow 适配器）；toolEventSink/commandEventSink 可选；invocationStore 可选；resourceVerifier 可选；attemptValidator 可选，非 nil 时 Ledger Commit 前校验 attempt（Lease fencing）
+func NewDAGCompiler(llmClient llm.Client, toolsReg *tools.Registry, engine *eino.Engine, toolEventSink agentexec.ToolEventSink, commandEventSink agentexec.CommandEventSink, invocationStore agentexec.ToolInvocationStore, resourceVerifier agentexec.ResourceVerifier, attemptValidator agentexec.AttemptValidator) *agentexec.Compiler {
 	toolAdapter := &agentexec.ToolNodeAdapter{Tools: &toolExecAdapter{reg: toolsReg}}
 	if toolEventSink != nil {
 		toolAdapter.ToolEventSink = toolEventSink
@@ -110,7 +110,11 @@ func NewDAGCompiler(llmClient llm.Client, toolsReg *tools.Registry, engine *eino
 	}
 	if invocationStore != nil {
 		toolAdapter.InvocationStore = invocationStore
-		toolAdapter.InvocationLedger = agentexec.NewInvocationLedgerFromStore(invocationStore)
+		if attemptValidator != nil {
+			toolAdapter.InvocationLedger = agentexec.NewInvocationLedger(invocationStore, attemptValidator)
+		} else {
+			toolAdapter.InvocationLedger = agentexec.NewInvocationLedgerFromStore(invocationStore)
+		}
 	}
 	if resourceVerifier != nil {
 		toolAdapter.ResourceVerifier = resourceVerifier

@@ -20,17 +20,31 @@ import (
 	"github.com/google/uuid"
 )
 
-// ledgerStore 包装 ToolInvocationStore，实现 InvocationLedger（执行许可裁决）
-type ledgerStore struct {
-	store ToolInvocationStore
+// AttemptValidator 校验当前 writer 是否仍为该 job 的租约持有者；用于 Ledger Commit 等写操作的 Lease fencing（design/scheduler-correctness.md）
+type AttemptValidator interface {
+	ValidateAttempt(ctx context.Context, jobID string) error
 }
 
-// NewInvocationLedgerFromStore 从现有 ToolInvocationStore 创建 InvocationLedger
+// ledgerStore 包装 ToolInvocationStore，实现 InvocationLedger（执行许可裁决）
+type ledgerStore struct {
+	store            ToolInvocationStore
+	attemptValidator AttemptValidator
+}
+
+// NewInvocationLedgerFromStore 从现有 ToolInvocationStore 创建 InvocationLedger（无 attempt 校验）
 func NewInvocationLedgerFromStore(store ToolInvocationStore) InvocationLedger {
 	if store == nil {
 		return nil
 	}
 	return &ledgerStore{store: store}
+}
+
+// NewInvocationLedger 创建带可选 AttemptValidator 的 InvocationLedger；Commit 时若 validator 非 nil 则校验当前 attempt 仍为 job 持有者（Lease fencing）
+func NewInvocationLedger(store ToolInvocationStore, validator AttemptValidator) InvocationLedger {
+	if store == nil {
+		return nil
+	}
+	return &ledgerStore{store: store, attemptValidator: validator}
 }
 
 // Acquire 实现 InvocationLedger
@@ -67,8 +81,16 @@ func (l *ledgerStore) Acquire(ctx context.Context, jobID, stepID, toolName, args
 	return InvocationDecisionAllowExecute, r, nil
 }
 
-// Commit 实现 InvocationLedger
+// Commit 实现 InvocationLedger；若配置了 AttemptValidator 则先校验当前 attempt 仍为该 job 持有者（Lease fencing），避免失去租约的 Worker 写入 Ledger
 func (l *ledgerStore) Commit(ctx context.Context, invocationID, idempotencyKey string, result []byte) error {
+	if l.attemptValidator != nil {
+		jobID := JobIDFromContext(ctx)
+		if jobID != "" {
+			if err := l.attemptValidator.ValidateAttempt(ctx, jobID); err != nil {
+				return err
+			}
+		}
+	}
 	return l.store.SetFinished(ctx, idempotencyKey, ToolInvocationStatusSuccess, result, true)
 }
 

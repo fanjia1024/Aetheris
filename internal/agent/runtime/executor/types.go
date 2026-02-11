@@ -42,12 +42,16 @@ type pendingToolInvocationsContextKey struct{}
 // executionStepIDContextKey 用于在 context 中传递确定性步身份（design/step-identity.md），供 Ledger/事件写入与 Replay 一致
 type executionStepIDContextKey struct{}
 
+// toolExecutionKeyContextKey 用于在 context 中传递当前工具执行的稳定身份，供 Tool 实现方做幂等（传给下游 idempotency key）；见 design/effect-system.md Idempotency contract
+type toolExecutionKeyContextKey struct{}
+
 var theAgentContextKey = agentContextKey{}
 var theJobIDContextKey = jobIDContextKey{}
 var theReplayContextKey = replayContextKey{}
 var theStateChangesByStepContextKey = stateChangesByStepContextKey{}
 var thePendingToolInvocationsContextKey = pendingToolInvocationsContextKey{}
 var theExecutionStepIDContextKey = executionStepIDContextKey{}
+var theToolExecutionKeyContextKey = toolExecutionKeyContextKey{}
 
 // WithAgent 将 agent 放入 ctx，供 Runner.Invoke 时传入节点
 func WithAgent(ctx context.Context, agent *runtime.Agent) context.Context {
@@ -140,6 +144,21 @@ func WithExecutionStepID(ctx context.Context, stepID string) context.Context {
 // ExecutionStepIDFromContext 从 context 取出步身份；空表示使用 planner node ID（向后兼容）
 func ExecutionStepIDFromContext(ctx context.Context) string {
 	v := ctx.Value(theExecutionStepIDContextKey)
+	if v == nil {
+		return ""
+	}
+	s, _ := v.(string)
+	return s
+}
+
+// WithToolExecutionKey 将当前工具调用的稳定执行键放入 ctx，供 Tool 实现方做幂等（Idempotency contract）；见 ExecutionKeyFromContext
+func WithToolExecutionKey(ctx context.Context, executionKey string) context.Context {
+	return context.WithValue(ctx, theToolExecutionKeyContextKey, executionKey)
+}
+
+// ExecutionKeyFromContext 从 context 取出当前工具调用的稳定执行键（job+step+idempotency_key 的等价标识）。Tool 实现方应据此做幂等或传给下游作 idempotency key；Runtime 保证同一 ExecutionKey 最多一次真实执行，Replay 仅注入已记录结果。
+func ExecutionKeyFromContext(ctx context.Context) string {
+	v := ctx.Value(theToolExecutionKeyContextKey)
 	if v == nil {
 		return ""
 	}

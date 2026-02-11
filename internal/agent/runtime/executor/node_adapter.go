@@ -370,6 +370,7 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 		inputBytes, _ := json.Marshal(cfg)
 		_ = a.ToolEventSink.AppendToolCalled(ctx, jobID, nodeIDForEvent, toolName, inputBytes)
 	}
+	ctx = WithToolExecutionKey(ctx, idempotencyKey)
 	result, err := a.Tools.Execute(ctx, toolName, cfg, state)
 	finishedAt := time.Now().UTC()
 	if err != nil {

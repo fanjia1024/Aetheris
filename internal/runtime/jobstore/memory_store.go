@@ -182,6 +182,16 @@ func (s *memoryStore) Heartbeat(ctx context.Context, workerID string, jobID stri
 	return nil
 }
 
+func (s *memoryStore) GetCurrentAttemptID(ctx context.Context, jobID string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	claim, ok := s.claims[jobID]
+	if !ok || claim.ExpiresAt.Before(time.Now()) {
+		return "", nil
+	}
+	return claim.AttemptID, nil
+}
+
 func (s *memoryStore) ListJobIDsWithExpiredClaim(ctx context.Context) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

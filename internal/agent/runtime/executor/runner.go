@@ -163,6 +163,7 @@ type Runner struct {
 	nodeEventSink     NodeEventSink
 	replayBuilder     replay.ReplayContextBuilder
 	replayPolicy      replaysandbox.ReplayPolicy // 可选；Replay 时按策略决定执行或注入
+	stepTimeout       time.Duration              // 可选；单步最大执行时间，超时按 retryable_failure（design/scheduler-correctness.md Step timeout）
 }
 
 // NewRunner 创建 Runner（仅编译与单次 Invoke）
@@ -194,6 +195,11 @@ func (r *Runner) SetReplayContextBuilder(b replay.ReplayContextBuilder) {
 // SetReplayPolicy 设置 Replay 策略（可选）；为 nil 时使用默认“已 command_committed 则注入”逻辑
 func (r *Runner) SetReplayPolicy(p replaysandbox.ReplayPolicy) {
 	r.replayPolicy = p
+}
+
+// SetStepTimeout 设置单步最大执行时间；超时后该步按 retryable_failure 处理（design/scheduler-correctness.md）
+func (r *Runner) SetStepTimeout(d time.Duration) {
+	r.stepTimeout = d
 }
 
 // Run 执行单轮：通过 Agent 的 Planner 得到 TaskGraph，编译为 DAG 并执行
@@ -393,10 +399,20 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 		}
 		ctx = WithStateChangesByStep(ctx, m)
 	}
+	runCtx := ctx
+	if r.stepTimeout > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, r.stepTimeout)
+		defer cancel()
+	}
 	var runErr error
-	payload, runErr = step.Run(ctx, payload)
+	payload, runErr = step.Run(runCtx, payload)
 	durationMs := time.Since(stepStart).Milliseconds()
 	resultType, reason := ClassifyError(runErr)
+	if runErr != nil && errors.Is(runErr, context.DeadlineExceeded) {
+		resultType = StepResultRetryableFailure
+		reason = "step timeout"
+	}
 	if resultType == StepResultSuccess {
 		if step.NodeType == "tool" {
 			resultType = StepResultSideEffectCommitted
@@ -713,10 +729,20 @@ runLoop:
 			}
 			ctx = WithStateChangesByStep(ctx, m)
 		}
+		runCtx := ctx
+		if r.stepTimeout > 0 {
+			var cancel context.CancelFunc
+			runCtx, cancel = context.WithTimeout(ctx, r.stepTimeout)
+			defer cancel()
+		}
 		var runErr error
-		payload, runErr = step.Run(ctx, payload)
+		payload, runErr = step.Run(runCtx, payload)
 		durationMs := time.Since(stepStart).Milliseconds()
 		resultType, reason := ClassifyError(runErr)
+		if runErr != nil && errors.Is(runErr, context.DeadlineExceeded) {
+			resultType = StepResultRetryableFailure
+			reason = "step timeout"
+		}
 		// 世界语义：tool 成功 = 已提交副作用；非 tool 成功 = 纯计算（Pure），replay 可重放
 		if resultType == StepResultSuccess {
 			if step.NodeType == "tool" {
@@ -761,6 +787,14 @@ runLoop:
 			}
 			if step.NodeType == "tool" {
 				snapshot["tool_name"] = step.NodeID // 或从 step 取 tool name 若有
+			}
+			if step.NodeType == planner.NodeLLM {
+				snapshot["llm_request"] = j.Goal
+				if payload.Results != nil {
+					if resp, ok := payload.Results[step.NodeID]; ok && resp != nil {
+						snapshot["llm_response"] = resp
+					}
+				}
 			}
 			if snapshotBytes, err := json.Marshal(snapshot); err == nil {
 				_ = r.nodeEventSink.AppendReasoningSnapshot(ctx, j.ID, snapshotBytes)

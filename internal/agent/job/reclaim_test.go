@@ -52,6 +52,10 @@ func (f *fakeEventStore) Watch(ctx context.Context, jobID string) (<-chan jobsto
 	panic("not used")
 }
 
+func (f *fakeEventStore) GetCurrentAttemptID(ctx context.Context, jobID string) (string, error) {
+	return "", nil
+}
+
 func TestReclaimOrphanedFromEventStore(t *testing.T) {
 	ctx := context.Background()
 	metadata := NewJobStoreMem()
