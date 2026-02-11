@@ -92,7 +92,11 @@ Key components:
 * **Execution Engine (eino)** — executes DAG nodes
 * **Workers** — distributed execution
 
+**P2 (future)**: Scheduler correctness (lease fencing, step heartbeat, worker epoch) is documented in [design/scheduler-correctness.md](design/scheduler-correctness.md).
+
 RAG is one capability that agents can use via pipelines or tools; it is **pluggable**, not the only built-in scenario. Aetheris is an **Agent Workflow Runtime** (like Temporal for agents): retrieval, generation, and knowledge pipelines are integrated as optional components, not the core product.
+
+**Names**: The product name is **Aetheris**. The Go module name (and import path) is **rag-platform**. See [docs/README.md](docs/README.md) for full naming (Aetheris, rag-platform, CoRag).
 
 Detailed documentation (configuration, CLI, deployment) is in [docs/](docs/).
 

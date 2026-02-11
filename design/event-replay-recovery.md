@@ -37,7 +37,7 @@ Runner 在「无 Cursor（无 Checkpoint）」时**优先**尝试从事件流重
    - 用 `ReplayContext.CompletedNodeIDs` 计算 **startIndex** = 第一个不在 CompletedNodeIDs 中的 step 索引。
    - 将 `PayloadResults` 反序列化进当前 DAG payload.Results；保存 **replayCtx** 供 runLoop 使用。
    - **直接进入 runLoop**，传入 completedSet = CompletedNodeIDs、replayCtx；runLoop 内每步若 command_id 已在 CompletedCommandIDs 则注入 CommandResults、写 NodeFinished（若尚未）、checkpoint 并 continue；若 node_id 已在 completedSet 则跳过；否则执行并先 command_committed（Adapter）再 NodeFinished、checkpoint（见 [execution-state-machine.md](execution-state-machine.md)）。**不调用 Planner**。
-3. 若 Replay 失败或无 PlanGenerated（例如旧 Job）：走原有路径，调用 Planner 生成 Plan 并写入 `PlanGenerated` 事件。
+3. 若 Replay 失败或无 PlanGenerated（例如旧 Job）：**不**调用 Planner；Runner 返回错误并将 Job 置为 Failed（见 [runtime-contract.md](runtime-contract.md) §4）。运维如需重新规划应通过显式 API 写入新的 Plan 事件。
 
 代码位置：[internal/agent/runtime/executor/runner.go](internal/agent/runtime/executor/runner.go)，「无 Cursor 时优先尝试从事件流重建」分支，成功后 `goto runLoop`；runLoop 内命令级跳过与注入逻辑。
 

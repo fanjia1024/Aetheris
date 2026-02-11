@@ -5,7 +5,8 @@ This document provides guidelines for AI agents working with the Aetheris codeba
 ## Project Overview
 
 Aetheris is a Go + Cloudwego eino powered agent execution runtime. Key technologies:
-- **Go 1.25.1+**
+- **Go 1.25.7** (see `go.mod` and CI)
+- **Go module**: `rag-platform` (import path for all internal packages)
 - **Cloudwego eino**: Workflow/DAG execution, Agent scheduling, Pipeline orchestration
 - **Hertz**: HTTP framework for REST APIs
 - **Viper**: Configuration management
@@ -255,7 +256,7 @@ deployments/      # Docker, K8s configurations
 - `configs/*.yaml`: Configuration files
 - `internal/runtime/eino/workflow.go`: Workflow implementation
 - `internal/api/http/handler.go`: HTTP handlers
-- `internal/app/app.go`: Core application logic
+- `internal/app/bootstrap.go`, `internal/app/api/app.go`: Bootstrap and API assembly (startup and wiring)
 - `pkg/errors/errors.go`: Error utilities
 
 ## Common Tasks

@@ -37,3 +37,6 @@ jobs:
 
       - name: Test
         run: go test -v -race -count=1 ./...
+
+      - name: Test coverage
+        run: go test -coverprofile=coverage.out -covermode=atomic ./...
