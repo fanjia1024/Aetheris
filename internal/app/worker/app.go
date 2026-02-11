@@ -211,7 +211,7 @@ func NewApp(cfg *config.Config) (*App, error) {
 		if maxConcurrency <= 0 {
 			maxConcurrency = 2
 		}
-		appObj.agentJobRunner = NewAgentJobRunner(
+		runner := NewAgentJobRunner(
 			DefaultWorkerID(),
 			pgEventStore,
 			pgJobStore,
@@ -222,6 +222,10 @@ func NewApp(cfg *config.Config) (*App, error) {
 			cfg.Worker.Capabilities,
 			logger,
 		)
+		// 唤醒队列：无 job 时用 Receive(pollInterval) 替代固定 sleep，API 侧 JobSignal/JobMessage 若设置同一 WakeupQueue 可立即唤醒（单进程部署时注入同一实例）
+		wakeupQueue := job.NewWakeupQueueMem(256)
+		runner.SetWakeupQueue(wakeupQueue)
+		appObj.agentJobRunner = runner
 		logger.Info("Worker Agent Job 模式已启用", "worker_id", DefaultWorkerID(), "dsn", dsn)
 	}
 

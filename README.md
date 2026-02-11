@@ -170,6 +170,8 @@ Aetheris is built not only to **trace** execution but to **audit** and **attribu
 
 See [design/execution-forensics.md](design/execution-forensics.md) and [design/causal-debugging.md](design/causal-debugging.md).
 
+**Formal execution guarantees** (step at-least-once, at-most-once, signal delivery, replay determinism, no duplicate side effects on crash) are documented in [design/execution-guarantees.md](design/execution-guarantees.md).
+
 ---
 
 ## License

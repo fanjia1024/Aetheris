@@ -813,6 +813,12 @@ runLoop:
 					}
 				}
 			}
+			// Evidence Graph：从工具步结果中取出 _evidence 写入 reasoning_snapshot（design/execution-forensics.md）
+			if payload.Results != nil {
+				if m, ok := payload.Results[step.NodeID].(map[string]interface{}); ok && m["_evidence"] != nil {
+					snapshot["evidence"] = m["_evidence"]
+				}
+			}
 			if snapshotBytes, err := json.Marshal(snapshot); err == nil {
 				_ = r.nodeEventSink.AppendReasoningSnapshot(ctx, j.ID, snapshotBytes)
 			}

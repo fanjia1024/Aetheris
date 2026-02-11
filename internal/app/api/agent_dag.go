@@ -126,6 +126,9 @@ func NewDAGCompiler(llmClient llm.Client, toolsReg *tools.Registry, engine *eino
 	if commandEventSink != nil {
 		llmAdapter.CommandEventSink = commandEventSink
 	}
+	if effectStore != nil {
+		llmAdapter.EffectStore = effectStore
+	}
 	workflowAdapter := &agentexec.WorkflowNodeAdapter{Workflow: &workflowExecAdapter{engine: engine}}
 	if commandEventSink != nil {
 		workflowAdapter.CommandEventSink = commandEventSink

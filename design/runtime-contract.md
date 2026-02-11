@@ -23,6 +23,13 @@ Reclaim 后再次 Claim 的 Job 会走 Replay；**安全前提**是 Effect 边�
 
 **接口**：见 [internal/runtime/jobstore/event.go](../internal/runtime/jobstore/event.go)（JobWaitingPayload）、[internal/api/http/handler.go](../internal/api/http/handler.go)（JobSignal 校验 correlation_key）、[internal/agent/job/state.go](../internal/agent/job/state.go)（IsJobBlocked）。
 
+### 外部事件送达保证（External Event Guarantee）
+
+- **送达语义**：Signal / Message 为 **at-least-once**。一旦 `wait_completed` 已写入且 Job 已置为 Pending，该 Job 将被 Scheduler 认领并继续执行；不会丢失「已送达」的 signal。
+- **重复幂等**：同一 `correlation_key` 的 signal（或 message 解除同一等待）若被多次调用，仅第一次会追加 `wait_completed`；后续请求若发现事件流中最后一条已是 `wait_completed` 且 `correlation_key` 一致，则直接返回 200（已送达），不再追加事件，避免重复 unblock。
+
+**接口**：JobSignal / JobMessage 在 Append 前通过 `lastEventIsWaitCompletedWithCorrelationKey(events, correlationKey)` 判断并短路返回。
+
 ---
 
 ## 三、谁拥有执行权？（租约 + Heartbeat）

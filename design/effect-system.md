@@ -109,10 +109,19 @@ Agent execution = **Deterministic State Machine + Recorded Effects**。本文档
 - **Runtime 保证**：同一 ExecutionKey 最多一次真实执行；Replay 时仅注入已记录结果，不再次调用 Tool。
 - **对外 API**：Tool 执行时可通过 `executor.ExecutionKeyFromContext(ctx)` 取得稳定执行键（等价于 job_id + step_id + idempotency_key），供实现方做幂等或传给下游作 idempotency key。Runner 在调用 `Tools.Execute` 前将当前调用的 idempotency_key 注入 context。
 
+## Step Idempotency for External World（外部副作用唯一）
+
+对会产生**外部副作用**的 Tool（发邮件、支付、webhook、调用第三方 API），必须将**步级幂等键**传给下游，否则崩溃重试可能导致「同一逻辑步执行两次」（如客户收到两封账单）。Runtime 提供规范格式的步级幂等键，Tool 实现方**必须**将其传给 email/payment/webhook/API。
+
+- **键格式**：`aetheris:<job_id>:<step_id>:<attempt_id>`；`attempt_id` 由 Worker Claim 时注入，空时用 `"0"`。
+- **API**：`executor.StepIdempotencyKeyForExternal(ctx, jobID, stepID string) string`；Tool 在执行发邮件/支付/webhook 前取得该键并作为下游的 idempotency key 或请求头传递。
+- **保证**：在配置 Effect Store + Ledger + 两步提交的前提下，Runtime 保证同一逻辑步至多一次真实执行；Tool 将 StepIdempotencyKeyForExternal 传给下游后，下游可据此去重，实现「崩溃后重试不重复副作用」。
+
 ## LLM 非确定性边界
 
 - **Plan**：来自事件流中的 `PlanGenerated`；Replay 不重新调用 Planner。
 - **每节点最多执行一次**：首次执行后立即写入 command_committed（或 tool_invocation_finished），Replay 时仅注入该结果，**不会**再次调用 LLM 或 Tool。因此已 command_committed 的 LLM 步在 Replay 时不会产生非确定性。
+- **LLM Effect Capture**：当配置 Effect Store 时，LLMNodeAdapter 在 Generate 成功后写入完整 effect（prompt、response、可选 model/temperature 至 Metadata）；Replay 时 Runner 已跳过已提交命令；Adapter 层若 EffectStore 已有该 command_id 记录则直接注入不调用 LLM（defence in depth）。**Replay 期间绝不调用 LLM**；完整 effect 存于 Effect Store 供审计与确定性重放。
 - **未来**：若支持单步内多次 LLM 调用，每次调用须有独立 command_id 并写入 Effect Log，Replay 时全部从事件注入。
 
 ## 断言与测试

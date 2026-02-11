@@ -52,6 +52,7 @@ type StepNarrative struct {
 	ToolInvocation    *ToolInvocationSummary `json:"tool_invocation,omitempty"`
 	StateDiff         *StateDiff             `json:"state_diff,omitempty"`
 	ReasoningSnapshot json.RawMessage        `json:"reasoning_snapshot,omitempty"` // 该步的推理快照，供因果调试
+	Evidence          interface{}            `json:"evidence,omitempty"`           // 决策依据（Evidence Graph）：rag_doc_ids、tool_invocation_ids 等，来自 reasoning_snapshot
 }
 
 // ReasoningItem is one agent thought or decision (from agent_thought_recorded, decision_made, tool_selected).
@@ -382,6 +383,9 @@ func BuildNarrative(events []jobstore.JobEvent) *Narrative {
 					snapshot := make([]byte, len(e.Payload))
 					copy(snapshot, e.Payload)
 					out.Steps[idx].ReasoningSnapshot = snapshot
+					if pl != nil && pl["evidence"] != nil {
+						out.Steps[idx].Evidence = pl["evidence"]
+					}
 				}
 			}
 		case jobstore.ToolSelected:

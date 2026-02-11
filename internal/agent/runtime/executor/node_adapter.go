@@ -56,6 +56,14 @@ type ToolResult struct {
 	Err    string
 }
 
+// attachToolEvidence 在工具步的 nodeResult 上附加 _evidence（tool_invocation_ids），供 Runner 写入 reasoning_snapshot 的 Evidence Graph（design/execution-forensics.md）
+func attachToolEvidence(m map[string]any, idempotencyKey string) {
+	if m == nil || idempotencyKey == "" {
+		return
+	}
+	m["_evidence"] = map[string]interface{}{"tool_invocation_ids": []string{idempotencyKey}}
+}
+
 // WorkflowExec 执行工作流（由应用层注入，如 Engine.ExecuteWorkflow）
 type WorkflowExec interface {
 	ExecuteWorkflow(ctx context.Context, name string, params map[string]any) (interface{}, error)
@@ -65,6 +73,7 @@ type WorkflowExec interface {
 type LLMNodeAdapter struct {
 	LLM              LLMGen
 	CommandEventSink CommandEventSink // 可选；执行成功后立即写 command_committed，保证副作用安全
+	EffectStore      EffectStore      // 可选；非 nil 时写入完整 LLM effect（prompt+response）并 Replay 时从 store 注入不重调（design/effect-system LLM Effect Capture）
 }
 
 func (a *LLMNodeAdapter) runNode(ctx context.Context, taskID string, cfg map[string]any, agent *runtime.Agent, p *AgentDAGPayload) (*AgentDAGPayload, error) {
@@ -74,21 +83,43 @@ func (a *LLMNodeAdapter) runNode(ctx context.Context, taskID string, cfg map[str
 			prompt = g
 		}
 	}
-	if a.CommandEventSink != nil {
-		if jobID := JobIDFromContext(ctx); jobID != "" {
-			inputBytes, _ := json.Marshal(map[string]any{"prompt": prompt})
-			_ = a.CommandEventSink.AppendCommandEmitted(ctx, jobID, taskID, taskID, "llm", inputBytes)
+	jobID := JobIDFromContext(ctx)
+	// Replay 防御：若 Effect Store 已有该 command 的结果，直接注入不调用 LLM（Runner 层已跳过已提交命令，此处为 defence in depth）
+	if a.EffectStore != nil && jobID != "" {
+		eff, err := a.EffectStore.GetEffectByJobAndCommandID(ctx, jobID, taskID)
+		if err == nil && eff != nil && len(eff.Output) > 0 {
+			var resp string
+			_ = json.Unmarshal(eff.Output, &resp)
+			if p.Results == nil {
+				p.Results = make(map[string]any)
+			}
+			p.Results[taskID] = resp
+			return p, nil
 		}
+	}
+	if a.CommandEventSink != nil && jobID != "" {
+		inputBytes, _ := json.Marshal(map[string]any{"prompt": prompt})
+		_ = a.CommandEventSink.AppendCommandEmitted(ctx, jobID, taskID, taskID, "llm", inputBytes)
 	}
 	resp, err := a.LLM.Generate(ctx, prompt)
 	if err != nil {
 		return nil, err
 	}
-	if a.CommandEventSink != nil {
-		if jobID := JobIDFromContext(ctx); jobID != "" {
-			resultBytes, _ := json.Marshal(resp)
-			_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, resultBytes, "")
-		}
+	resultBytes, _ := json.Marshal(resp)
+	// LLM Effect Capture：完整写入 Effect Store 供审计与 Replay 防御（design/effect-system）
+	if a.EffectStore != nil && jobID != "" {
+		inputBytes, _ := json.Marshal(map[string]any{"prompt": prompt})
+		_ = a.EffectStore.PutEffect(ctx, &EffectRecord{
+			JobID:     jobID,
+			CommandID: taskID,
+			Kind:      EffectKindLLM,
+			Input:     inputBytes,
+			Output:    resultBytes,
+			Metadata:  map[string]any{}, // model/temperature 可由 LLM 实现方扩展
+		})
+	}
+	if a.CommandEventSink != nil && jobID != "" {
+		_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, resultBytes, "")
 	}
 	if p.Results == nil {
 		p.Results = make(map[string]any)
@@ -226,6 +257,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 				if p.Results == nil {
 					p.Results = make(map[string]any)
 				}
+				attachToolEvidence(nodeResult, idempotencyKey)
 				p.Results[taskID] = nodeResult
 				return p, nil
 			}
@@ -262,6 +294,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 			if p.Results == nil {
 				p.Results = make(map[string]any)
 			}
+			attachToolEvidence(nodeResult, idempotencyKey)
 			p.Results[taskID] = nodeResult
 			return p, nil
 		case InvocationDecisionWaitOtherWorker:
@@ -292,6 +325,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 			if p.Results == nil {
 				p.Results = make(map[string]any)
 			}
+			attachToolEvidence(nodeResult, idempotencyKey)
 			p.Results[taskID] = nodeResult
 			return p, nil
 		}
@@ -311,6 +345,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 			if p.Results == nil {
 				p.Results = make(map[string]any)
 			}
+			attachToolEvidence(nodeResult, idempotencyKey)
 			p.Results[taskID] = nodeResult
 			return p, nil
 		}
@@ -339,6 +374,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 			if p.Results == nil {
 				p.Results = make(map[string]any)
 			}
+			attachToolEvidence(nodeResult, idempotencyKey)
 			p.Results[taskID] = nodeResult
 			return p, nil
 		}
@@ -489,6 +525,7 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 	if p.Results == nil {
 		p.Results = make(map[string]any)
 	}
+	attachToolEvidence(nodeResult, idempotencyKey)
 	p.Results[taskID] = nodeResult
 	if a.ToolEventSink != nil && jobID != "" {
 		outBytes, _ := json.Marshal(map[string]interface{}{"output": result.Output, "error": result.Err, "done": result.Done})

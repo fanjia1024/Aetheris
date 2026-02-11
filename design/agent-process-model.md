@@ -33,6 +33,15 @@
 - Query：GET job、GET replay、GET trace；Replay 响应可增加 `current_state`（由 BuildFromEvents 推导的 completed_node_ids、cursor_node、payload_results 摘要）。
 - Interrupt/Stop：`JobStop`、`RequestCancel`、Worker 轮询 CancelRequestedAt。
 
+## Wakeup Index（事件驱动唤醒）
+
+当 Job 因 signal/message 变为 Pending 时，若仅靠 Scheduler 轮询，会有延迟与无效 polling。**WakeupQueue** 提供「mailbox → scheduler 的触发」：API 在写入 wait_completed 并 UpdateStatus(Pending) 后调用 `NotifyReady(ctx, jobID)`；Worker 在无 job 时调用 `Receive(ctx, pollInterval)` 替代固定 sleep，从而在收到 NotifyReady 后立即继续 Claim，实现事件驱动唤醒。
+
+- **接口**：[internal/agent/job/wakeup.go](../internal/agent/job/wakeup.go) — `NotifyReady`、`Receive`；内存实现 `WakeupQueueMem`（带缓冲 channel）。
+- **API**：Handler 可选 `SetWakeupQueue(q)`；JobSignal/JobMessage 在 UpdateStatus(Pending) 后若 `wakeupQueue != nil` 则 `NotifyReady(ctx, jobID)`。
+- **Worker**：AgentJobRunner 可选 `SetWakeupQueue(q)`；无 job 时以 `Receive(ctx, pollInterval)` 替代 `time.After(pollInterval)`。
+- **单进程部署**：创建同一 `WakeupQueueMem` 实例并注入 Handler 与 AgentJobRunner，则 signal/message 后 Worker 可立即唤醒；多进程时需 Redis/PG 等分布式队列实现。
+
 ## 分阶段实现
 
 1. **Phase 1（当前）**：Query 强化 — replay 响应增加 current_state 字段；文档化 Signal/Query/Interrupt/Resume 与现有 API 的对应关系。

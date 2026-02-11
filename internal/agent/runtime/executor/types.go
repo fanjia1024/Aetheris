@@ -17,8 +17,10 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"rag-platform/internal/agent/runtime"
+	"rag-platform/internal/runtime/jobstore"
 )
 
 // ErrJobWaiting 表示 Job 在 Wait 节点挂起，等待 signal/continue 后由其他 Worker 认领继续（design/job-state-machine.md）
@@ -183,6 +185,15 @@ func ExecutionKeyFromContext(ctx context.Context) string {
 	}
 	s, _ := v.(string)
 	return s
+}
+
+// StepIdempotencyKeyForExternal 返回供外部系统（email、payment、webhook、API）使用的步级幂等键，格式 aetheris:job_id:step_id:attempt_id；Tool 应将此键传给下游以实现 at-most-once。attempt_id 来自 context（Worker Claim 时注入），空时用 "0"。
+func StepIdempotencyKeyForExternal(ctx context.Context, jobID, stepID string) string {
+	attemptID := jobstore.AttemptIDFromContext(ctx)
+	if attemptID == "" {
+		attemptID = "0"
+	}
+	return fmt.Sprintf("aetheris:%s:%s:%s", jobID, stepID, attemptID)
 }
 
 // AgentDAGPayload DAG 统一载荷：整图节点入参/出参一致，便于多前驱时合并结果

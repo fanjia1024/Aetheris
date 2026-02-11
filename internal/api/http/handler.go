@@ -95,6 +95,8 @@ type Handler struct {
 	agentStateStore agentruntime.AgentStateStore
 	// planAtJobCreation 在 Job 创建时生成并持久化 Plan（1.0：执行阶段只读，禁止再调 Planner）
 	planAtJobCreation func(ctx context.Context, agentID, goal string) (*planner.TaskGraph, error)
+	// wakeupQueue 可选；非 nil 时 JobSignal/JobMessage 在 UpdateStatus(Pending) 后调用 NotifyReady，供 Worker 事件驱动唤醒（design/wakeup-index）
+	wakeupQueue job.WakeupQueue
 }
 
 // NewHandler 创建新的 HTTP 处理器
@@ -155,6 +157,11 @@ func (h *Handler) SetAgentStateStore(store agentruntime.AgentStateStore) {
 // SetPlanAtJobCreation 设置 Job 创建时规划函数；传入后 POST message 将先 Append PlanGenerated 再返回 202（1.0 确定性执行）
 func (h *Handler) SetPlanAtJobCreation(fn func(ctx context.Context, agentID, goal string) (*planner.TaskGraph, error)) {
 	h.planAtJobCreation = fn
+}
+
+// SetWakeupQueue 设置唤醒队列；非 nil 时 JobSignal/JobMessage 在将 Job 置为 Pending 后调用 NotifyReady，Worker 可据此立即 Claim 而非仅轮询（design/wakeup-index）
+func (h *Handler) SetWakeupQueue(q job.WakeupQueue) {
+	h.wakeupQueue = q
 }
 
 // HealthCheck 健康检查
@@ -1217,6 +1224,23 @@ type JobSignalRequest struct {
 	Payload        map[string]interface{} `json:"payload"`
 }
 
+// lastEventIsWaitCompletedWithCorrelationKey 判断事件列表最后一条是否为 wait_completed 且 payload 中 correlation_key 一致（用于 signal/message 幂等）
+func lastEventIsWaitCompletedWithCorrelationKey(events []jobstore.JobEvent, correlationKey string) bool {
+	if len(events) == 0 || correlationKey == "" {
+		return false
+	}
+	last := events[len(events)-1]
+	if last.Type != jobstore.WaitCompleted {
+		return false
+	}
+	var m map[string]interface{}
+	if json.Unmarshal(last.Payload, &m) != nil {
+		return false
+	}
+	ck, _ := m["correlation_key"].(string)
+	return ck == correlationKey
+}
+
 // JobSignal 向挂起的 Job 发送 signal，写入 wait_completed 事件并将 Job 置回 Pending 供 Worker 认领继续
 func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
 	if h.jobStore == nil || h.jobEventStore == nil {
@@ -1259,6 +1283,15 @@ func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusBadRequest, map[string]string{"error": "correlation_key 与当前等待不匹配"})
 		return
 	}
+	// 幂等：若最后一条事件已是 wait_completed 且 correlation_key 一致，视为已送达，直接 200
+	if lastEventIsWaitCompletedWithCorrelationKey(events, req.CorrelationKey) {
+		c.JSON(consts.StatusOK, map[string]interface{}{
+			"job_id":  jobID,
+			"status":  j.Status,
+			"message": "signal 已送达（幂等）",
+		})
+		return
+	}
 	if req.Payload == nil {
 		req.Payload = make(map[string]interface{})
 	}
@@ -1279,6 +1312,9 @@ func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
 	}
 	if err := h.jobStore.UpdateStatus(ctx, jobID, job.StatusPending); err != nil {
 		hlog.CtxErrorf(ctx, "UpdateStatus Pending: %v", err)
+	}
+	if h.wakeupQueue != nil {
+		_ = h.wakeupQueue.NotifyReady(ctx, jobID)
 	}
 	c.JSON(consts.StatusOK, map[string]interface{}{
 		"job_id":  jobID,
@@ -1350,6 +1386,15 @@ func (h *Handler) JobMessage(ctx context.Context, c *app.RequestContext) {
 		matches := waitPayload.WaitType == "message" && waitPayload.CorrelationKey != "" &&
 			(waitPayload.CorrelationKey == req.Channel || waitPayload.CorrelationKey == req.CorrelationKey || req.Channel == waitPayload.CorrelationKey)
 		if matches {
+			// 幂等：若最后一条事件已是 wait_completed 且 correlation_key 一致，视为已送达
+			if lastEventIsWaitCompletedWithCorrelationKey(events, waitPayload.CorrelationKey) {
+				c.JSON(consts.StatusOK, map[string]interface{}{
+					"job_id":  jobID,
+					"status":  "pending",
+					"message": "消息已投递并解除等待（幂等）",
+				})
+				return
+			}
 			evPayload, _ := json.Marshal(map[string]interface{}{
 				"node_id":         waitPayload.NodeID,
 				"payload":         req.Payload,
@@ -1360,6 +1405,9 @@ func (h *Handler) JobMessage(ctx context.Context, c *app.RequestContext) {
 				JobID: jobID, Type: jobstore.WaitCompleted, Payload: evPayload,
 			})
 			_ = h.jobStore.UpdateStatus(ctx, jobID, job.StatusPending)
+			if h.wakeupQueue != nil {
+				_ = h.wakeupQueue.NotifyReady(ctx, jobID)
+			}
 			c.JSON(consts.StatusOK, map[string]interface{}{
 				"job_id":  jobID,
 				"status":  "pending",

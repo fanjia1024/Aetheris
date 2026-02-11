@@ -40,7 +40,8 @@ type AgentJobRunner struct {
 	leaseDuration   time.Duration
 	heartbeatTicker time.Duration
 	maxConcurrency  int
-	limiter         chan struct{} // 信号量，限制同时执行的 Job 数，避免 goroutine/LLM 爆炸
+	limiter         chan struct{}   // 信号量，限制同时执行的 Job 数，避免 goroutine/LLM 爆炸
+	wakeupQueue     job.WakeupQueue // 可选；非 nil 时无 job 时用 Receive(timeout) 替代固定 sleep，实现 signal/message 后立即唤醒（design/wakeup-index）
 	logger          *log.Logger
 	stopCh          chan struct{}
 	wg              sync.WaitGroup
@@ -80,6 +81,11 @@ func NewAgentJobRunner(
 	}
 }
 
+// SetWakeupQueue 设置唤醒队列；非 nil 时无 job 时用 Receive(pollInterval) 替代固定 sleep，signal/message 后 NotifyReady 可立即唤醒本 Worker（design/wakeup-index）
+func (r *AgentJobRunner) SetWakeupQueue(q job.WakeupQueue) {
+	r.wakeupQueue = q
+}
+
 // Start 启动 Claim 循环；先占并发槽位再 Claim，执行后释放槽位（Backpressure）；capabilities 非空时按能力从 jobStore 选 Job 再在 eventStore 占租约
 func (r *AgentJobRunner) Start(ctx context.Context) {
 	r.wg.Add(1)
@@ -102,12 +108,16 @@ func (r *AgentJobRunner) Start(ctx context.Context) {
 					j, errClaim := r.jobStore.ClaimNextPendingForWorker(ctx, "", r.capabilities)
 					if errClaim != nil || j == nil {
 						<-r.limiter
-						select {
-						case <-r.stopCh:
-							return
-						case <-ctx.Done():
-							return
-						case <-time.After(r.pollInterval):
+						if r.wakeupQueue != nil {
+							_, _ = r.wakeupQueue.Receive(ctx, r.pollInterval)
+						} else {
+							select {
+							case <-r.stopCh:
+								return
+							case <-ctx.Done():
+								return
+							case <-time.After(r.pollInterval):
+							}
 						}
 						continue
 					}
@@ -135,14 +145,18 @@ func (r *AgentJobRunner) Start(ctx context.Context) {
 					if err != nil {
 						<-r.limiter
 						if err == jobstore.ErrNoJob {
-							select {
-							case <-r.stopCh:
-								return
-							case <-ctx.Done():
-								return
-							case <-time.After(r.pollInterval):
-								continue
+							if r.wakeupQueue != nil {
+								_, _ = r.wakeupQueue.Receive(ctx, r.pollInterval)
+							} else {
+								select {
+								case <-r.stopCh:
+									return
+								case <-ctx.Done():
+									return
+								case <-time.After(r.pollInterval):
+								}
 							}
+							continue
 						}
 						r.logger.Error("Claim 失败", "error", err)
 						time.Sleep(r.pollInterval)

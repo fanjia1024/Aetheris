@@ -101,6 +101,8 @@ eino Runtime
 - 任务以**事件流**形态存储：ListEvents（带 version）、版本化 Append（乐观并发）、Claim/Heartbeat（租约）、Watch（订阅）。
 - 与 eino 的关系：eino **仅作为 DAG 执行内核** 被 `internal/agent/runtime/executor` 调用，不直接面对“创建任务”；任务创建与调度由 Agent Runtime 与 JobStore 负责。
 
+**执行保证契约**：步至少/至多执行一次、Signal 交付、Replay 确定性、崩溃后不重复副作用等正式语义见 [execution-guarantees.md](execution-guarantees.md)。
+
 ---
 
 ## 5. Domain Pipelines（Go Native）

@@ -30,6 +30,42 @@
 
 每个「决策点」除节点级 reasoning_snapshot 外，**Planner 级**决策在 PlanGoal 返回后写入 **decision_snapshot** 事件：goal、task_graph_summary（或完整 TaskGraph）、可选 memory_keys、reasoning 摘要。GET /api/jobs/:id/trace 在 execution_tree 的 plan 节点挂载 decision_snapshot，并在顶层返回 decision_snapshot 字段，供 UI 展示「为什么生成这个计划」。实现： [internal/app/api/plan_sink.go](../internal/app/api/plan_sink.go) 在 AppendPlanGenerated 后追加 DecisionSnapshot； [internal/api/http/trace_tree.go](../internal/api/http/trace_tree.go) BuildExecutionTree 将事件挂到 plan 节点。
 
+## Evidence Graph（可证明的决策依据）
+
+为满足合规与审计（「该决策依据了哪些数据？」），每个决策点可引用**证据**：RAG 文档 ID、工具调用 ID、记忆条目 ID、策略规则 ID。Trace/API 可据此展示「Evidence graph」（决策 → 证据引用）。
+
+### 证据负载结构（Evidence payload schema）
+
+在 **reasoning_snapshot**（以及可选的 decision_snapshot）中增加可选字段 **evidence**：
+
+```json
+{
+  "evidence": {
+    "rag_doc_ids": ["doc-id-1", "chunk-id-2"],
+    "tool_invocation_ids": ["idempotency-key-or-invocation-id"],
+    "memory_entry_ids": ["mem-id-1"],
+    "policy_rule_ids": ["policy-rule-id"]
+  }
+}
+```
+
+或统一使用 **evidence_refs**（二选一或并存均可）：
+
+```json
+{
+  "evidence_refs": [
+    { "type": "tool_invocation", "id": "job:step:tool:hash", "summary": "optional" },
+    { "type": "rag_doc", "id": "chunk-id" },
+    { "type": "memory", "id": "mem-id" },
+    { "type": "policy", "id": "rule-id" }
+  ]
+}
+```
+
+- **谁写入**：Runner 或 Node Sink 在步完成时（reasoning_snapshot）附加；Planner 层若有 RAG/记忆输入可写入 decision_snapshot。Tool 步由 Adapter 将 idempotency_key / invocation_id 通过 payload 传回 Runner，Runner 写入 reasoning_snapshot.evidence。
+- **Phase 1**：reasoning_snapshot 中增加可选 `evidence`；Tool 步填充 `tool_invocation_ids`（idempotency_key）。Phase 2：RAG/Memory/Policy 在子系统暴露 ID 后填充对应字段。
+- **Trace**：GET /api/jobs/:id/trace 与 GET node 的 step 或 node 负载中返回 reasoning_snapshot 原始 JSON，其中已含 `evidence`，供 UI 展示 Evidence graph。
+
 ## 与 Causal Debugging 的关系
 
 [causal-debugging.md](causal-debugging.md) 定义 ReasoningSnapshot 事件与因果链；本页强调**审计/取证**能力与产品表述：不仅「可追踪」，而且「可审计、可归因、可回答为什么」。Decision Snapshot 为 Accountability 的数据基础，回答「为什么 AI 做出了这个决定」。
