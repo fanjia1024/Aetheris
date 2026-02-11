@@ -75,10 +75,10 @@ type Result struct {
 
 // Error represents an effect execution error.
 type Error struct {
-	Type    string `json:"type"`     // "llm", "tool", "http", "timeout", "internal"
-	Message string `json:"message"`  // User-facing error message
-	Code    int    `json:"code,omitempty"` // HTTP status code, tool exit code, etc.
-	Retriable bool `json:"retriable"` // Whether this error should trigger a retry
+	Type      string `json:"type"`           // "llm", "tool", "http", "timeout", "internal"
+	Message   string `json:"message"`        // User-facing error message
+	Code      int    `json:"code,omitempty"` // HTTP status code, tool exit code, etc.
+	Retriable bool   `json:"retriable"`      // Whether this error should trigger a retry
 }
 
 // NewEffect creates a new effect with auto-generated ID.

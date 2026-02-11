@@ -41,58 +41,58 @@ var (
 var (
 	// LLM errors
 	ErrLLMGenerationFailed = Error{
-		Type:    "llm",
-		Message: "LLM generation failed",
+		Type:      "llm",
+		Message:   "LLM generation failed",
 		Retriable: true,
 	}
 	ErrLLMTimeout = Error{
-		Type:    "llm",
-		Message: "LLM request timed out",
-		Code:    408,
+		Type:      "llm",
+		Message:   "LLM request timed out",
+		Code:      408,
 		Retriable: true,
 	}
 	ErrLLMRateLimited = Error{
-		Type:    "llm",
-		Message: "LLM rate limit exceeded",
-		Code:    429,
+		Type:      "llm",
+		Message:   "LLM rate limit exceeded",
+		Code:      429,
 		Retriable: true,
 	}
 
 	// Tool errors
 	ErrToolExecutionFailed = Error{
-		Type:    "tool",
-		Message: "tool execution failed",
+		Type:      "tool",
+		Message:   "tool execution failed",
 		Retriable: true,
 	}
 	ErrToolNotFound = Error{
-		Type:    "tool",
-		Message: "tool not found",
-		Code:    404,
+		Type:      "tool",
+		Message:   "tool not found",
+		Code:      404,
 		Retriable: false,
 	}
 	ErrToolTimeout = Error{
-		Type:    "tool",
-		Message: "tool execution timed out",
-		Code:    408,
+		Type:      "tool",
+		Message:   "tool execution timed out",
+		Code:      408,
 		Retriable: true,
 	}
 
 	// HTTP errors
 	ErrHTTPRequestFailed = Error{
-		Type:    "http",
-		Message: "HTTP request failed",
+		Type:      "http",
+		Message:   "HTTP request failed",
 		Retriable: true,
 	}
 	ErrHTTPNotFound = Error{
-		Type:    "http",
-		Message: "HTTP resource not found",
-		Code:    404,
+		Type:      "http",
+		Message:   "HTTP resource not found",
+		Code:      404,
 		Retriable: false,
 	}
 	ErrHTTPServerError = Error{
-		Type:    "http",
-		Message: "HTTP server error",
-		Code:    500,
+		Type:      "http",
+		Message:   "HTTP server error",
+		Code:      500,
 		Retriable: true,
 	}
 )

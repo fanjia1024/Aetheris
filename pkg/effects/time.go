@@ -21,9 +21,9 @@ import (
 
 // TimeResult represents the recorded time value.
 type TimeResult struct {
-	Timestamp   time.Time `json:"timestamp"`
-	Timezone    string    `json:"timezone"`
-	UnixNano    int64     `json:"unix_nano"`
+	Timestamp time.Time `json:"timestamp"`
+	Timezone  string    `json:"timezone"`
+	UnixNano  int64     `json:"unix_nano"`
 }
 
 // ExecuteTime records the current time as an effect.
@@ -55,7 +55,7 @@ func ExecuteTime(ctx context.Context, sys System) (TimeResult, error) {
 func TimeEffect(t time.Time) Effect {
 	result := TimeResult{
 		Timestamp: t,
-		UnixNano:   t.UnixNano(),
+		UnixNano:  t.UnixNano(),
 	}
 	return NewEffect(KindTime, result).WithDescription("time.now")
 }

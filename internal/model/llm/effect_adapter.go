@@ -57,12 +57,12 @@ func (a *EffectAdapter) GenerateWithContext(ctx context.Context, prompt string, 
 			{Role: "user", Content: prompt},
 		},
 		Params: effects.LLMParams{
-			Temperature:    &options.Temperature,
-			MaxTokens:      &options.MaxTokens,
-			TopP:           &options.TopP,
+			Temperature:      &options.Temperature,
+			MaxTokens:        &options.MaxTokens,
+			TopP:             &options.TopP,
 			FrequencyPenalty: &options.FrequencyPenalty,
-			PresencePenalty: &options.PresencePenalty,
-			StopSequences:  options.Stop,
+			PresencePenalty:  &options.PresencePenalty,
+			StopSequences:    options.Stop,
 		},
 	}
 
@@ -72,11 +72,11 @@ func (a *EffectAdapter) GenerateWithContext(ctx context.Context, prompt string, 
 		// Convert effect request to legacy options
 		legacyOpts := GenerateOptions{
 			Temperature:      getFloat64(r.Params.Temperature),
-			MaxTokens:       getInt(r.Params.MaxTokens),
-			TopP:            getFloat64(r.Params.TopP),
+			MaxTokens:        getInt(r.Params.MaxTokens),
+			TopP:             getFloat64(r.Params.TopP),
 			FrequencyPenalty: getFloat64(r.Params.FrequencyPenalty),
-			PresencePenalty: getFloat64(r.Params.PresencePenalty),
-			Stop:            r.Params.StopSequences,
+			PresencePenalty:  getFloat64(r.Params.PresencePenalty),
+			Stop:             r.Params.StopSequences,
 		}
 
 		// Convert messages
@@ -107,9 +107,9 @@ func (a *EffectAdapter) GenerateWithContext(ctx context.Context, prompt string, 
 		}
 
 		return effects.LLMResponse{
-			Content:     content,
-			StopReason:  "stop",
-			Model:       r.Model,
+			Content:    content,
+			StopReason: "stop",
+			Model:      r.Model,
 		}, nil
 	})
 
@@ -138,23 +138,23 @@ func (a *EffectAdapter) ChatWithContext(ctx context.Context, messages []Message,
 		Model:    a.client.Model(),
 		Messages: effectMsgs,
 		Params: effects.LLMParams{
-			Temperature:    &options.Temperature,
-			MaxTokens:      &options.MaxTokens,
-			TopP:           &options.TopP,
+			Temperature:      &options.Temperature,
+			MaxTokens:        &options.MaxTokens,
+			TopP:             &options.TopP,
 			FrequencyPenalty: &options.FrequencyPenalty,
-			PresencePenalty: &options.PresencePenalty,
-			StopSequences:  options.Stop,
+			PresencePenalty:  &options.PresencePenalty,
+			StopSequences:    options.Stop,
 		},
 	}
 
 	response, err := effects.ExecuteLLM(ctx, a.effects, req, func(ctx context.Context, r effects.LLMRequest) (effects.LLMResponse, error) {
 		legacyOpts := GenerateOptions{
 			Temperature:      getFloat64(r.Params.Temperature),
-			MaxTokens:       getInt(r.Params.MaxTokens),
-			TopP:            getFloat64(r.Params.TopP),
+			MaxTokens:        getInt(r.Params.MaxTokens),
+			TopP:             getFloat64(r.Params.TopP),
 			FrequencyPenalty: getFloat64(r.Params.FrequencyPenalty),
-			PresencePenalty: getFloat64(r.Params.PresencePenalty),
-			Stop:            r.Params.StopSequences,
+			PresencePenalty:  getFloat64(r.Params.PresencePenalty),
+			Stop:             r.Params.StopSequences,
 		}
 
 		legacyMsgs := make([]Message, len(r.Messages))
@@ -168,9 +168,9 @@ func (a *EffectAdapter) ChatWithContext(ctx context.Context, messages []Message,
 		}
 
 		return effects.LLMResponse{
-			Content:     content,
-			StopReason:  "stop",
-			Model:       r.Model,
+			Content:    content,
+			StopReason: "stop",
+			Model:      r.Model,
 		}, nil
 	})
 
@@ -253,12 +253,12 @@ func (c *EffectClient) GenerateWithContext(ctx context.Context, prompt string, o
 			{Role: "user", Content: prompt},
 		},
 		Params: effects.LLMParams{
-			Temperature:    &options.Temperature,
-			MaxTokens:      &options.MaxTokens,
-			TopP:           &options.TopP,
+			Temperature:      &options.Temperature,
+			MaxTokens:        &options.MaxTokens,
+			TopP:             &options.TopP,
 			FrequencyPenalty: &options.FrequencyPenalty,
-			PresencePenalty: &options.PresencePenalty,
-			StopSequences:  options.Stop,
+			PresencePenalty:  &options.PresencePenalty,
+			StopSequences:    options.Stop,
 		},
 	}
 
@@ -285,12 +285,12 @@ func (c *EffectClient) ChatWithContext(ctx context.Context, messages []Message, 
 		Model:    c.model,
 		Messages: effectMsgs,
 		Params: effects.LLMParams{
-			Temperature:    &options.Temperature,
-			MaxTokens:      &options.MaxTokens,
-			TopP:           &options.TopP,
+			Temperature:      &options.Temperature,
+			MaxTokens:        &options.MaxTokens,
+			TopP:             &options.TopP,
 			FrequencyPenalty: &options.FrequencyPenalty,
-			PresencePenalty: &options.PresencePenalty,
-			StopSequences:  options.Stop,
+			PresencePenalty:  &options.PresencePenalty,
+			StopSequences:    options.Stop,
 		},
 	}
 
@@ -324,12 +324,12 @@ func (c *EffectClient) SetAPIKey(apiKey string) {
 // EffectGenerateOptions converts GenerateOptions to LLMParams.
 func EffectGenerateOptions(opts GenerateOptions) effects.LLMParams {
 	return effects.LLMParams{
-		Temperature:       &opts.Temperature,
+		Temperature:      &opts.Temperature,
 		MaxTokens:        &opts.MaxTokens,
 		TopP:             &opts.TopP,
 		FrequencyPenalty: &opts.FrequencyPenalty,
-		PresencePenalty: &opts.PresencePenalty,
-		StopSequences:   opts.Stop,
+		PresencePenalty:  &opts.PresencePenalty,
+		StopSequences:    opts.Stop,
 	}
 }
 

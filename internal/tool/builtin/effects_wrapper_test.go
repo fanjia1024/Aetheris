@@ -169,7 +169,7 @@ func TestEffectsHTTPAdapter(t *testing.T) {
 
 	// Create an HTTP adapter with a mock caller
 	adapter := &EffectsHTTPAdapter{
-		tool: &HTTPTool{client: http.DefaultClient},
+		tool:    &HTTPTool{client: http.DefaultClient},
 		effects: sys,
 		caller: func(ctx context.Context, req effects.HTTPRequest) (effects.HTTPResponse, error) {
 			return effects.HTTPResponse{

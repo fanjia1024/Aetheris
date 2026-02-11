@@ -72,9 +72,9 @@ func RegisterSystem(sys System) {
 // NewMemorySystem creates an in-memory effect system for testing.
 func NewMemorySystem() System {
 	return &memorySystem{
-		byID:   make(map[string]Result),
-		byKey:  make(map[string]Result),
-		byIDMu: sync.RWMutex{},
+		byID:    make(map[string]Result),
+		byKey:   make(map[string]Result),
+		byIDMu:  sync.RWMutex{},
 		byKeyMu: sync.RWMutex{},
 	}
 }

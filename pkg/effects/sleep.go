@@ -21,16 +21,16 @@ import (
 
 // SleepResult represents the recorded sleep duration.
 type SleepResult struct {
-	DurationMs   int64     `json:"duration_ms"`
-	Duration     time.Duration `json:"duration"`
-	CompletedAt time.Time `json:"completed_at"`
+	DurationMs  int64         `json:"duration_ms"`
+	Duration    time.Duration `json:"duration"`
+	CompletedAt time.Time     `json:"completed_at"`
 }
 
 // ExecuteSleep executes a sleep effect.
 func ExecuteSleep(ctx context.Context, sys System, duration time.Duration) (SleepResult, error) {
 	result := SleepResult{
-		DurationMs:   duration.Milliseconds(),
-		Duration:     duration,
+		DurationMs:  duration.Milliseconds(),
+		Duration:    duration,
 		CompletedAt: time.Now(),
 	}
 

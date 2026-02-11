@@ -140,7 +140,7 @@ type baseTool struct {
 
 func (t *baseTool) Name() string        { return t.name }
 func (t *baseTool) Description() string { return t.description }
-func (t *baseTool) Schema() tool.Schema  { return t.schema }
+func (t *baseTool) Schema() tool.Schema { return t.schema }
 func (t *baseTool) Execute(ctx context.Context, input map[string]any) (tool.ToolResult, error) {
 	return tool.ToolResult{}, nil
 }

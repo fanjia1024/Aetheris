@@ -40,7 +40,7 @@ type HTTPResponse struct {
 	StatusCode int               `json:"status_code"`
 	Headers    map[string]string `json:"headers"`
 	Body       []byte            `json:"body"`
-	Duration   time.Duration    `json:"duration"`
+	Duration   time.Duration     `json:"duration"`
 }
 
 // HTTPCaller is the function type for actual HTTP calls.
@@ -82,15 +82,15 @@ func ExecuteHTTP(ctx context.Context, sys System, req HTTPRequest, caller HTTPCa
 // computeHTTPIdempotencyKey creates a deterministic key from HTTP request.
 func computeHTTPIdempotencyKey(req HTTPRequest) string {
 	keyData := struct {
-		Method string
-		URL    string
+		Method  string
+		URL     string
 		Headers map[string]string
-		Body   []byte
+		Body    []byte
 	}{
 		Method:  req.Method,
 		URL:     req.URL,
 		Headers: req.Headers,
-		Body:     req.Body,
+		Body:    req.Body,
 	}
 
 	data, _ := json.Marshal(keyData)

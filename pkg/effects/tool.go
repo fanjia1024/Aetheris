@@ -32,16 +32,16 @@ type ToolRequest struct {
 
 // ToolResponse represents a tool effect response.
 type ToolResponse struct {
-	Content   string                 `json:"content"`
-	Result    map[string]interface{} `json:"result,omitempty"`
-	Error     *ToolError            `json:"error,omitempty"`
-	StartedAt time.Time              `json:"started_at"`
-	FinishedAt time.Time             `json:"finished_at"`
+	Content    string                 `json:"content"`
+	Result     map[string]interface{} `json:"result,omitempty"`
+	Error      *ToolError             `json:"error,omitempty"`
+	StartedAt  time.Time              `json:"started_at"`
+	FinishedAt time.Time              `json:"finished_at"`
 }
 
 // ToolError represents a tool execution error.
 type ToolError struct {
-	Type    string `json:"type"`    // "execution", "timeout", "not_found", "invalid_args"
+	Type    string `json:"type"` // "execution", "timeout", "not_found", "invalid_args"
 	Message string `json:"message"`
 	Code    int    `json:"code"`
 }

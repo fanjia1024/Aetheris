@@ -34,27 +34,27 @@ type LLMRequest struct {
 
 // LLMMessage represents a single message in an LLM request.
 type LLMMessage struct {
-	Role    string `json:"role"`    // "system", "user", "assistant", "tool"
+	Role    string `json:"role"` // "system", "user", "assistant", "tool"
 	Content string `json:"content"`
 }
 
 // LLMParams represents generation parameters.
 type LLMParams struct {
-	Temperature    *float64 `json:"temperature,omitempty"`
-	MaxTokens     *int     `json:"max_tokens,omitempty"`
-	TopP          *float64 `json:"top_p,omitempty"`
+	Temperature      *float64 `json:"temperature,omitempty"`
+	MaxTokens        *int     `json:"max_tokens,omitempty"`
+	TopP             *float64 `json:"top_p,omitempty"`
 	FrequencyPenalty *float64 `json:"frequency_penalty,omitempty"`
-	PresencePenalty *float64 `json:"presence_penalty,omitempty"`
-	StopSequences []string  `json:"stop_sequences,omitempty"`
+	PresencePenalty  *float64 `json:"presence_penalty,omitempty"`
+	StopSequences    []string `json:"stop_sequences,omitempty"`
 }
 
 // LLMResponse represents an LLM effect response.
 type LLMResponse struct {
-	Content      string        `json:"content"`
-	StopReason  string        `json:"stop_reason"` // "stop", "length", "tool_calls", "content_filter", "null"
-	Usage       LLMUsage      `json:"usage"`
-	Model       string        `json:"model"`
-	RawResponse any           `json:"raw_response,omitempty"`
+	Content     string   `json:"content"`
+	StopReason  string   `json:"stop_reason"` // "stop", "length", "tool_calls", "content_filter", "null"
+	Usage       LLMUsage `json:"usage"`
+	Model       string   `json:"model"`
+	RawResponse any      `json:"raw_response,omitempty"`
 }
 
 // LLMUsage represents token usage.
@@ -106,10 +106,10 @@ func ExecuteLLM(ctx context.Context, sys System, req LLMRequest, caller LLMCalle
 func computeLLMIdempotencyKey(req LLMRequest) string {
 	// Create a canonical representation for hashing
 	canonical := struct {
-		Model         string
-		Messages      []LLMMessage
-		SystemPrompt  string
-		Params        LLMParams
+		Model        string
+		Messages     []LLMMessage
+		SystemPrompt string
+		Params       LLMParams
 	}{
 		Model:        req.Model,
 		Messages:     req.Messages,

@@ -154,7 +154,7 @@ func TestMemorySystem_Clear(t *testing.T) {
 
 func TestEffect_Builder(t *testing.T) {
 	effect := NewEffect(KindLLM, map[string]any{
-		"model": "gpt-4",
+		"model":  "gpt-4",
 		"prompt": "hello",
 	}).WithIdempotencyKey("key-123").
 		WithDescription("test LLM call").

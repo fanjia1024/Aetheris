@@ -24,9 +24,9 @@ import (
 // memorySystem is an in-memory implementation of the effect system.
 // Used for testing and local development.
 type memorySystem struct {
-	byID   map[string]Result // effect ID -> result
-	byKey  map[string]Result // idempotency key -> result
-	byIDMu sync.RWMutex
+	byID    map[string]Result // effect ID -> result
+	byKey   map[string]Result // idempotency key -> result
+	byIDMu  sync.RWMutex
 	byKeyMu sync.RWMutex
 }
 

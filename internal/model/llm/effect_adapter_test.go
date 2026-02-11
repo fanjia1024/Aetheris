@@ -56,9 +56,9 @@ func (m *mockClient) ChatWithContext(ctx context.Context, messages []Message, op
 	return m.Chat(messages, options)
 }
 
-func (m *mockClient) Model() string     { return "test-model" }
-func (m *mockClient) Provider() string  { return "test" }
-func (m *mockClient) SetModel(model string) {}
+func (m *mockClient) Model() string           { return "test-model" }
+func (m *mockClient) Provider() string        { return "test" }
+func (m *mockClient) SetModel(model string)   {}
 func (m *mockClient) SetAPIKey(apiKey string) {}
 
 func TestEffectAdapter_Generate(t *testing.T) {
