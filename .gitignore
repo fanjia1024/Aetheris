@@ -3,5 +3,6 @@
 /bin/*
 /coverage.out
 /coverage.html
+.claude/
 .cursor/
 .trae/
