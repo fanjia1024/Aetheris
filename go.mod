@@ -7,6 +7,7 @@ require (
 	github.com/cloudwego/eino-ext/components/indexer/redis v0.0.0-20260204064123-1f91f547c77e
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.8
 	github.com/cloudwego/eino-ext/components/retriever/redis v0.0.0-20260204064123-1f91f547c77e
+	github.com/cloudwego/eino-ext/devops v0.1.8
 	github.com/cloudwego/hertz v0.10.4
 	github.com/go-resty/resty/v2 v2.7.0
 	github.com/google/uuid v1.6.0
@@ -19,6 +20,7 @@ require (
 	github.com/prometheus/common v0.66.1
 	github.com/redis/go-redis/v9 v9.10.0
 	github.com/spf13/viper v1.18.2
+	github.com/stretchr/testify v1.11.1
 	github.com/unidoc/unipdf/v3 v3.69.0
 	google.golang.org/grpc v1.59.0
 	google.golang.org/protobuf v1.36.9
@@ -34,7 +36,6 @@ require (
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/cloudwego/eino-ext/devops v0.1.8 // indirect
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.13 // indirect
 	github.com/cloudwego/gopkg v0.1.4 // indirect
 	github.com/cloudwego/netpoll v0.7.2 // indirect
@@ -83,7 +84,6 @@ require (
 	github.com/spf13/afero v1.11.0 // indirect
 	github.com/spf13/cast v1.6.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
