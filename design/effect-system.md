@@ -71,6 +71,21 @@ Agent execution = **Deterministic State Machine + Recorded Effects**。本文档
 
 这样 Replay 以事件流为权威时，已提交命令永不重放；且「已 started 无 finished」时禁止再执行，仅恢复或失败。
 
+### Effect Store 与强 Replay（两步提交）
+
+当配置 **Effect Store**（副作用存储）时，Replay 升级为 **Execution Replay**：同一 logical step 的副作用只执行一次，重放时只读已记录的效应；崩溃发生在「Execute 成功、尚未 Append command_committed」时，新 Worker 可从 Effect Store **catch-up**，写回事件流而不重执行 Tool/LLM。
+
+- **两步提交**  
+  - **Phase 1**：Execute 成功后**先**将 effect（input + output + 元数据）写入 Effect Store（`PutEffect`）。  
+  - **Phase 2**：Effect Store 写入成功后，再 Append `command_committed` / `tool_invocation_finished` 与 NodeFinished、Checkpoint。  
+  约定：仅当事件流中出现 `command_committed`（或等价「step 已提交」）后，该 step 才视为完成；Replay 以「事件流 + Effect Store」为事实来源。
+
+- **恢复语义（catch-up）**  
+  Replay 时若发现：事件流中该 step **无** `command_committed`，但 Effect Store 中**已有**该 step 的 effect（按 job_id + idempotency_key 或 job_id + command_id 查）→ 视为「上一 Worker 已执行并持久化效应、未完成 Phase 2」。执行 **catch-up**：向事件流追加 `command_committed` / `tool_invocation_finished`（payload 从 Effect Store 读取），并可选更新 Ledger/InvocationStore，**不**调用 Tool/LLM。
+
+- **效应类型与必填**  
+  Effect Store 记录类型至少包括：**Tool**（input + output + error）、**LLM**（prompt + response + model/temperature 等元数据）、**Time/Random**（占位）、**Human**（审批/人工输入）。接口见 `internal/agent/runtime/executor/effect_store.go`；内存实现见 `effect_store_mem.go`，多 Worker 时需 PG 等共享存储。
+
 ## 与现有事件类型映射
 
 | EffectKind（逻辑） | 存储为 EventType | 说明 |
@@ -86,7 +101,7 @@ Agent execution = **Deterministic State Machine + Recorded Effects**。本文档
 - **Replay 构建**：[internal/agent/replay/replay.go](internal/agent/replay/replay.go) — `BuildFromEvents` 解析 PlanGenerated、NodeFinished、CommandCommitted、ToolInvocationFinished。
 - **Replay 决策**：[internal/agent/replay/sandbox/policy.go](internal/agent/replay/sandbox/policy.go) — `ReplayPolicy.Decide` 对 llm/tool/workflow 返回 SideEffect，有记录则 Inject。
 - **Runner**：[internal/agent/runtime/executor/runner.go](internal/agent/runtime/executor/runner.go) — 无 Cursor 时优先从事件流重建；runLoop 内 command_id ∈ CompletedCommandIDs 时只注入、不调用 step.Run。
-- **Adapter**：[internal/agent/runtime/executor/node_adapter.go](internal/agent/runtime/executor/node_adapter.go) — Ledger 路径下仅 `AllowExecute` 才执行 tool；Replay 注入时不调用 tool。**Activity Log Barrier**：若 idempotency_key ∈ PendingToolInvocations（事件流已 started 无 finished），禁止执行，仅 Recover 后 catch-up 写 Finished 或返回永久失败。
+- **Adapter**：[internal/agent/runtime/executor/node_adapter.go](internal/agent/runtime/executor/node_adapter.go) — Ledger 路径下仅 `AllowExecute` 才执行 tool；Replay 注入时不调用 tool。**Activity Log Barrier**：若 idempotency_key ∈ PendingToolInvocations（事件流已 started 无 finished），禁止执行，仅 Recover 后 catch-up 写 Finished 或返回永久失败。**Effect Store**：当 `EffectStore != nil` 时，Execute 成功后先 `PutEffect` 再 Append（两步提交）；runNode 内若事件流无 command_committed 但 EffectStore 有该 idempotency_key 的 effect，则 catch-up 写回事件并注入结果，不执行 Tool。
 
 ## Idempotency 契约（Idempotency Contract）
 

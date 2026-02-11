@@ -144,7 +144,7 @@ func NewApp(cfg *config.Config) (*App, error) {
 		if token := os.Getenv("GITHUB_TOKEN"); token != "" {
 			resourceVerifier = verifier.NewGitHubVerifier(token)
 		}
-		dagCompiler := api.NewDAGCompiler(llmClient, toolsReg, engine, nodeEventSink, nodeEventSink, invocationStore, resourceVerifier, api.NewAttemptValidator(pgEventStore))
+		dagCompiler := api.NewDAGCompiler(llmClient, toolsReg, engine, nodeEventSink, nodeEventSink, invocationStore, nil, resourceVerifier, api.NewAttemptValidator(pgEventStore))
 		dagRunner := api.NewDAGRunner(dagCompiler)
 		checkpointStore := runtime.NewCheckpointStoreMem()
 		agentStateStore, errState := runtime.NewAgentStateStorePg(context.Background(), dsn)

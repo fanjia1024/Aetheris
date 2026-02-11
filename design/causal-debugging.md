@@ -35,6 +35,10 @@
 - **Sink**：[internal/app/api/node_sink.go](internal/app/api/node_sink.go) — `AppendReasoningSnapshot` 写入 `reasoning_snapshot` 事件。
 - **Trace**：[internal/api/http/trace_narrative.go](internal/api/http/trace_narrative.go) — `BuildNarrative` 解析 `reasoning_snapshot`，按 `node_id` 挂到对应 `StepNarrative.ReasoningSnapshot`。
 
+## Decision Snapshot（Planner 级）
+
+除每步 ReasoningSnapshot 外，**Planner 决策**在 PlanGoal 返回后写入 **decision_snapshot** 事件（goal、task_graph_summary、plan_hash），供 Trace 在 plan 节点展示「为什么选这个 TaskGraph」。见 [execution-forensics.md](execution-forensics.md) § Decision Snapshot。
+
 ## 扩展（可选）
 
 - **LLM 节点**：Runner 在 node_type=llm 时已写入 snapshot 的 `llm_request`（goal）、`llm_response`（该步结果，即 payload.Results[node_id]）；供执行取证与因果链反推。

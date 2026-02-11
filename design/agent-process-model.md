@@ -18,11 +18,12 @@
 | Query（只读状态） | 已实现 | GET `/api/jobs/:id`（元数据）、GET `/api/jobs/:id/replay`（事件流）；可扩展 replay 响应含 current_state |
 | Interrupt | 已实现（取消） | POST `/api/jobs/:id/stop` → RequestCancel → Worker 取消 runCtx |
 | Resume（Wait 后） | 已实现 | 同上 Signal；wait_completed 后 Job 重新入队 |
-| Mailbox（通用消息） | 设计 | 未来：POST `/api/jobs/:id/message` 写入 `agent_message`，Runner 在收件节点消费 |
+| Mailbox（通用消息） | 已实现 | POST `/api/jobs/:id/message` 写入 `agent_message`；Wait 节点 wait_kind=message、config.channel 为信道名，匹配即写 wait_completed 并重新入队 |
 
 ## 事件形态（契约）
 
-- **job_waiting**：payload 含 correlation_key、wait_type、node_id；只有相同 correlation_key 的 signal 可解除。
+- **job_waiting**：payload 含 correlation_key、wait_type、node_id；signal 需 correlation_key 一致解除；wait_type=message 时 correlation_key 可为 channel，由 POST message 的 channel 匹配解除。
+- **agent_message**：payload 含 message_id、channel、correlation_key、payload；POST `/api/jobs/:id/message` 写入；若 Job 处于 Waiting 且当前 job_waiting 的 wait_type=message 且 channel/correlation_key 匹配，则追加 wait_completed 并将 Job 置为 Pending。
 - **wait_completed**：payload 含 node_id、可选 payload；Replay 将对应节点视为完成并注入 payload。
 - **job_interrupted**（可选）：未来若区分「暂停」与「取消」，可写入 job_interrupted，Runner 在步间检查后挂起。
 
@@ -35,5 +36,5 @@
 ## 分阶段实现
 
 1. **Phase 1（当前）**：Query 强化 — replay 响应增加 current_state 字段；文档化 Signal/Query/Interrupt/Resume 与现有 API 的对应关系。
-2. **Phase 2**：Mailbox — 定义 `agent_message` 事件与 POST `/api/jobs/:id/message`；Runner 在 Wait 或专用「收件」节点消费。
+2. **Phase 2（已实现）**：Mailbox — `agent_message` 事件与 POST `/api/jobs/:id/message`；Wait 节点 config 设 wait_kind=message、channel=信道名，Runner 写 job_waiting 时 correlation_key=channel，消息 API 匹配后写 wait_completed 并重新入队。见 [internal/runtime/jobstore/event.go](../internal/runtime/jobstore/event.go) AgentMessage、[internal/api/http/handler.go](../internal/api/http/handler.go) JobMessage。
 3. **Phase 3**：Interrupt 细化为「暂停」与「取消」；Resume 对已暂停 Job 的显式恢复 API。

@@ -50,6 +50,9 @@ const (
 	// PlanGenerated, CommandCommitted, ToolInvocationFinished, NodeFinished 用于重建 ReplayContext；
 	// Replay 时禁止真实调用 LLM/Tool，只读这些事件注入结果。
 
+	// AgentMessage 信箱消息：外部向 Job 投递的消息，Wait 节点 wait_type=message 时可根据 channel/correlation_key 消费（design/agent-process-model.md Mailbox）
+	AgentMessage EventType = "agent_message"
+
 	// Semantic events for Trace narrative (v0.9); see design/trace-event-schema-v0.9.md
 	StateCheckpointed    EventType = "state_checkpointed"
 	AgentThoughtRecorded EventType = "agent_thought_recorded"
@@ -62,6 +65,8 @@ const (
 	StateChanged         EventType = "state_changed" // 外部资源变更（resource_type, resource_id, operation）供审计
 	// ReasoningSnapshot 推理快照：每步完成后的决策上下文，供因果调试（哪个计划步骤、哪次 LLM 输出导致该步）
 	ReasoningSnapshot EventType = "reasoning_snapshot"
+	// DecisionSnapshot Planner 决策快照：PlanGoal 返回后写入，含 goal、memory 摘要、reasoning 摘要、decision（TaskGraph），供可追责与 Trace 展示（design/execution-forensics.md）
+	DecisionSnapshot EventType = "decision_snapshot"
 )
 
 // JobWaitingPayload job_waiting 事件 payload 契约；只有携带相同 correlation_key 的 signal 才能解除该 block（design/runtime-contract.md）
@@ -81,6 +86,14 @@ func ParseJobWaitingPayload(payload []byte) (p JobWaitingPayload, err error) {
 	}
 	err = json.Unmarshal(payload, &p)
 	return p, err
+}
+
+// AgentMessagePayload agent_message 事件 payload；POST /api/jobs/:id/message 写入，Wait wait_type=message 时按 channel 或 correlation_key 匹配解除
+type AgentMessagePayload struct {
+	MessageID      string                 `json:"message_id"`
+	Channel        string                 `json:"channel"`
+	CorrelationKey string                 `json:"correlation_key"`
+	Payload        map[string]interface{} `json:"payload"`
 }
 
 // JobEvent 单条不可变事件；Job 的真实形态是事件流

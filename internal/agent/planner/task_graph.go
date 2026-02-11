@@ -34,6 +34,8 @@ const (
 	WaitKindWebhook   = "webhook"
 	WaitKindSchedule  = "schedule"
 	WaitKindCondition = "condition"
+	// WaitKindMessage 信箱：等待 agent_message 事件，channel 或 correlation_key 匹配即解除（design/agent-process-model.md Mailbox）
+	WaitKindMessage = "message"
 )
 
 // TaskNode 任务图中的节点

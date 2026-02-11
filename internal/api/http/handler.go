@@ -914,8 +914,20 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 						"goal":       req.Message,
 						"plan_hash":  planHash,
 					})
-					_, _ = h.jobEventStore.Append(ctx, jobIDOut, ver, jobstore.JobEvent{
+					verPlan, _ := h.jobEventStore.Append(ctx, jobIDOut, ver, jobstore.JobEvent{
 						JobID: jobIDOut, Type: jobstore.PlanGenerated, Payload: payloadPlan,
+					})
+					taskGraphSummary := string(graphBytes)
+					if len(graphBytes) > 512 {
+						taskGraphSummary = string(graphBytes[:512]) + "..."
+					}
+					dsPayload, _ := json.Marshal(map[string]interface{}{
+						"goal":               req.Message,
+						"task_graph_summary": taskGraphSummary,
+						"plan_hash":          planHash,
+					})
+					_, _ = h.jobEventStore.Append(ctx, jobIDOut, verPlan, jobstore.JobEvent{
+						JobID: jobIDOut, Type: jobstore.DecisionSnapshot, Payload: dsPayload,
 					})
 				}
 			}
@@ -1253,8 +1265,9 @@ func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
 	nodeID := waitPayload.NodeID
 	payloadBytes, _ := json.Marshal(req.Payload)
 	evPayload, _ := json.Marshal(map[string]interface{}{
-		"node_id": nodeID,
-		"payload": json.RawMessage(payloadBytes),
+		"node_id":         nodeID,
+		"payload":         json.RawMessage(payloadBytes),
+		"correlation_key": req.CorrelationKey,
 	})
 	_, err = h.jobEventStore.Append(ctx, jobID, ver, jobstore.JobEvent{
 		JobID: jobID, Type: jobstore.WaitCompleted, Payload: evPayload,
@@ -1271,6 +1284,93 @@ func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
 		"job_id":  jobID,
 		"status":  "pending",
 		"message": "已发送 signal，Job 将重新入队执行",
+	})
+}
+
+// JobMessageRequest POST /api/jobs/:id/message 请求体；向 Job 投递信箱消息，若 Job 处于 Waiting 且 wait_type=message 且 channel/correlation_key 匹配则写入 wait_completed 并重新入队（design/agent-process-model.md Mailbox）
+type JobMessageRequest struct {
+	MessageID      string                 `json:"message_id"`
+	Channel        string                 `json:"channel"`
+	CorrelationKey string                 `json:"correlation_key"`
+	Payload        map[string]interface{} `json:"payload"`
+}
+
+// JobMessage 向指定 Job 写入一条 agent_message 事件；若 Job 处于 Waiting 且当前 job_waiting 的 wait_type=message 且 channel 或 correlation_key 匹配，则追加 wait_completed 并将 Job 置为 Pending
+func (h *Handler) JobMessage(ctx context.Context, c *app.RequestContext) {
+	if h.jobStore == nil || h.jobEventStore == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "Job 或事件存储未启用"})
+		return
+	}
+	jobID := c.Param("id")
+	j, err := h.jobStore.Get(ctx, jobID)
+	if err != nil || j == nil {
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+		return
+	}
+	var req JobMessageRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(consts.StatusBadRequest, map[string]string{"error": "请求体需为 JSON"})
+		return
+	}
+	if req.Payload == nil {
+		req.Payload = make(map[string]interface{})
+	}
+	if req.MessageID == "" {
+		req.MessageID = fmt.Sprintf("msg-%d", time.Now().UnixNano())
+	}
+	msgPayload := jobstore.AgentMessagePayload{
+		MessageID:      req.MessageID,
+		Channel:        req.Channel,
+		CorrelationKey: req.CorrelationKey,
+		Payload:        req.Payload,
+	}
+	msgBytes, _ := json.Marshal(msgPayload)
+	events, ver, err := h.jobEventStore.ListEvents(ctx, jobID)
+	if err != nil {
+		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件失败"})
+		return
+	}
+	_, err = h.jobEventStore.Append(ctx, jobID, ver, jobstore.JobEvent{
+		JobID: jobID, Type: jobstore.AgentMessage, Payload: msgBytes,
+	})
+	if err != nil {
+		hlog.CtxErrorf(ctx, "Append AgentMessage: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "写入消息失败"})
+		return
+	}
+	if j.Status == job.StatusWaiting {
+		var waitPayload jobstore.JobWaitingPayload
+		for i := len(events) - 1; i >= 0; i-- {
+			if events[i].Type == jobstore.JobWaiting {
+				waitPayload, _ = jobstore.ParseJobWaitingPayload(events[i].Payload)
+				break
+			}
+		}
+		matches := waitPayload.WaitType == "message" && waitPayload.CorrelationKey != "" &&
+			(waitPayload.CorrelationKey == req.Channel || waitPayload.CorrelationKey == req.CorrelationKey || req.Channel == waitPayload.CorrelationKey)
+		if matches {
+			evPayload, _ := json.Marshal(map[string]interface{}{
+				"node_id":         waitPayload.NodeID,
+				"payload":         req.Payload,
+				"correlation_key": waitPayload.CorrelationKey,
+			})
+			_, ver2, _ := h.jobEventStore.ListEvents(ctx, jobID)
+			_, _ = h.jobEventStore.Append(ctx, jobID, ver2, jobstore.JobEvent{
+				JobID: jobID, Type: jobstore.WaitCompleted, Payload: evPayload,
+			})
+			_ = h.jobStore.UpdateStatus(ctx, jobID, job.StatusPending)
+			c.JSON(consts.StatusOK, map[string]interface{}{
+				"job_id":  jobID,
+				"status":  "pending",
+				"message": "已投递消息并解除等待，Job 将重新入队执行",
+			})
+			return
+		}
+	}
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"job_id":  jobID,
+		"message": "已写入 agent_message 事件",
 	})
 }
 
@@ -1431,14 +1531,24 @@ func (h *Handler) GetJobTrace(ctx context.Context, c *app.RequestContext) {
 	}
 	executionTree := BuildExecutionTree(events)
 	narrative := BuildNarrative(events)
-	c.JSON(consts.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"job_id":            jobID,
 		"timeline":          timeline,
 		"node_durations":    nodeDurations,
 		"execution_tree":    executionTree,
 		"timeline_segments": narrative.TimelineSegments,
 		"steps":             narrative.Steps,
-	})
+	}
+	for _, e := range events {
+		if e.Type == jobstore.DecisionSnapshot && len(e.Payload) > 0 {
+			var ds map[string]interface{}
+			if _ = json.Unmarshal(e.Payload, &ds); ds != nil {
+				resp["decision_snapshot"] = ds
+			}
+			break
+		}
+	}
+	c.JSON(consts.StatusOK, resp)
 }
 
 // GetJobNode 返回某节点的相关事件与 payload（输入/输出等）

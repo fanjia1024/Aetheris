@@ -30,6 +30,14 @@ Adapter 在 Execute 成功后**立即**写 `command_committed`，再由 Runner �
 
 为保证 at-most-once tool 执行，**completion 必须先于 NodeFinished/checkpoint 对 Replay 可见**。即：事件流为 Replay 的事实来源时，Tool 节点在 Adapter 内应先写 `tool_invocation_finished` 与 `command_committed`，再写 InvocationStore 的 SetFinished/Commit；Runner 再写 NodeFinished 与 UpdateCursor。这样若 Worker 在「tool 已执行、事件已落盘」后、UpdateCursor 前崩溃，Replay 仍能从事件流看到 completion 并注入结果，不会重复执行。见 [node_adapter.go](internal/agent/runtime/executor/node_adapter.go) 中 Tool 成功路径的写入顺序。
 
+### Step 两阶段提交（Effect Store）
+
+当配置 **Effect Store** 时，单步提交分为两阶段，避免「Execute 成功、Append 前崩溃」导致 Replay 再次执行同一 step：
+
+- **StepStarted**（事件流：node_started / tool_invocation_started 等）→ **StepEffectPersisted**（Effect Store：`PutEffect`）→ **StepCommitted**（事件流：`command_committed` / `tool_invocation_finished`）→ NodeFinished / Checkpoint。
+
+Replay 或 Reclaim 后新 Worker 推进时：若事件流中该 step 无 `command_committed`，但 Effect Store 中已有该 step 的 effect（按 job_id + idempotency_key 查），则执行 **catch-up**：从 Effect Store 读取 result，向事件流追加 `command_committed` / `tool_invocation_finished`，并可选更新 Ledger/InvocationStore，**不**再执行 Tool/LLM。详见 [effect-system.md](effect-system.md) § Effect Store 与强 Replay。
+
 ## 推进规则
 
 1. **startIndex**：第一个不在 CompletedNodeIDs 中的 step 索引（Replay 路径）；或 Checkpoint 路径下「CursorNode 的下一索引」。

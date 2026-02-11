@@ -684,7 +684,7 @@ runLoop:
 		}
 		// Wait 节点：不执行，写 job_waiting 并置为 Waiting，由 API signal 后重新入队继续（design/job-state-machine.md）
 		if step.NodeType == planner.NodeWait {
-			waitKind, reason := "", ""
+			waitKind, reason, waitChannel := "", "", ""
 			var expiresAt time.Time
 			for _, n := range taskGraph.Nodes {
 				if n.ID == step.NodeID && n.Config != nil {
@@ -693,6 +693,9 @@ runLoop:
 					}
 					if r, ok := n.Config["reason"].(string); ok {
 						reason = r
+					}
+					if ch, ok := n.Config["channel"].(string); ok {
+						waitChannel = ch
 					}
 					if e, ok := n.Config["expires_at"].(string); ok {
 						if t, err := time.Parse(time.RFC3339, e); err == nil {
@@ -707,6 +710,9 @@ runLoop:
 			}
 			if r.nodeEventSink != nil {
 				correlationKey := "wait-" + uuid.New().String()
+				if waitKind == planner.WaitKindMessage && waitChannel != "" {
+					correlationKey = waitChannel
+				}
 				_ = r.nodeEventSink.AppendJobWaiting(ctx, j.ID, step.NodeID, waitKind, reason, expiresAt, correlationKey)
 			}
 			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusWaiting)
@@ -729,6 +735,9 @@ runLoop:
 			}
 			ctx = WithStateChangesByStep(ctx, m)
 		}
+		if replayCtx != nil && len(replayCtx.ApprovedCorrelationKeys) > 0 {
+			ctx = WithApprovedCorrelationKeys(ctx, replayCtx.ApprovedCorrelationKeys)
+		}
 		runCtx := ctx
 		if r.stepTimeout > 0 {
 			var cancel context.CancelFunc
@@ -738,6 +747,14 @@ runLoop:
 		var runErr error
 		payload, runErr = step.Run(runCtx, payload)
 		durationMs := time.Since(stepStart).Milliseconds()
+		var capReq *CapabilityRequiresApproval
+		if errors.As(runErr, &capReq) && capReq != nil {
+			if r.nodeEventSink != nil {
+				_ = r.nodeEventSink.AppendJobWaiting(ctx, j.ID, step.NodeID, "signal", "capability_approval", time.Now().Add(24*time.Hour), capReq.CorrelationKey)
+			}
+			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusWaiting)
+			return ErrJobWaiting
+		}
 		resultType, reason := ClassifyError(runErr)
 		if runErr != nil && errors.Is(runErr, context.DeadlineExceeded) {
 			resultType = StepResultRetryableFailure

@@ -130,8 +130,12 @@ type ToolNodeAdapter struct {
 	// InvocationLedger 执行许可账本；非 nil 时所有 tool 调用经 Acquire/Commit，禁止直接拥有执行权
 	InvocationLedger InvocationLedger
 	// InvocationStore 可选；当 InvocationLedger 为 nil 时用于兼容旧逻辑（先查再执行）
-	InvocationStore  ToolInvocationStore
-	ResourceVerifier ResourceVerifier // 可选；Confirmation Replay 时校验外部资源仍存在，不通过则失败 job
+	InvocationStore ToolInvocationStore
+	// EffectStore 副作用存储；非 nil 时两步提交：Execute 后先 PutEffect，再 Append；Replay/catch-up 时先查此处（强 Replay）
+	EffectStore EffectStore
+	// CapabilityPolicyChecker 执行前校验；非 nil 时在 Tools.Execute 前按能力/策略 Check，deny 则失败该步，require_approval 则返回 CapabilityRequiresApproval（design/capability-policy.md）
+	CapabilityPolicyChecker CapabilityPolicyChecker
+	ResourceVerifier        ResourceVerifier // 可选；Confirmation Replay 时校验外部资源仍存在，不通过则失败 job
 }
 
 // runConfirmation 在注入前校验本步的 StateChanged；若 verifier 存在且有待校验项且任一项失败则返回永久失败错误
@@ -311,6 +315,34 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 			return p, nil
 		}
 	}
+	// Effect Store catch-up：事件流无 command_committed 但 EffectStore 已有 effect（上一 Worker 执行后崩溃），则只写回事件不重执行（强 Replay）
+	if a.EffectStore != nil && jobID != "" {
+		eff, err := a.EffectStore.GetEffectByJobAndIdempotencyKey(ctx, jobID, idempotencyKey)
+		if err == nil && eff != nil && len(eff.Output) > 0 {
+			if err := a.runConfirmation(ctx, jobID, taskID, stepChanges); err != nil {
+				return nil, err
+			}
+			if err := a.writeCatchUpFinished(ctx, jobID, taskID, stepIDForLedger, idempotencyKey, argsHash, eff.Output); err != nil {
+				return nil, err
+			}
+			if a.InvocationLedger != nil {
+				_ = a.InvocationLedger.Commit(ctx, "catchup-"+idempotencyKey, idempotencyKey, eff.Output)
+			}
+			if a.InvocationStore != nil {
+				_ = a.InvocationStore.SetFinished(ctx, idempotencyKey, ToolInvocationStatusSuccess, eff.Output, true)
+			}
+			var nodeResult map[string]any
+			_ = json.Unmarshal(eff.Output, &nodeResult)
+			if nodeResult == nil {
+				nodeResult = make(map[string]any)
+			}
+			if p.Results == nil {
+				p.Results = make(map[string]any)
+			}
+			p.Results[taskID] = nodeResult
+			return p, nil
+		}
+	}
 	// 1.0 短路：Replay 已注入的节点结果不再执行
 	if prev, ok := p.Results[taskID]; ok {
 		if m, ok := prev.(map[string]any); ok {
@@ -371,6 +403,21 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 		_ = a.ToolEventSink.AppendToolCalled(ctx, jobID, nodeIDForEvent, toolName, inputBytes)
 	}
 	ctx = WithToolExecutionKey(ctx, idempotencyKey)
+	// Capability 执行前校验（design/capability-policy.md）
+	if a.CapabilityPolicyChecker != nil && jobID != "" {
+		approvedKeys := ApprovedCorrelationKeysFromContext(ctx)
+		capability := toolName
+		allowed, requiredApproval, checkErr := a.CapabilityPolicyChecker.Check(ctx, jobID, toolName, capability, idempotencyKey, approvedKeys)
+		if checkErr != nil {
+			return nil, &StepFailure{Type: StepResultPermanentFailure, Inner: checkErr, NodeID: taskID}
+		}
+		if !allowed && requiredApproval {
+			return nil, &CapabilityRequiresApproval{CorrelationKey: "cap-approval-" + idempotencyKey}
+		}
+		if !allowed {
+			return nil, &StepFailure{Type: StepResultPermanentFailure, Inner: fmt.Errorf("capability denied: %s", capability), NodeID: taskID}
+		}
+	}
 	result, err := a.Tools.Execute(ctx, toolName, cfg, state)
 	finishedAt := time.Now().UTC()
 	if err != nil {
@@ -408,7 +455,20 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 		"done": result.Done, "state": result.State, "output": result.Output, "error": result.Err,
 	}
 	resultBytes, _ := json.Marshal(nodeResult)
-	// 先写事件再写 Store，保证 Replay 以事件流为事实来源时能先看到 completion，避免崩溃后重放重复执行（Tool Idempotency Guard）
+	// 两步提交 Phase 1：先写 Effect Store，崩溃恢复时 Replay 可从 Effect Store catch-up，不重执行（强 Replay）
+	if a.EffectStore != nil && jobID != "" {
+		inputBytes, _ := json.Marshal(cfg)
+		_ = a.EffectStore.PutEffect(ctx, &EffectRecord{
+			JobID:          jobID,
+			CommandID:      nodeIDForEvent,
+			IdempotencyKey: idempotencyKey,
+			Kind:           EffectKindTool,
+			Input:          inputBytes,
+			Output:         resultBytes,
+			Error:          result.Err,
+		})
+	}
+	// Phase 2：写事件流与 Ledger/Store
 	if a.ToolEventSink != nil && jobID != "" {
 		_ = a.ToolEventSink.AppendToolInvocationFinished(ctx, jobID, nodeIDForEvent, &ToolInvocationFinishedPayload{
 			InvocationID:   invocationID,

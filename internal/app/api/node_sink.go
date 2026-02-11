@@ -396,7 +396,7 @@ func (s *nodeEventSinkImpl) AppendJobWaiting(ctx context.Context, jobID string, 
 		return err
 	}
 	waitType := waitKind
-	if waitType != "webhook" && waitType != "human" && waitType != "timer" && waitType != "signal" {
+	if waitType != "webhook" && waitType != "human" && waitType != "timer" && waitType != "signal" && waitType != "message" {
 		waitType = "signal"
 	}
 	pl := jobstore.JobWaitingPayload{

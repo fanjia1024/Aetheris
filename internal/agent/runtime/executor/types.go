@@ -39,6 +39,9 @@ type stateChangesByStepContextKey struct{}
 // pendingToolInvocationsContextKey 用于在 context 中传递事件流「已 started 无 finished」的 idempotency_key 集合（Activity Log Barrier），禁止再次执行
 type pendingToolInvocationsContextKey struct{}
 
+// approvedCorrelationKeysContextKey 用于在 context 中传递已批准的 correlation_key 集合（wait_completed），供 CapabilityPolicyChecker 审批后放行（design/capability-policy.md）
+type approvedCorrelationKeysContextKey struct{}
+
 // executionStepIDContextKey 用于在 context 中传递确定性步身份（design/step-identity.md），供 Ledger/事件写入与 Replay 一致
 type executionStepIDContextKey struct{}
 
@@ -50,6 +53,7 @@ var theJobIDContextKey = jobIDContextKey{}
 var theReplayContextKey = replayContextKey{}
 var theStateChangesByStepContextKey = stateChangesByStepContextKey{}
 var thePendingToolInvocationsContextKey = pendingToolInvocationsContextKey{}
+var theApprovedCorrelationKeysContextKey = approvedCorrelationKeysContextKey{}
 var theExecutionStepIDContextKey = executionStepIDContextKey{}
 var theToolExecutionKeyContextKey = toolExecutionKeyContextKey{}
 
@@ -106,6 +110,21 @@ func WithPendingToolInvocations(ctx context.Context, pending map[string]struct{}
 // PendingToolInvocationsFromContext 从 context 取出 pending 集合
 func PendingToolInvocationsFromContext(ctx context.Context) map[string]struct{} {
 	v := ctx.Value(thePendingToolInvocationsContextKey)
+	if v == nil {
+		return nil
+	}
+	m, _ := v.(map[string]struct{})
+	return m
+}
+
+// WithApprovedCorrelationKeys 将已批准的 correlation_key 集合放入 ctx（来自 wait_completed），供 CapabilityPolicyChecker 审批后放行
+func WithApprovedCorrelationKeys(ctx context.Context, m map[string]struct{}) context.Context {
+	return context.WithValue(ctx, theApprovedCorrelationKeysContextKey, m)
+}
+
+// ApprovedCorrelationKeysFromContext 从 context 取出已批准的 correlation_key 集合
+func ApprovedCorrelationKeysFromContext(ctx context.Context) map[string]struct{} {
+	v := ctx.Value(theApprovedCorrelationKeysContextKey)
 	if v == nil {
 		return nil
 	}

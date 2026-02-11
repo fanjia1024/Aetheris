@@ -46,6 +46,7 @@ type ReplayContext struct {
 	CompletedToolInvocations map[string][]byte              // idempotency_key -> 成功完成的工具调用 result JSON，Replay 时跳过执行并注入
 	PendingToolInvocations   map[string]struct{}            // 事件流中「有 tool_invocation_started 无对应 tool_invocation_finished」的 idempotency_key，禁止再次执行（Activity Log Barrier）
 	StateChangesByStep       map[string][]StateChangeRecord // node_id -> 该步的 state_changed 列表，供 Confirmation Replay
+	ApprovedCorrelationKeys  map[string]struct{}            // wait_completed 中的 correlation_key 集合，供 CapabilityPolicyChecker 审批后放行（design/capability-policy.md）
 	// Phase 由事件流推导的执行阶段（plan 3.4），用于观测与「Agent 即长期进程」表述
 	Phase ExecutionPhase
 }
@@ -110,6 +111,7 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 		CompletedToolInvocations: make(map[string][]byte),
 		PendingToolInvocations:   make(map[string]struct{}),
 		StateChangesByStep:       make(map[string][]StateChangeRecord),
+		ApprovedCorrelationKeys:  make(map[string]struct{}),
 	}
 	var lastType jobstore.EventType
 	for _, e := range events {
@@ -209,8 +211,9 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 			out.StateChangesByStep[pl.NodeID] = append(out.StateChangesByStep[pl.NodeID], pl.StateChanges...)
 		case jobstore.WaitCompleted:
 			var pl struct {
-				NodeID  string          `json:"node_id"`
-				Payload json.RawMessage `json:"payload"`
+				NodeID         string          `json:"node_id"`
+				Payload        json.RawMessage `json:"payload"`
+				CorrelationKey string          `json:"correlation_key"`
 			}
 			if err := json.Unmarshal(e.Payload, &pl); err != nil || pl.NodeID == "" {
 				continue
@@ -218,6 +221,9 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 			out.CompletedNodeIDs[pl.NodeID] = struct{}{}
 			out.CursorNode = pl.NodeID
 			out.CompletedCommandIDs[pl.NodeID] = struct{}{}
+			if pl.CorrelationKey != "" {
+				out.ApprovedCorrelationKeys[pl.CorrelationKey] = struct{}{}
+			}
 			if len(pl.Payload) > 0 {
 				out.CommandResults[pl.NodeID] = []byte(pl.Payload)
 			} else {

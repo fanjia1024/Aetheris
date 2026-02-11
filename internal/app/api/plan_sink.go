@@ -63,5 +63,26 @@ func (s *PlanGeneratedSinkImpl) AppendPlanGenerated(ctx context.Context, jobID s
 	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{
 		JobID: jobID, Type: jobstore.PlanGenerated, Payload: payload,
 	})
+	if err != nil {
+		return err
+	}
+	// 决策快照：Plan 后写入，供可追责与 Trace 展示（design/execution-forensics.md）
+	taskGraphSummary := ""
+	if len(taskGraphJSON) > 0 {
+		if len(taskGraphJSON) <= 512 {
+			taskGraphSummary = string(taskGraphJSON)
+		} else {
+			taskGraphSummary = string(taskGraphJSON[:512]) + "..."
+		}
+	}
+	dsPayload, _ := json.Marshal(map[string]interface{}{
+		"goal":               goal,
+		"task_graph_summary": taskGraphSummary,
+		"plan_hash":          planHash,
+	})
+	_, ver2, _ := s.store.ListEvents(ctx, jobID)
+	_, err = s.store.Append(ctx, jobID, ver2, jobstore.JobEvent{
+		JobID: jobID, Type: jobstore.DecisionSnapshot, Payload: dsPayload,
+	})
 	return err
 }

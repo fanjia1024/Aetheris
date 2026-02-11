@@ -325,7 +325,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
 		resourceVerifier = verifier.NewGitHubVerifier(token)
 	}
-	dagCompiler = NewDAGCompiler(llmClientForAgent, toolsReg, engine, nodeEventSink, nodeEventSink, invocationStore, resourceVerifier, NewAttemptValidator(jobEventStore))
+	dagCompiler = NewDAGCompiler(llmClientForAgent, toolsReg, engine, nodeEventSink, nodeEventSink, invocationStore, nil, resourceVerifier, NewAttemptValidator(jobEventStore))
 	dagRunner = NewDAGRunner(dagCompiler)
 	var agentStateStore runtime.AgentStateStore
 	if bootstrap.Config != nil && bootstrap.Config.JobStore.Type == "postgres" && bootstrap.Config.JobStore.DSN != "" {
