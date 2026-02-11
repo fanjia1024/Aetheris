@@ -69,6 +69,31 @@ Reclaim 后再次 Claim 的 Job 会走 Replay；**安全前提**是 Effect 边�
 
 ---
 
+## 七、Cross-Version Replay（跨版本恢复）
+
+### 契约
+
+- **Execution Version Binding**：Job 创建时可记录 `execution_version`（代码版本，如 git tag）、`planner_version`（Planner 版本）；Replay 时检查版本是否匹配。
+- **Version Mismatch 策略**：
+  - **warning mode**（1.0 默认）：版本不匹配时记录 warning 日志，继续 Replay（假设向后兼容）
+  - **strict mode**（可选）：版本不匹配时拒绝执行，返回 `ErrVersionMismatch`
+  - **auto-migrate**（未来）：按 version 路由到旧代码或执行 schema migration
+- **PlanGenerated Versioning**：`plan_generated` payload 可包含 `planner_version`、`task_graph_schema_version`；Replay 时可据此判断"旧 Plan schema"与"新 Plan schema"是否兼容。
+
+**用途**：
+- 系统演进（Planner 更新、Tool 更新）后，旧 Job 仍可恢复（若版本兼容）
+- 审计可追溯"执行时用的哪个版本代码"
+- 版本不兼容时显式失败，而非静默错误
+
+**接口**：
+- **Job**：[internal/agent/job/job.go](../internal/agent/job/job.go) 增加 `ExecutionVersion`、`PlannerVersion` 字段
+- **Runner**：[internal/agent/runtime/executor/runner.go](../internal/agent/runtime/executor/runner.go) `RunForJob` 开始时检查 `j.ExecutionVersion`；不匹配时 warning 或 fail
+- **PlanGenerated**：payload 可增加 `planner_version`、`schema_version`
+
+详见 [versioning.md](versioning.md) § Cross-Version Replay。
+
+---
+
 ## 实现顺序与测试
 
 1. **Reclaim 以 event store 为准** + **不回收 Blocked**（§2、§3）。

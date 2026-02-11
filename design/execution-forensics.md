@@ -44,7 +44,15 @@
     "rag_doc_ids": ["doc-id-1", "chunk-id-2"],
     "tool_invocation_ids": ["idempotency-key-or-invocation-id"],
     "memory_entry_ids": ["mem-id-1"],
-    "policy_rule_ids": ["policy-rule-id"]
+    "policy_rule_ids": ["policy-rule-id"],
+    "signal_payload_id": "signal-456",
+    "llm_decision": {
+      "model": "gpt-4o-2024-11-20",
+      "provider": "openai",
+      "temperature": 0.7,
+      "prompt_hash": "sha256:abc123...",
+      "token_count": 1234
+    }
   }
 }
 ```
@@ -57,14 +65,16 @@
     { "type": "tool_invocation", "id": "job:step:tool:hash", "summary": "optional" },
     { "type": "rag_doc", "id": "chunk-id" },
     { "type": "memory", "id": "mem-id" },
-    { "type": "policy", "id": "rule-id" }
+    { "type": "policy", "id": "rule-id" },
+    { "type": "llm_decision", "id": "model:gpt-4o-2024-11-20", "summary": "temp=0.7" }
   ]
 }
 ```
 
-- **谁写入**：Runner 或 Node Sink 在步完成时（reasoning_snapshot）附加；Planner 层若有 RAG/记忆输入可写入 decision_snapshot。Tool 步由 Adapter 将 idempotency_key / invocation_id 通过 payload 传回 Runner，Runner 写入 reasoning_snapshot.evidence。
-- **Phase 1**：reasoning_snapshot 中增加可选 `evidence`；Tool 步填充 `tool_invocation_ids`（idempotency_key）。Phase 2：RAG/Memory/Policy 在子系统暴露 ID 后填充对应字段。
+- **谁写入**：Runner 或 Node Sink 在步完成时（reasoning_snapshot）附加；Planner 层若有 RAG/记忆输入可写入 decision_snapshot。Tool 步由 Adapter 将 idempotency_key / invocation_id 通过 payload 传回 Runner；LLM 步由 LLMNodeAdapter 在 result 中附加 `_evidence.llm_decision`（model, temperature, prompt_hash），Runner 写入 reasoning_snapshot.evidence。
+- **Phase 1**：reasoning_snapshot 中增加可选 `evidence`；Tool 步填充 `tool_invocation_ids`（idempotency_key）；LLM 步填充 `llm_decision`（model, provider, temperature, prompt_hash, token_count）。Phase 2：RAG/Memory/Policy 在子系统暴露 ID 后填充对应字段（rag_doc_ids, memory_entry_ids, policy_rule_ids）。
 - **Trace**：GET /api/jobs/:id/trace 与 GET node 的 step 或 node 负载中返回 reasoning_snapshot 原始 JSON，其中已含 `evidence`，供 UI 展示 Evidence graph。
+- **审计级证据**：与 Causal Debugging 区分：Causal 是工程师调试（reasoning 文本、state diff），Evidence 是法务/审计（可回答"为什么做这个决策？依据哪些输入？使用哪个模型？"）。Evidence Graph 必须记录所有决策输入（RAG 文档、工具调用、LLM 模型版本）以满足合规需求。
 
 ## 与 Causal Debugging 的关系
 

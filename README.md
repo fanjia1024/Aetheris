@@ -90,6 +90,30 @@ Because execution is event-sourced, Aetheris can:
 * audit every decision
 * deterministically replay an agent run
 
+**Important**: These guarantees require developers to follow the [Step Contract](design/step-contract.md) — steps must be deterministic and side effects must go through Tools. See the contract for how to write correct steps.
+
+---
+
+## When to Use Aetheris
+
+Use Aetheris when your agent needs **any** of the following:
+
+| Scenario | Why Aetheris |
+|----------|--------------|
+| **Human-in-the-loop approval** | Agent waits for days; must survive restarts |
+| **Long-running tasks (>1 min)** | Crashes should not lose progress |
+| **External side effects** | Email, payment, API calls — must be at-most-once |
+| **Audit & compliance** | Need execution proof: who did what, when, why |
+| **Multi-step reasoning** | Complex plans that span hours or days |
+| **Reliable recovery** | Production systems where agents must not lose state |
+
+**Don't use Aetheris** for:
+- Stateless chatbots (single request/response)
+- Prototype/demo agents (if crash = acceptable)
+- Pure in-memory tasks (<1 min, no side effects)
+
+If your agent is becoming a "critical system" (customers depend on it, data loss is unacceptable, failures cost money), you need Aetheris.
+
 ---
 
 ## Architecture Overview

@@ -67,21 +67,24 @@ func canonicalizeMap(m map[string]any) map[string]any {
 
 // ToolInvocationStartedPayload tool_invocation_started 事件 payload
 type ToolInvocationStartedPayload struct {
-	InvocationID   string `json:"invocation_id"`
-	ToolName       string `json:"tool_name"`
-	ArgumentsHash  string `json:"arguments_hash,omitempty"`
-	IdempotencyKey string `json:"idempotency_key"`
-	StartedAt      string `json:"started_at"` // RFC3339
+	InvocationID      string `json:"invocation_id"`
+	ToolName          string `json:"tool_name"`
+	ArgumentsHash     string `json:"arguments_hash,omitempty"`
+	IdempotencyKey    string `json:"idempotency_key"`
+	StartedAt         string `json:"started_at"`                    // RFC3339
+	ToolVersion       string `json:"tool_version,omitempty"`        // Tool 实现版本（用于审计与版本追踪）
+	RequestSchemaHash string `json:"request_schema_hash,omitempty"` // 输入 schema hash（用于检测 schema 漂移）
 }
 
 // ToolInvocationFinishedPayload tool_invocation_finished 事件 payload
 type ToolInvocationFinishedPayload struct {
-	InvocationID   string          `json:"invocation_id"`
-	IdempotencyKey string          `json:"idempotency_key"`
-	Outcome        string          `json:"outcome"` // success | failure | timeout
-	Result         json.RawMessage `json:"result,omitempty"`
-	Error          string          `json:"error,omitempty"`
-	FinishedAt     string          `json:"finished_at"` // RFC3339
+	InvocationID       string          `json:"invocation_id"`
+	IdempotencyKey     string          `json:"idempotency_key"`
+	Outcome            string          `json:"outcome"` // success | failure | timeout
+	Result             json.RawMessage `json:"result,omitempty"`
+	Error              string          `json:"error,omitempty"`
+	FinishedAt         string          `json:"finished_at"`                    // RFC3339
+	ResponseSchemaHash string          `json:"response_schema_hash,omitempty"` // 输出 schema hash（与 started 时对比检测 schema 变化）
 }
 
 // ArgumentsHash 对 args 做规范化 JSON 后取 sha256 前 16 字符，用于审计

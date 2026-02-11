@@ -1253,8 +1253,8 @@ func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
 		return
 	}
-	if j.Status != job.StatusWaiting {
-		c.JSON(consts.StatusBadRequest, map[string]string{"error": "任务未在等待状态，无法 signal"})
+	if j.Status != job.StatusWaiting && j.Status != job.StatusParked {
+		c.JSON(consts.StatusBadRequest, map[string]string{"error": "任务未在等待状态（Waiting/Parked），无法 signal"})
 		return
 	}
 	events, ver, err := h.jobEventStore.ListEvents(ctx, jobID)
@@ -1375,7 +1375,7 @@ func (h *Handler) JobMessage(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "写入消息失败"})
 		return
 	}
-	if j.Status == job.StatusWaiting {
+	if j.Status == job.StatusWaiting || j.Status == job.StatusParked {
 		var waitPayload jobstore.JobWaitingPayload
 		for i := len(events) - 1; i >= 0; i-- {
 			if events[i].Type == jobstore.JobWaiting {

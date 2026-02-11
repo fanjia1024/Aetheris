@@ -25,8 +25,10 @@ const (
 	StatusCompleted
 	StatusFailed
 	StatusCancelled
-	// StatusWaiting 在 Wait 节点挂起，等待 signal/continue（见 design/job-state-machine.md）
+	// StatusWaiting 短暂等待（<1 min），scheduler 仍扫描（防止 signal 丢失）
 	StatusWaiting
+	// StatusParked 长时间等待（>1 min），scheduler 跳过；仅由 signal 通过 WakeupQueue 唤醒（见 design/agent-process-model.md）
+	StatusParked
 	// StatusRetrying 失败后等待重试（可选显式状态）
 	StatusRetrying
 )
@@ -45,6 +47,8 @@ func (s JobStatus) String() string {
 		return "cancelled"
 	case StatusWaiting:
 		return "waiting"
+	case StatusParked:
+		return "parked"
 	case StatusRetrying:
 		return "retrying"
 	default:
@@ -76,4 +80,8 @@ type Job struct {
 	QueueClass string
 	// RequiredCapabilities 执行该 Job 所需能力（如 llm, tool, rag）；空表示任意 Worker 可执行；Scheduler 按能力派发
 	RequiredCapabilities []string
+	// ExecutionVersion 执行代码版本（如 git tag v1.2.0）；用于跨版本 replay 检测（design/versioning.md）
+	ExecutionVersion string
+	// PlannerVersion Planner 版本（可选）；记录生成 Plan 时的 Planner 版本
+	PlannerVersion string
 }

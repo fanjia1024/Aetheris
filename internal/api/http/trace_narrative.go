@@ -50,6 +50,7 @@ type StepNarrative struct {
 	EndTime           *time.Time             `json:"end_time,omitempty"`
 	Reasoning         []ReasoningItem        `json:"reasoning,omitempty"`
 	ToolInvocation    *ToolInvocationSummary `json:"tool_invocation,omitempty"`
+	LLMInvocation     *LLMInvocationSummary  `json:"llm_invocation,omitempty"` // LLM 调用元数据（model/provider/temperature），供审计与 trace
 	StateDiff         *StateDiff             `json:"state_diff,omitempty"`
 	ReasoningSnapshot json.RawMessage        `json:"reasoning_snapshot,omitempty"` // 该步的推理快照，供因果调试
 	Evidence          interface{}            `json:"evidence,omitempty"`           // 决策依据（Evidence Graph）：rag_doc_ids、tool_invocation_ids 等，来自 reasoning_snapshot
@@ -70,6 +71,15 @@ type ToolInvocationSummary struct {
 	Idempotent bool            `json:"idempotent,omitempty"`
 	Input      json.RawMessage `json:"input,omitempty"`
 	Output     json.RawMessage `json:"output,omitempty"`
+}
+
+// LLMInvocationSummary LLM 调用元数据（from command_committed LLM 步），供审计与 trace（design/versioning.md）
+type LLMInvocationSummary struct {
+	Model       string  `json:"model"`
+	Provider    string  `json:"provider"`
+	Temperature float64 `json:"temperature"`
+	PromptHash  string  `json:"prompt_hash,omitempty"`
+	TokenCount  int     `json:"token_count,omitempty"`
 }
 
 // StateChangeItem 单条外部资源变更（来自 state_changed 事件），供审计
@@ -245,6 +255,32 @@ func BuildNarrative(events []jobstore.JobEvent) *Narrative {
 			delete(nodeStartTime, nodeID)
 			delete(nodeStartPayload, nodeID)
 
+		case jobstore.CommandCommitted:
+			// LLM 步的 command_committed 包含 llm_model 等元数据（design/versioning.md）
+			nodeID := getStr("node_id")
+			if nodeID != "" && pl != nil {
+				if model, ok := pl["llm_model"].(string); ok && model != "" {
+					if idx, ok := spanToStepIndex[nodeID]; ok && idx < len(out.Steps) {
+						provider, _ := pl["llm_provider"].(string)
+						temperature := 0.0
+						if t, ok := pl["llm_temperature"].(float64); ok {
+							temperature = t
+						}
+						promptHash, _ := pl["prompt_hash"].(string)
+						tokenCount := 0
+						if tc, ok := pl["token_count"].(float64); ok {
+							tokenCount = int(tc)
+						}
+						out.Steps[idx].LLMInvocation = &LLMInvocationSummary{
+							Model:       model,
+							Provider:    provider,
+							Temperature: temperature,
+							PromptHash:  promptHash,
+							TokenCount:  tokenCount,
+						}
+					}
+				}
+			}
 		case jobstore.ToolCalled:
 			nodeID := getStr("node_id")
 			toolName := getStr("tool_name")

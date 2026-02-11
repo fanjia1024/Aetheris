@@ -267,3 +267,134 @@ Query
 ## 12. 结论
 
 本架构以 **Go + eino** 为核心，构建了一个 **Agent-Native、Workflow-Driven、RAG-Ready** 的系统基础，可支撑复杂知识系统与智能体平台的长期演进。
+
+---
+
+## 13. 使用场景（Use Cases）
+
+Aetheris 适用于需要**可信执行保证**的 Agent 场景。以下场景推荐使用 Aetheris：
+
+### 13.1 审批流（Human-in-the-Loop）
+
+**场景**：法务审批合同、财务审批付款、HR 审批招聘
+
+**需求**：
+- Agent 生成文档后等待人工审批（可能 3 天）
+- 等待期间系统重启、Worker 崩溃不能丢失状态
+- 审批通过后从中断点继续执行
+
+**Aetheris 能力**：
+- Wait 节点 + StatusParked：长时间等待不占 Scheduler 资源
+- Signal/Message：审批结果通过 POST `/api/jobs/:id/signal` 唤醒
+- Event Sourcing：等待期间崩溃可从事件流恢复
+
+**典型流程**：
+```
+Plan → 生成合同 → Wait(correlation_key="approval-123") → (人工审批 3 天) → Signal(approval-123, approved=true) → 发送合同
+```
+
+---
+
+### 13.2 长任务（Long-Running Tasks）
+
+**场景**：数据处理（1 小时）、报告生成（30 分钟）、批量导入（2 小时）
+
+**需求**：
+- 任务运行时间 > 1 分钟，Worker 可能崩溃
+- 崩溃后从中断点恢复，不重新执行已完成步骤
+- 进度可追踪、可审计
+
+**Aetheris 能力**：
+- Checkpoint + Replay：每步完成后写入 Checkpoint，崩溃后从最近 Checkpoint 恢复
+- Event Stream：完整执行历史，可展示进度（已完成 3/5 步）
+- At-most-once：已完成步骤 replay 时不重新执行
+
+**典型流程**：
+```
+Plan → 拉取数据(10 min) → Checkpoint → 清洗数据(20 min) → Checkpoint → 生成报告(30 min) → Checkpoint → 发送报告
+```
+
+---
+
+### 13.3 外部集成（External Side Effects）
+
+**场景**：调用 Stripe 扣款、Twilio 发短信、Salesforce 创建 Lead、发送邮件
+
+**需求**：
+- 外部 API 调用必须 **at-most-once**（不能重复扣款/发短信）
+- 崩溃重试时不能重复执行副作用
+- 审计需要知道"何时调用了哪个 API、参数是什么、结果是什么"
+
+**Aetheris 能力**：
+- Tool Invocation + Ledger：同一 idempotency_key 最多执行一次
+- Effect Store + Two-Phase Commit：先记录 effect，崩溃后 catch-up 不重执行
+- Step Idempotency Key：`StepIdempotencyKeyForExternal(ctx, jobID, stepID)` 传给下游 API
+
+**典型流程**：
+```
+Plan → 计算金额 → Tool(stripe.charge, idempotency_key="job:step:attempt") → Tool(email.send, idempotency_key=...) → 完成
+```
+
+---
+
+### 13.4 合规审计（Audit & Compliance）
+
+**场景**：金融系统（交易审计）、医疗系统（处方记录）、政府系统（决策追溯）
+
+**需求**：
+- 必须记录"谁、何时、为什么做了什么决策"
+- 决策依据可追溯（使用了哪些数据、调用了哪些 API、LLM 输出是什么）
+- Execution Proof Chain：不可篡改的执行证明
+
+**Aetheris 能力**：
+- Evidence Graph：记录 RAG doc IDs、tool invocation IDs、LLM model/temperature
+- Decision Snapshot：Planner 级决策（为什么生成这个 Plan）
+- Reasoning Snapshot：Step 级决策（goal、state_before、state_after、evidence）
+- Event Stream + Trace：完整时间线，可回答"为什么 AI 发送了这封邮件"
+
+**典型流程**：
+```
+PlanGenerated(evidence: goal, memory_keys) → Step1(evidence: rag_doc_ids, llm_decision) → Step2(evidence: tool_invocation_id) → Trace 展示完整证据链
+```
+
+---
+
+### 13.5 多步推理（Multi-Step Reasoning）
+
+**场景**：研究助手（搜索 → 阅读 → 总结 → 撰写）、销售流程（线索 → 跟进 → 报价 → 成交）
+
+**需求**：
+- 计划包含多个步骤，每步依赖上一步结果
+- 中间步骤失败需重试，已完成步骤不重新执行
+- 可暂停、恢复、修改计划
+
+**Aetheris 能力**：
+- TaskGraph：DAG 定义步骤依赖
+- State Checkpoint：每步 state_before → state_after，下一步读取 state_after
+- Replay：失败步骤重试时，前置步骤从事件流注入不重执行
+
+**典型流程**：
+```
+Plan(TaskGraph: A → B → C) → A 成功 → B 失败 → Retry B（A 从 Checkpoint 注入）→ B 成功 → C 成功
+```
+
+---
+
+### 13.6 反例：不适合 Aetheris 的场景
+
+| 场景 | 为什么不适合 | 推荐方案 |
+|------|-------------|----------|
+| 无状态聊天机器人 | 单次请求/响应，无需持久化 | LangChain + stateless API |
+| 原型/Demo Agent | 崩溃可接受，无审计需求 | LangGraph + 内存存储 |
+| 纯内存任务（<1 分钟） | 执行时间短，崩溃风险低 | 直接调用 LLM API |
+| 无外部副作用 | 不调用 API/数据库，replay 无意义 | 纯函数 + 缓存 |
+
+---
+
+## 参考
+
+- [execution-guarantees.md](execution-guarantees.md) — 运行时保证
+- [effect-system.md](effect-system.md) — Effect 类型与 Replay 协议
+- [scheduler-correctness.md](scheduler-correctness.md) — 调度器正确性
+- [runtime-contract.md](runtime-contract.md) — 运行时契约
+- [step-contract.md](step-contract.md) — Step 编写契约

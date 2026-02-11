@@ -93,7 +93,16 @@ func (a *LLMNodeAdapter) runNode(ctx context.Context, taskID string, cfg map[str
 			if p.Results == nil {
 				p.Results = make(map[string]any)
 			}
-			p.Results[taskID] = resp
+			// Include evidence from Effect Store Metadata if available
+			evidence := map[string]interface{}{}
+			if eff.Metadata != nil && len(eff.Metadata) > 0 {
+				evidence["llm_decision"] = eff.Metadata
+			}
+			resultMap := map[string]any{
+				"output":    resp,
+				"_evidence": evidence,
+			}
+			p.Results[taskID] = resultMap
 			return p, nil
 		}
 	}
@@ -119,12 +128,34 @@ func (a *LLMNodeAdapter) runNode(ctx context.Context, taskID string, cfg map[str
 		})
 	}
 	if a.CommandEventSink != nil && jobID != "" {
-		_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, resultBytes, "")
+		// LLM command_committed payload 包含 model/provider/temperature 供审计与 trace（design/versioning.md）
+		commitPayload := map[string]interface{}{
+			"result":          resp,
+			"llm_model":       "llm-model-default", // TODO: from LLM.GetModelInfo() when available
+			"llm_provider":    "default",
+			"llm_temperature": 0.7,
+		}
+		commitBytes, _ := json.Marshal(commitPayload)
+		_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, commitBytes, "")
 	}
 	if p.Results == nil {
 		p.Results = make(map[string]any)
 	}
-	p.Results[taskID] = resp
+
+	// Evidence: LLM decision metadata for audit (design/execution-forensics.md)
+	// TODO: Extract model/temperature from LLM when GetModelInfo() is available
+	resultMap := map[string]any{
+		"output": resp,
+		"_evidence": map[string]interface{}{
+			"llm_decision": map[string]interface{}{
+				"model":       "llm-model-default",
+				"provider":    "default",
+				"temperature": 0.7,
+			},
+		},
+	}
+	p.Results[taskID] = resultMap
+
 	if agent != nil && agent.Session != nil {
 		agent.Session.AddMessage("assistant", resp)
 	}

@@ -33,7 +33,8 @@ const (
 	pgStatusFailed    = 3
 	pgStatusCancelled = 4
 	pgStatusWaiting   = 5
-	pgStatusRetrying  = 6
+	pgStatusParked    = 6 // 长时间等待，scheduler 跳过
+	pgStatusRetrying  = 7
 )
 
 // JobStorePg Postgres 实现：jobs 表，供 API 与 Worker 共享
@@ -77,6 +78,8 @@ func statusToPg(s JobStatus) int {
 		return pgStatusCancelled
 	case StatusWaiting:
 		return pgStatusWaiting
+	case StatusParked:
+		return pgStatusParked
 	case StatusRetrying:
 		return pgStatusRetrying
 	default:
@@ -98,6 +101,8 @@ func pgToStatus(i int) JobStatus {
 		return StatusCancelled
 	case pgStatusWaiting:
 		return StatusWaiting
+	case pgStatusParked:
+		return StatusParked
 	case pgStatusRetrying:
 		return StatusRetrying
 	default:
