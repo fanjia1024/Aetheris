@@ -5,8 +5,8 @@ With Postgres + Worker deployed, run the following 9 checks in order; all must p
 ## Prerequisites
 
 - Deployed: 1 API + at least 1 Worker + Postgres (or use `deployments/compose`)
-- `CORAG_API_URL` points to the API (default http://localhost:8080)
-- CLI: `go run ./cmd/cli` or installed `corag`
+- `AETHERIS_API_URL` points to the API (default http://localhost:8080)
+- CLI: `go run ./cmd/cli` or installed `aetheris`
 
 ---
 
@@ -21,10 +21,10 @@ With Postgres + Worker deployed, run the following 9 checks in order; all must p
 
 ```bash
 # Example (adjust agent_id and message as needed)
-corag agent create test
-corag chat <agent_id>   # Send a message, note job_id; in another terminal kill -9 worker
+aetheris agent create test
+aetheris chat <agent_id>   # Send a message, note job_id; in another terminal kill -9 worker
 # After restarting worker, poll job status until completed
-corag trace <job_id>   # Inspect event sequence
+aetheris trace <job_id>   # Inspect event sequence
 ```
 
 ---
@@ -57,9 +57,9 @@ corag trace <job_id>   # Inspect event sequence
 2. **Verify**: DAG before recovery matches DAG after (same node set and order).
 
 ```bash
-corag trace <job_id>   # Save a copy before recovery
+aetheris trace <job_id>   # Save a copy before recovery
 # Trigger recovery (e.g. kill worker, restart)
-corag trace <job_id>   # Get another copy; compare plan_generated and node sequence
+aetheris trace <job_id>   # Get another copy; compare plan_generated and node sequence
 ```
 
 ---
@@ -70,7 +70,7 @@ corag trace <job_id>   # Get another copy; compare plan_generated and node seque
 2. **Verify**: LLM response still references earlier turns.
 
 ```bash
-corag chat <agent_id>  # Multi-turn
+aetheris chat <agent_id>  # Multi-turn
 # Restart worker
 # Send a message that depends on context; check reply continues the conversation
 ```
@@ -92,9 +92,9 @@ corag chat <agent_id>  # Multi-turn
 2. **Verify**: Execution path can be fully replayed; result matches a single real recovery run.
 
 ```bash
-corag replay <job_id>
+aetheris replay <job_id>
 # or
-curl -s "$CORAG_API_URL/api/jobs/<job_id>/events"
+curl -s "$AETHERIS_API_URL/api/jobs/<job_id>/events"
 ```
 
 ---
@@ -117,11 +117,11 @@ curl -s "$CORAG_API_URL/api/jobs/<job_id>/events"
 
 ```bash
 # Start a long task, note job_id; then:
-corag cancel <job_id>
+aetheris cancel <job_id>
 # or
-curl -X POST "$CORAG_API_URL/api/jobs/<job_id>/stop"
+curl -X POST "$AETHERIS_API_URL/api/jobs/<job_id>/stop"
 # Check job status is cancelled, event stream contains job_cancelled
-corag trace <job_id>
+aetheris trace <job_id>
 ```
 
 ---

@@ -513,7 +513,7 @@ type workersLister interface {
 	ListActiveWorkerIDs(ctx context.Context) ([]string, error)
 }
 
-// SystemWorkers 返回当前有未过期租约的 Worker 列表（GET /api/system/workers，供 CLI corag workers）
+// SystemWorkers 返回当前有未过期租约的 Worker 列表（GET /api/system/workers，供 CLI aetheris workers）
 func (h *Handler) SystemWorkers(ctx context.Context, c *app.RequestContext) {
 	if h.jobEventStore == nil {
 		c.JSON(consts.StatusOK, map[string]interface{}{"workers": []string{}, "total": 0})

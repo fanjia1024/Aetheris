@@ -143,7 +143,7 @@ Worker loads config via **LoadWorkerConfigWithModel**, which merges `configs/mod
 
 ### log / monitoring
 
-Same as API for log; monitoring.prometheus port can be set per Worker; use env **CORAG_WORKER_METRICS_PORT** when running multiple workers (e.g. 9094).
+Same as API for log; monitoring.prometheus port can be set per Worker; use env **AETHERIS_WORKER_METRICS_PORT** when running multiple workers (e.g. 9094).
 
 ---
 
@@ -159,8 +159,8 @@ Same as API for log; monitoring.prometheus port can be set per Worker; use env *
 | JOBSTORE_DSN | Postgres DSN; overrides jobstore.dsn in api.yaml / worker.yaml |
 | OTEL_EXPORTER_OTLP_ENDPOINT | Tracing OTLP endpoint (when export_endpoint is unset) |
 | PLANNER_TYPE | Set to `rule` for v1 Agent rule planner (no LLM), for debugging |
-| CORAG_API_URL | CLI API base URL, default http://localhost:8080 |
-| CORAG_AGENT_ID | Used by CLI `chat` when agent_id is not passed |
-| CORAG_WORKER_METRICS_PORT | Worker Prometheus port (when running multiple instances) |
+| AETHERIS_API_URL | CLI API base URL, default http://localhost:8080 |
+| AETHERIS_AGENT_ID | Used by CLI `chat` when agent_id is not passed |
+| AETHERIS_WORKER_METRICS_PORT | Worker Prometheus port (when running multiple instances) |
 
 For more on startup and typical flows see the "Environment variables and configuration" section in [usage.md](usage.md).

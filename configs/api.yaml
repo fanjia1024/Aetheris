@@ -21,14 +21,14 @@ api:
 # 任务事件存储（事件流 + 租约）；未配置或 type 非 postgres 时使用内存后端
 # 当 type=postgres 时，仅由 Worker 进程通过事件 Claim 执行，API 不启动进程内 Scheduler（单一执行权）
 # 本地 Docker 启动 Postgres 并初始化表结构：
-#   docker run -d --name corag-pg -p 5432:5432 \
-#     -e POSTGRES_USER=corag -e POSTGRES_PASSWORD=corag -e POSTGRES_DB=corag \
+#   docker run -d --name aetheris-pg -p 5432:5432 \
+#     -e POSTGRES_USER=aetheris -e POSTGRES_PASSWORD=aetheris -e POSTGRES_DB=aetheris \
 #     -v $(pwd)/internal/runtime/jobstore/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro \
 #     postgres:15-alpine
 # 或使用项目 compose：docker compose -f deployments/compose/docker-compose.yml up -d postgres
 jobstore:
   type: "postgres"         # memory | postgres
-  dsn: "postgres://corag:corag@localhost:5432/corag?sslmode=disable"  # 可用环境变量 JOBSTORE_DSN 覆盖
+  dsn: "postgres://aetheris:aetheris@localhost:5432/aetheris?sslmode=disable"  # 可用环境变量 JOBSTORE_DSN 覆盖
   lease_duration: "30s"    # 租约时长；Heartbeat 间隔建议 < lease_duration/2
 
 # v1 Agent 与 Job 调度（仅 jobstore.type=memory 时生效；postgres 时 API 不拉取，由 Worker 唯一执行）

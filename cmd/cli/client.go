@@ -25,7 +25,7 @@ import (
 )
 
 func apiBaseURL() string {
-	if u := os.Getenv("CORAG_API_URL"); u != "" {
+	if u := os.Getenv("AETHERIS_API_URL"); u != "" {
 		return u
 	}
 	return "http://localhost:8080"

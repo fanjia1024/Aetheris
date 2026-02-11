@@ -13,7 +13,7 @@ worker:
 # 任务事件与元数据存储（与 API 共用 DSN 时，Worker Claim 执行 Job）
 jobstore:
   type: "postgres"
-  dsn: "postgres://corag:corag@localhost:5432/corag?sslmode=disable"
+  dsn: "postgres://aetheris:aetheris@localhost:5432/aetheris?sslmode=disable"
   lease_duration: "30s"
 
 # 存储配置（当前元数据仅支持 memory；mysql 等需后续实现）
@@ -52,7 +52,7 @@ log:
   format: "json"
   file: "worker.log"
 
-# 监控配置（多 Worker 时可用环境变量 CORAG_WORKER_METRICS_PORT 指定不同端口，如 9094）
+# 监控配置（多 Worker 时可用环境变量 AETHERIS_WORKER_METRICS_PORT 指定不同端口，如 9094）
 monitoring:
   prometheus:
     enable: true

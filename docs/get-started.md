@@ -1,6 +1,6 @@
 # Get Started — 核心功能完整测试指南
 
-本文档帮助你在本地快速跑通 Aetheris/CoRag 的主要能力，并按需完成「完整运行时」测试（崩溃恢复、多 Worker、Trace、取消等）。
+本文档帮助你在本地快速跑通 Aetheris 的主要能力，并按需完成「完整运行时」测试（崩溃恢复、多 Worker、Trace、取消等）。
 
 ---
 
@@ -32,8 +32,8 @@
 - 先启动 Postgres 并执行 schema。一键启动 Postgres（Docker）：
 
 ```bash
-docker run -d --name corag-pg -p 5432:5432 \
-  -e POSTGRES_USER=corag -e POSTGRES_PASSWORD=corag -e POSTGRES_DB=corag \
+docker run -d --name aetheris-pg -p 5432:5432 \
+  -e POSTGRES_USER=aetheris -e POSTGRES_PASSWORD=aetheris -e POSTGRES_DB=aetheris \
   -v $(pwd)/internal/runtime/jobstore/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro \
   postgres:15-alpine
 ```
@@ -304,7 +304,7 @@ curl -X POST http://localhost:8080/api/query/batch \
 ./scripts/release-cert-1.0.sh
 ```
 
-环境变量：`CORAG_API_URL`（默认 `http://localhost:8080`）、`RUN_TEST4=1` 可跑多 Job 并发测试。
+环境变量：`AETHERIS_API_URL`（默认 `http://localhost:8080`）、`RUN_TEST4=1` 可跑多 Job 并发测试。
 
 ---
 
@@ -322,7 +322,7 @@ CLI 用于调试与管理：创建 Agent、发消息、查 Job、Trace、Replay�
 | `go run ./cmd/cli replay <job_id>`     | 输出事件流与 Trace 页面 URL | GET /api/jobs/:id/events               |
 | `go run ./cmd/cli cancel <job_id>`     | 取消运行中的 Job            | POST /api/jobs/:id/stop                |
 
-可通过环境变量 `CORAG_API_URL` 指定 API 地址（默认 `http://localhost:8080`）。
+可通过环境变量 `AETHERIS_API_URL` 指定 API 地址（默认 `http://localhost:8080`）。
 
 ---
 

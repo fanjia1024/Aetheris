@@ -96,23 +96,73 @@ Because execution is event-sourced, Aetheris can:
 
 ## When to Use Aetheris
 
-Use Aetheris when your agent needs **any** of the following:
+Aetheris is designed for **three core scenarios**:
 
-| Scenario | Why Aetheris |
-|----------|--------------|
-| **Human-in-the-loop approval** | Agent waits for days; must survive restarts |
-| **Long-running tasks (>1 min)** | Crashes should not lose progress |
-| **External side effects** | Email, payment, API calls — must be at-most-once |
-| **Audit & compliance** | Need execution proof: who did what, when, why |
-| **Multi-step reasoning** | Complex plans that span hours or days |
-| **Reliable recovery** | Production systems where agents must not lose state |
+### 1. Human-in-the-Loop Operations
+
+审批流、客服工单、运营决策 — agent 等待人工（可能 3 天）并从中断点恢复
+
+**Why Aetheris**:
+- **StatusParked**: 长时间等待不占 Scheduler 资源
+- **Continuation**: 恢复时绑定完整 state（思维连续性）
+- **Signal**: 外部触发恢复（at-least-once delivery）
+
+**Examples**: 法务审批合同、财务审批付款、客服升级工单、HR 招聘审批
+
+---
+
+### 2. Long-Running API Orchestration
+
+SaaS 操作代理、数据 pipeline、批量处理 — agent 调用多个外部 API（可能 1 小时）
+
+**Why Aetheris**:
+- **At-most-once**: Tool 调用不重复（Ledger + Effect Store）
+- **Crash recovery**: Worker 崩溃后从 Checkpoint 继续
+- **Step timeout**: 超时自动重试或失败
+
+**Examples**: Salesforce 批量同步、Stripe 订单处理、数据清洗 pipeline、API 编排
+
+---
+
+### 3. Auditable Decision Agents
+
+金融交易、医疗处方、政府系统 — 必须记录"谁、何时、为什么做了什么"
+
+**Why Aetheris**:
+- **Evidence Graph**: 记录 RAG doc IDs、tool invocations、LLM model/version
+- **Execution Proof Chain**: 不可篡改的决策历史
+- **Replay deterministic**: 可证明"决策可重现"
+
+**Examples**: 自动放款审批、处方推荐、补贴发放、合规决策
+
+---
 
 **Don't use Aetheris** for:
-- Stateless chatbots (single request/response)
-- Prototype/demo agents (if crash = acceptable)
+- Stateless chatbots (单次请求/响应，无需持久化)
+- Prototype/demo agents (崩溃可接受，无审计需求)
 - Pure in-memory tasks (<1 min, no side effects)
 
 If your agent is becoming a "critical system" (customers depend on it, data loss is unacceptable, failures cost money), you need Aetheris.
+
+---
+
+## Quick Start
+
+**Build your first production agent in 15 minutes**: [Getting Started with Agents](docs/getting-started-agents.md)
+
+See a real business scenario (refund approval agent with human-in-the-loop) running on Aetheris, including:
+- Tool definition (at-most-once side effects)
+- Wait node (StatusParked for long waits)
+- Signal (human approval)
+- Crash recovery (Worker crash → resume without duplicate)
+- Trace & Replay (audit & debug)
+
+## Adapters
+
+Already have agents? Migrate them to Aetheris:
+
+- [Custom Agent Adapter](docs/adapters/custom-agent.md) — Wrap your existing agents (imperative → TaskGraph)
+- [LangGraph Adapter](docs/adapters/langgraph.md) — Run LangGraph agents on Aetheris (coming soon)
 
 ---
 
@@ -136,7 +186,7 @@ Scheduler correctness (lease fencing, step timeout) is implemented and documente
 
 RAG is one capability that agents can use via pipelines or tools; it is **pluggable**, not the only built-in scenario. Aetheris is an **Agent Hosting Runtime** (Temporal for agents): retrieval, generation, and knowledge pipelines are integrated as optional components, not the core product.
 
-**Names**: The product name is **Aetheris**. The Go module name (and import path) is **rag-platform**. See [docs/README.md](docs/README.md) for full naming (Aetheris, rag-platform, CoRag).
+**Names**: The product name is **Aetheris**. The Go module name (and import path) is **rag-platform**. The CLI command is **aetheris**. See [docs/README.md](docs/README.md) for naming details.
 
 Detailed documentation (configuration, CLI, deployment) is in [docs/](docs/).
 
@@ -196,7 +246,7 @@ Aetheris is built not only to **trace** execution but to **audit** and **attribu
 
 See [design/execution-forensics.md](design/execution-forensics.md) and [design/causal-debugging.md](design/causal-debugging.md).
 
-**Formal execution guarantees** (step at-least-once, at-most-once, signal delivery, replay determinism, no duplicate side effects on crash) are documented in [design/execution-guarantees.md](design/execution-guarantees.md).
+**Runtime guarantees and failure behavior** are documented in [docs/runtime-guarantees.md](docs/runtime-guarantees.md). See what happens when workers crash, steps timeout, or signals are lost. Formal guarantees table: [design/execution-guarantees.md](design/execution-guarantees.md).
 
 ---
 

@@ -14,11 +14,10 @@ Health check: `curl http://localhost:8080/api/health`. For full startup, environ
 
 ## Project names
 
-- **Aetheris** — Product/project name
-- **rag-platform** — go.mod module name
-- **CoRag** — Short name used in deployment and CLI (e.g. `corag` command, `CORAG_API_URL`)
+- **Aetheris** — Product/project name and CLI command (`aetheris`)
+- **rag-platform** — go.mod module name (internal use only, not user-facing)
 
-All refer to the same project.
+Environment variables use `AETHERIS_*` prefix (e.g., `AETHERIS_API_URL`).
 
 ## Version and changes
 
@@ -44,7 +43,7 @@ Recommended **Go 1.25.7+**, aligned with go.mod and CI.
 
 - [Usage (usage.md)](usage.md) — Startup, environment variables, typical flows, API endpoint summary, FAQ
 - [Configuration (config.md)](config.md) — api.yaml, model.yaml, worker.yaml field reference and env vars
-- [CLI (cli.md)](cli.md) — corag subcommands, install and run, REST API mapping
+- [CLI (cli.md)](cli.md) — aetheris subcommands, install and run, REST API mapping
 - [E2E testing (test-e2e.md)](test-e2e.md) — Upload → parse → split → index → retrieve (PDF / AGENTS.md)
 - [Tracing (tracing.md)](tracing.md) — OpenTelemetry config, OTEL_EXPORTER_OTLP_ENDPOINT, local Jaeger
 - [Observability (observability.md)](observability.md) — Execution Trace UI（Job 时间线、step 延迟、重试原因）、GET /api/jobs/:id/trace/page

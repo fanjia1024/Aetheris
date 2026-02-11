@@ -6,10 +6,10 @@ Use after release to quickly confirm core features, event tracing, distributed e
 
 ## 1. Core features
 
-- [ ] **Job creation** — Jobs can be created via Agent API or CLI. Check: `POST /api/agents/:id/message` or `corag chat <agent_id>`; confirm `job_id` is returned.
+- [ ] **Job creation** — Jobs can be created via Agent API or CLI. Check: `POST /api/agents/:id/message` or `aetheris chat <agent_id>`; confirm `job_id` is returned.
 - [ ] **Job execution** — Job runs from start to completion. Check: Run example DAG or TaskGraph, observe job status until completed.
-- [ ] **Event stream** — Every action (planning, tool call, step, retry, failure) is recorded. Check: `GET /api/jobs/:id/events` or `corag trace <job_id>`.
-- [ ] **Job replay** — Job can be replayed with same result. Check: `GET /api/jobs/:id/replay` or `corag replay <job_id>`.
+- [ ] **Event stream** — Every action (planning, tool call, step, retry, failure) is recorded. Check: `GET /api/jobs/:id/events` or `aetheris trace <job_id>`.
+- [ ] **Job replay** — Job can be replayed with same result. Check: `GET /api/jobs/:id/replay` or `aetheris replay <job_id>`.
 - [ ] **Idempotency** — Repeating replay or query does not cause duplicate writes or side effects. Check: Re-trigger replay/query for same job, confirm no duplicates.
 - [ ] **Job resume after interrupt** — After simulating an interrupt, job can resume. Check: Kill Runner or Worker while running; after restart, resume via `POST /api/agents/:id/resume` or Scheduler.
 
@@ -21,10 +21,10 @@ Use after release to quickly confirm core features, event tracing, distributed e
 
 ## 3. CLI and Agent API
 
-- [ ] **CLI commands** — Common commands work. Check: `corag agent create [name]`, `corag chat [agent_id]`, `corag jobs <agent_id>`, `corag trace <job_id>`, `corag replay <job_id>`, `corag cancel <job_id>`, `corag workers`.
+- [ ] **CLI commands** — Common commands work. Check: `aetheris agent create [name]`, `aetheris chat [agent_id]`, `aetheris jobs <agent_id>`, `aetheris trace <job_id>`, `aetheris replay <job_id>`, `aetheris cancel <job_id>`, `aetheris workers`, `aetheris debug <job_id>`.
 - [ ] **Agent API** — REST endpoints work. Check: curl, Postman, or script for `POST /api/agents`, `POST /api/agents/:id/message`, `GET /api/agents`, etc.
-- [ ] **Job cancel** — Job cancellation is supported. Check: `POST /api/jobs/:id/stop` or `corag cancel <job_id>`; job reaches cancelled/stopped.
-- [ ] **Event query** — Event stream can be queried by job. Check: `GET /api/jobs/:id/events` or `corag trace <job_id>`, `corag replay <job_id>`.
+- [ ] **Job cancel** — Job cancellation is supported. Check: `POST /api/jobs/:id/stop` or `aetheris cancel <job_id>`; job reaches cancelled/stopped.
+- [ ] **Event query** — Event stream can be queried by job. Check: `GET /api/jobs/:id/events` or `aetheris trace <job_id>`, `aetheris replay <job_id>`.
 
 ## 4. Logging and monitoring
 

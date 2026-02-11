@@ -28,7 +28,7 @@ This checklist ensures that Aetheris v1.0 is fully ready for open source release
 ## 3. CLI & Agent API Functionality
 | Check Item | Goal | Verification Method | Status |
 |------------|------|------------------|--------|
-| CLI Commands | `corag` subcommands (`agent create`, `jobs`, `trace`, `replay`, `cancel`, `workers`) work correctly | Run CLI examples | ☐ |
+| CLI Commands | `aetheris` subcommands (`agent create`, `jobs`, `trace`, `replay`, `cancel`, `workers`, `debug`) work correctly | Run CLI examples | ☐ |
 | Agent API | REST/gRPC endpoints operate correctly | Test API with Postman or scripts | ☐ |
 | Job Cancellation | Jobs can be cancelled mid-execution | Test cancel API | ☐ |
 | Event Query | Retrieve events by Job | API listEvents | ☐ |

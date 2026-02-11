@@ -242,10 +242,10 @@ func (a *App) Start() error {
 		a.agentJobRunner.Start(ctx)
 	}
 
-	// 可选：Prometheus /metrics 端点；多 Worker 时可用 CORAG_WORKER_METRICS_PORT 指定不同端口避免冲突
+	// 可选：Prometheus /metrics 端点；多 Worker 时可用 AETHERIS_WORKER_METRICS_PORT 指定不同端口避免冲突
 	if a.config != nil && a.config.Monitoring.Prometheus.Enable && a.config.Monitoring.Prometheus.Port > 0 {
 		port := a.config.Monitoring.Prometheus.Port
-		if envPort := os.Getenv("CORAG_WORKER_METRICS_PORT"); envPort != "" {
+		if envPort := os.Getenv("AETHERIS_WORKER_METRICS_PORT"); envPort != "" {
 			if p, err := strconv.Atoi(envPort); err == nil && p > 0 {
 				port = p
 			}
