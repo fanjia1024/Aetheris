@@ -119,7 +119,7 @@ type NodeEventSink interface {
 	// AppendNodeFinished 写入 node_finished；stepID 为空时用 nodeID；inputHash 非空时写入 payload 供 Replay 确定性判定（plan 3.3）
 	AppendNodeFinished(ctx context.Context, jobID string, nodeID string, payloadResults []byte, durationMs int64, state string, attempt int, resultType StepResultType, reason string, stepID string, inputHash string) error
 	AppendStateCheckpointed(ctx context.Context, jobID string, nodeID string, stateBefore, stateAfter []byte, opts *StateCheckpointOpts) error
-	AppendJobWaiting(ctx context.Context, jobID string, nodeID string, waitKind, reason string, expiresAt time.Time, correlationKey string) error
+	AppendJobWaiting(ctx context.Context, jobID string, nodeID string, waitKind, reason string, expiresAt time.Time, correlationKey string, resumptionContext []byte) error
 	// AppendReasoningSnapshot 写入 reasoning_snapshot 事件，供因果调试（design：Causal Debugging）
 	AppendReasoningSnapshot(ctx context.Context, jobID string, payload []byte) error
 }
@@ -713,9 +713,26 @@ runLoop:
 				if waitKind == planner.WaitKindMessage && waitChannel != "" {
 					correlationKey = waitChannel
 				}
-				_ = r.nodeEventSink.AppendJobWaiting(ctx, j.ID, step.NodeID, waitKind, reason, expiresAt, correlationKey)
+				// Continuation: 保存等待时的完整上下文（payload.Results snapshot + plan_decision_id），恢复时绑定 state（design/agent-process-model.md § Continuation Semantics）
+				resumptionCtx := map[string]interface{}{
+					"payload_results":  payload.Results,
+					"plan_decision_id": PlanDecisionID(graphBytes),
+					"cursor_node":      step.NodeID,
+				}
+				resumptionBytes, _ := json.Marshal(resumptionCtx)
+				_ = r.nodeEventSink.AppendJobWaiting(ctx, j.ID, step.NodeID, waitKind, reason, expiresAt, correlationKey, resumptionBytes)
 			}
-			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusWaiting)
+			// StatusWaiting vs StatusParked：通过 config.park 控制（design/agent-process-model.md § Process State）
+			targetStatus := statusWaiting
+			for _, n := range taskGraph.Nodes {
+				if n.ID == step.NodeID && n.Config != nil {
+					if park, ok := n.Config["park"].(bool); ok && park {
+						targetStatus = 6 // StatusParked
+						break
+					}
+				}
+			}
+			_ = r.jobStore.UpdateStatus(ctx, j.ID, targetStatus)
 			return ErrJobWaiting
 		}
 		stepStart := time.Now()
@@ -750,7 +767,14 @@ runLoop:
 		var capReq *CapabilityRequiresApproval
 		if errors.As(runErr, &capReq) && capReq != nil {
 			if r.nodeEventSink != nil {
-				_ = r.nodeEventSink.AppendJobWaiting(ctx, j.ID, step.NodeID, "signal", "capability_approval", time.Now().Add(24*time.Hour), capReq.CorrelationKey)
+				// Capability approval wait: also save resumption context
+				resumptionCtx := map[string]interface{}{
+					"payload_results":  payload.Results,
+					"plan_decision_id": PlanDecisionID(graphBytes),
+					"cursor_node":      step.NodeID,
+				}
+				resumptionBytes, _ := json.Marshal(resumptionCtx)
+				_ = r.nodeEventSink.AppendJobWaiting(ctx, j.ID, step.NodeID, "signal", "capability_approval", time.Now().Add(24*time.Hour), capReq.CorrelationKey, resumptionBytes)
 			}
 			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusWaiting)
 			return ErrJobWaiting
@@ -818,6 +842,14 @@ runLoop:
 				if m, ok := payload.Results[step.NodeID].(map[string]interface{}); ok && m["_evidence"] != nil {
 					snapshot["evidence"] = m["_evidence"]
 				}
+			}
+			// Causal Chain Phase 1：基于 state keys 推导因果依赖（design/execution-forensics.md § Causal Dependency）
+			inputKeys, outputKeys := extractStateKeys(stateBefore, payloadResults)
+			if len(inputKeys) > 0 {
+				snapshot["input_keys"] = inputKeys
+			}
+			if len(outputKeys) > 0 {
+				snapshot["output_keys"] = outputKeys
 			}
 			if snapshotBytes, err := json.Marshal(snapshot); err == nil {
 				_ = r.nodeEventSink.AppendReasoningSnapshot(ctx, j.ID, snapshotBytes)

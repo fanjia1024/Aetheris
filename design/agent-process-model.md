@@ -42,6 +42,46 @@
 - **Worker**：AgentJobRunner 可选 `SetWakeupQueue(q)`；无 job 时以 `Receive(ctx, pollInterval)` 替代 `time.After(pollInterval)`。
 - **单进程部署**：创建同一 `WakeupQueueMem` 实例并注入 Handler 与 AgentJobRunner，则 signal/message 后 Worker 可立即唤醒；多进程时需 Redis/PG 等分布式队列实现。
 
+## Continuation Semantics（等待后仍是同一思维）
+
+Agent 在 Wait 节点挂起后由 signal 唤醒继续执行，**恢复时必须保证思维连续性**：不是"新执行"，而是"同一 continuation"。
+
+### Resumption Context
+
+`job_waiting` 事件 payload 包含 **resumption_context**：
+
+```json
+{
+  "node_id": "wait1",
+  "wait_type": "human",
+  "correlation_key": "approval-123",
+  "resumption_context": {
+    "payload_results": {...},        // 等待前的 payload.Results snapshot
+    "plan_decision_id": "sha256:...", // 绑定到具体 Plan（避免 replan）
+    "cursor_node": "wait1"
+  }
+}
+```
+
+**写入时机**：Runner 在遇到 Wait 节点时，在写 `job_waiting` 前将当前 `payload.Results`、`plan_decision_id`、`cursor_node` 序列化为 resumption_context。
+
+**恢复时**：
+- Signal 写入 `wait_completed`，payload 包含 signal 传入的数据
+- Runner 恢复时从 resumption_context 读取等待前的完整 state
+- 下一步执行的 input = resumption_context.payload_results + signal.payload（合并）
+
+**保证**：
+- 等待 3 天后恢复，state 来自 wait 点 snapshot，不是"旧 checkpoint"或"空 state"
+- Agent 继续的是"原先的执行路径"（same plan, same reasoning state），不是"重新规划"
+
+### 实现位置
+
+- **事件 payload**：[internal/runtime/jobstore/event.go](../internal/runtime/jobstore/event.go) `JobWaitingPayload.ResumptionContext`
+- **写入**：[internal/agent/runtime/executor/runner.go](../internal/agent/runtime/executor/runner.go) Wait 节点路径，构造 resumption_context 并传给 `AppendJobWaiting`
+- **恢复**：[internal/agent/replay/replay.go](../internal/agent/replay/replay.go) `BuildFromEvents` 在遇到 `wait_completed` 时，可从对应 `job_waiting` 的 resumption_context 恢复 payload_results（Phase 2 增强）
+
+---
+
 ## Process State Semantics（WAITING vs PARKED）
 
 Agent 等待外部事件时有两种状态语义，区分"短暂等待"与"长时间等待"：

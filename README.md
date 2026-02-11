@@ -118,6 +118,8 @@ If your agent is becoming a "critical system" (customers depend on it, data loss
 
 ## Architecture Overview
 
+**Aetheris treats agents as virtual processes, not tasks.** Workers schedule and host processes; processes can pause, wait for signals, receive messages, and resume across different workers.
+
 User → Agent API → Job → Scheduler → Runner → Planner → TaskGraph → Tool/Workflow Nodes
 
 Key components:

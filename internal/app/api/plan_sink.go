@@ -49,13 +49,22 @@ func (s *PlanGeneratedSinkImpl) AppendPlanGenerated(ctx context.Context, jobID s
 		h := sha256.Sum256(taskGraphJSON)
 		planHash = hex.EncodeToString(h[:])
 	}
+	// Plan Input Hash: 绑定输入（goal），确保"相同输入 → 相同 plan"（design/workflow-decision-record.md § Non-Forkable History）
+	planInputHash := ""
+	if goal != "" {
+		canonical := goal // 未来可扩展：goal + memory_keys + tool_registry_version
+		h := sha256.Sum256([]byte(canonical))
+		planInputHash = hex.EncodeToString(h[:16])
+	}
 	payload, err := json.Marshal(map[string]interface{}{
-		"task_graph":     json.RawMessage(taskGraphJSON),
-		"goal":           goal,
-		"plan_hash":      planHash, // 决策记录完整性校验与调试（design/workflow-decision-record.md）
-		"trace_span_id":  "plan",
-		"parent_span_id": "root",
-		"step_index":     stepIndex,
+		"task_graph":      json.RawMessage(taskGraphJSON),
+		"goal":            goal,
+		"plan_hash":       planHash,      // 决策记录完整性校验与调试（design/workflow-decision-record.md）
+		"plan_input_hash": planInputHash, // 输入 hash，确保"相同输入 → 相同 plan"（非 fork 历史）
+		"decision_locked": true,          // 标记该 plan 不可替换（audit 必须）
+		"trace_span_id":   "plan",
+		"parent_span_id":  "root",
+		"step_index":      stepIndex,
 	})
 	if err != nil {
 		return err

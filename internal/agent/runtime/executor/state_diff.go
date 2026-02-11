@@ -49,6 +49,35 @@ type ResourceVerifier interface {
 	Verify(ctx context.Context, jobID, stepID, resourceType, resourceID, operation, externalRef string) (ok bool, err error)
 }
 
+// extractStateKeys 提取 state_before 和 state_after 的 keys，用于 Causal Chain Phase 1（design/execution-forensics.md § Causal Dependency）
+// inputKeys: state_before 中有的 keys（本步读取）；outputKeys: state_after 中新增/变化的 keys（本步写入）
+func extractStateKeys(before, after []byte) (inputKeys, outputKeys []string) {
+	var beforeMap, afterMap map[string]interface{}
+	_ = json.Unmarshal(before, &beforeMap)
+	_ = json.Unmarshal(after, &afterMap)
+
+	// inputKeys: before 中的 keys
+	for k := range beforeMap {
+		inputKeys = append(inputKeys, k)
+	}
+
+	// outputKeys: after 中新增或变化的 keys
+	for k, vAfter := range afterMap {
+		vBefore, existsBefore := beforeMap[k]
+		if !existsBefore {
+			outputKeys = append(outputKeys, k) // 新增
+		} else {
+			// 值变化：简单比较 JSON 序列化后的字符串
+			bBefore, _ := json.Marshal(vBefore)
+			bAfter, _ := json.Marshal(vAfter)
+			if string(bBefore) != string(bAfter) {
+				outputKeys = append(outputKeys, k)
+			}
+		}
+	}
+	return inputKeys, outputKeys
+}
+
 // ChangedKeysFromState 比较 state_before 与 state_after JSON，返回发生变化的 key 列表
 func ChangedKeysFromState(stateBefore, stateAfter []byte) []string {
 	var mBefore, mAfter map[string]interface{}

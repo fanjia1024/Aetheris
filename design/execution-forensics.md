@@ -72,9 +72,45 @@
 ```
 
 - **谁写入**：Runner 或 Node Sink 在步完成时（reasoning_snapshot）附加；Planner 层若有 RAG/记忆输入可写入 decision_snapshot。Tool 步由 Adapter 将 idempotency_key / invocation_id 通过 payload 传回 Runner；LLM 步由 LLMNodeAdapter 在 result 中附加 `_evidence.llm_decision`（model, temperature, prompt_hash），Runner 写入 reasoning_snapshot.evidence。
-- **Phase 1**：reasoning_snapshot 中增加可选 `evidence`；Tool 步填充 `tool_invocation_ids`（idempotency_key）；LLM 步填充 `llm_decision`（model, provider, temperature, prompt_hash, token_count）。Phase 2：RAG/Memory/Policy 在子系统暴露 ID 后填充对应字段（rag_doc_ids, memory_entry_ids, policy_rule_ids）。
+- **Phase 1**：reasoning_snapshot 中增加可选 `evidence`；Tool 步填充 `tool_invocation_ids`（idempotency_key）；LLM 步填充 `llm_decision`（model, provider, temperature, prompt_hash, token_count）。**Causal Chain Phase 1**：增加 `input_keys`（本步读取的 state keys）和 `output_keys`（本步写入的 keys），供 Trace 构建 dependency graph。Phase 2：RAG/Memory/Policy 在子系统暴露 ID 后填充对应字段（rag_doc_ids, memory_entry_ids, policy_rule_ids）。
 - **Trace**：GET /api/jobs/:id/trace 与 GET node 的 step 或 node 负载中返回 reasoning_snapshot 原始 JSON，其中已含 `evidence`，供 UI 展示 Evidence graph。
 - **审计级证据**：与 Causal Debugging 区分：Causal 是工程师调试（reasoning 文本、state diff），Evidence 是法务/审计（可回答"为什么做这个决策？依据哪些输入？使用哪个模型？"）。Evidence Graph 必须记录所有决策输入（RAG 文档、工具调用、LLM 模型版本）以满足合规需求。
+
+### Causal Dependency（因果依赖链）
+
+**Phase 1** — 基于 State Keys 推导因果关系：
+
+reasoning_snapshot 包含 `input_keys`（本步读取的 state keys）和 `output_keys`（本步写入的 keys）。Trace 可据此构建 **dependency graph**：
+
+```
+Step A: output_keys=["order_status"]
+Step B: input_keys=["order_status"], output_keys=["refund_amount"]
+Step C: input_keys=["refund_amount"]
+→ Dependency: A → B → C (order_status 传递)
+```
+
+**用途**：
+- 审计可沿链追溯："Step C 发送退款邮件，因为 Step B 计算退款金额，因为 Step A 返回订单异常"
+- Trace UI 可展示 dependency DAG，不只是 timeline
+- 合规可证明"决策依据链完整"
+
+**实现**：
+- Runner 在构建 reasoning_snapshot 时，调用 `extractStateKeys(stateBefore, stateAfter)` 提取 input/output keys
+- Trace 可遍历所有 reasoning_snapshot，按 output_keys → input_keys 构建边（Step A.output_key X → Step B.input_key X）
+
+**Phase 2（未来）** — 显式因果关系：
+
+增加 `caused_by` 字段（参见 plan § 7.1）：
+
+```json
+{
+  "caused_by": [
+    {"type": "tool_result", "id": "inv-1", "key": "order_status", "value_summary": "异常"}
+  ]
+}
+```
+
+由 Planner 或 Runner 显式声明"本步因为 X 而执行"。
 
 ## 与 Causal Debugging 的关系
 

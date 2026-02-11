@@ -224,6 +224,8 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 			if pl.CorrelationKey != "" {
 				out.ApprovedCorrelationKeys[pl.CorrelationKey] = struct{}{}
 			}
+			// Continuation: 恢复时优先从 resumption_context 读取 wait 点的 payload_results（design/agent-process-model.md § Continuation）
+			// 若 signal payload 非空，合并到 command result；resumption_context 在对应 job_waiting 中，需二次查找（Phase 2）
 			if len(pl.Payload) > 0 {
 				out.CommandResults[pl.NodeID] = []byte(pl.Payload)
 			} else {

@@ -386,8 +386,8 @@ func (s *nodeEventSinkImpl) AppendStateChanged(ctx context.Context, jobID string
 	return err
 }
 
-// AppendJobWaiting 实现 NodeEventSink；写入 job_waiting 事件，payload 含 correlation_key、wait_type（design/runtime-contract.md）
-func (s *nodeEventSinkImpl) AppendJobWaiting(ctx context.Context, jobID string, nodeID string, waitKind, reason string, expiresAt time.Time, correlationKey string) error {
+// AppendJobWaiting 实现 NodeEventSink；写入 job_waiting 事件，payload 含 correlation_key、wait_type、resumption_context（design/runtime-contract.md, design/agent-process-model.md § Continuation）
+func (s *nodeEventSinkImpl) AppendJobWaiting(ctx context.Context, jobID string, nodeID string, waitKind, reason string, expiresAt time.Time, correlationKey string, resumptionContext []byte) error {
 	if s.store == nil {
 		return nil
 	}
@@ -400,12 +400,13 @@ func (s *nodeEventSinkImpl) AppendJobWaiting(ctx context.Context, jobID string, 
 		waitType = "signal"
 	}
 	pl := jobstore.JobWaitingPayload{
-		NodeID:           nodeID,
-		WaitType:         waitType,
-		CorrelationKey:   correlationKey,
-		WaitKind:         waitKind,
-		Reason:           reason,
-		ExpiresAtRFC3339: expiresAt.Format(time.RFC3339),
+		NodeID:            nodeID,
+		WaitType:          waitType,
+		CorrelationKey:    correlationKey,
+		WaitKind:          waitKind,
+		Reason:            reason,
+		ExpiresAtRFC3339:  expiresAt.Format(time.RFC3339),
+		ResumptionContext: resumptionContext,
 	}
 	payload, err := json.Marshal(pl)
 	if err != nil {

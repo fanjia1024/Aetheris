@@ -122,6 +122,7 @@ Agent execution = **Deterministic State Machine + Recorded Effects**。本文档
 - **Plan**：来自事件流中的 `PlanGenerated`；Replay 不重新调用 Planner。
 - **每节点最多执行一次**：首次执行后立即写入 command_committed（或 tool_invocation_finished），Replay 时仅注入该结果，**不会**再次调用 LLM 或 Tool。因此已 command_committed 的 LLM 步在 Replay 时不会产生非确定性。
 - **LLM Effect Capture**：当配置 Effect Store 时，LLMNodeAdapter 在 Generate 成功后写入完整 effect（prompt、response、可选 model/temperature 至 Metadata）；Replay 时 Runner 已跳过已提交命令；Adapter 层若 EffectStore 已有该 command_id 记录则直接注入不调用 LLM（defence in depth）。**Replay 期间绝不调用 LLM**；完整 effect 存于 Effect Store 供审计与确定性重放。
+- **强保证**：配置 Effect Store 时，Aetheris **保证** Replay **绝不**调用 LLM API。两层防护：(1) Runner 层检查 `CompletedCommandIDs`，已提交命令不调用 `step.Run`；(2) Adapter 层检查 EffectStore，已有 effect 直接注入不调用 `Generate`。**生产环境必须配置 Effect Store**，否则无法保证 LLM 不可重现性（开发模式可选）。
 - **未来**：若支持单步内多次 LLM 调用，每次调用须有独立 command_id 并写入 Effect Log，Replay 时全部从事件注入。
 
 ## 断言与测试

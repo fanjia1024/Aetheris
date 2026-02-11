@@ -71,12 +71,13 @@ const (
 
 // JobWaitingPayload job_waiting 事件 payload 契约；只有携带相同 correlation_key 的 signal 才能解除该 block（design/runtime-contract.md）
 type JobWaitingPayload struct {
-	NodeID           string `json:"node_id"`
-	WaitType         string `json:"wait_type"`       // webhook | human | timer | signal
-	CorrelationKey   string `json:"correlation_key"` // 唯一标识此次等待，signal 必须匹配
-	WaitKind         string `json:"wait_kind"`
-	Reason           string `json:"reason"`
-	ExpiresAtRFC3339 string `json:"expires_at"`
+	NodeID            string          `json:"node_id"`
+	WaitType          string          `json:"wait_type"`       // webhook | human | timer | signal | message
+	CorrelationKey    string          `json:"correlation_key"` // 唯一标识此次等待，signal 必须匹配
+	WaitKind          string          `json:"wait_kind"`
+	Reason            string          `json:"reason"`
+	ExpiresAtRFC3339  string          `json:"expires_at"`
+	ResumptionContext json.RawMessage `json:"resumption_context,omitempty"` // 恢复上下文：payload_results snapshot + plan_decision_id，保证等待后"同一思维"继续（design/agent-process-model.md § Continuation）
 }
 
 // ParseJobWaitingPayload 解析 job_waiting 事件的 payload；若缺少 correlation_key 返回空字符串

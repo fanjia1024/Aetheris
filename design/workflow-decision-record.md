@@ -38,6 +38,33 @@
 
 ---
 
-## 可选：Plan Hash
+## Planning is Immutable Fact（计划不可 replan）
+
+Plan 一旦写入 `PlanGenerated` 即成为**权威决策**（immutable fact）：
+
+- **执行与 Replay 仅依据已记录 Plan**：Runner 不调用 Planner；事件流中无 PlanGenerated 则失败（不静默 replan）
+- **Replan 必须显式**：若需重新规划，必须写新的 PlanGenerated 事件（或 `decision_recorded(kind=re_plan)`）；不允许"隐式 replan"（如"无 Plan 时自动调用 Planner"）
+- **Non-Forkable History**：同一输入（goal + memory + tools）只能产生一个 Plan（或显式版本化）；防止"同一历史对应多个未来"
+
+### Plan Input Hash
+
+`PlanGenerated` payload 包含 `plan_input_hash`（hash(goal + memory_keys + tool_registry_version)），确保：
+
+- **相同输入 → 相同 Plan**（或显式版本不同）
+- Replay / Audit 时可证明"Plan 唯一"
+- 多个 PlanGenerated 时检查 plan_input_hash；若不一致且 `decision_locked=true`，拒绝执行
+
+**实现**：[internal/app/api/plan_sink.go](../internal/app/api/plan_sink.go) 计算 plan_input_hash 并写入 payload；未来可扩展包含 memory_keys 和 tool_registry_version。
+
+### Decision Locked
+
+`decision_locked: true` 标记该 Plan 不可替换：
+
+- Audit 必须保证"Plan 是唯一的、不可变的事实"
+- Debug/Replay 时若产生不同 Plan，明确失败（而非静默接受）
+
+---
+
+## Plan Hash & Integrity
 
 为便于校验与调试，可在 `PlanGenerated` payload 中增加 `plan_hash`（如 SHA256(task_graph JSON)）。Replay 与审计时可验证事件流中的 plan 未被篡改。实现见 [internal/app/api/plan_sink.go](../internal/app/api/plan_sink.go)（可选字段）。
