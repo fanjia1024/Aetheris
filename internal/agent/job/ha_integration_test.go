@@ -25,8 +25,8 @@ import (
 // haFakeEventStore simulates an event store where a job has an expired claim
 // and allows a second worker to ClaimJob after reclaim (simulating lease expiry).
 type haFakeEventStore struct {
-	expiredIDs   []string
-	events       map[string][]jobstore.JobEvent
+	expiredIDs    []string
+	events        map[string][]jobstore.JobEvent
 	allowClaimJob map[string]bool // after "reclaim", allow ClaimJob for this job
 }
 
@@ -82,7 +82,7 @@ func TestHA_ReclaimThenSecondWorkerCanClaim(t *testing.T) {
 	}
 
 	eventStore := &haFakeEventStore{
-		expiredIDs:   []string{"j1"},
+		expiredIDs: []string{"j1"},
 		events: map[string][]jobstore.JobEvent{
 			"j1": {ev(jobstore.JobCreated), ev(jobstore.JobRunning)},
 		},
