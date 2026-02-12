@@ -343,9 +343,7 @@ func getHostname() string {
 		return "worker"
 	}
 	return h
-}
-
-// runIngestQueueLoop 轮询认领入库任务并执行 ingest_pipeline，直到 shutdown 关闭
+}// runIngestQueueLoop 轮询认领入库任务并执行 ingest_pipeline，直到 shutdown 关闭
 func (a *App) runIngestQueueLoop(queue ingestqueue.IngestQueue, workerID string, pollInterval time.Duration) {
 	for {
 		select {

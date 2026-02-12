@@ -100,46 +100,46 @@ Aetheris is designed for **three core scenarios**:
 
 ### 1. Human-in-the-Loop Operations
 
-审批流、客服工单、运营决策 — agent 等待人工（可能 3 天）并从中断点恢复
+Approval flows, customer service tickets, operational decisions — agents wait for human input (possibly for days) and resume from the checkpoint.
 
 **Why Aetheris**:
-- **StatusParked**: 长时间等待不占 Scheduler 资源
-- **Continuation**: 恢复时绑定完整 state（思维连续性）
-- **Signal**: 外部触发恢复（at-least-once delivery）
+- **StatusParked**: Long waits do not consume Scheduler resources
+- **Continuation**: On resume, full state is bound (reasoning continuity)
+- **Signal**: External trigger to resume (at-least-once delivery)
 
-**Examples**: 法务审批合同、财务审批付款、客服升级工单、HR 招聘审批
+**Examples**: Legal contract approval, payment approval, escalated support tickets, HR hiring approval
 
 ---
 
 ### 2. Long-Running API Orchestration
 
-SaaS 操作代理、数据 pipeline、批量处理 — agent 调用多个外部 API（可能 1 小时）
+SaaS operation agents, data pipelines, batch processing — agents call multiple external APIs (possibly for an hour).
 
 **Why Aetheris**:
-- **At-most-once**: Tool 调用不重复（Ledger + Effect Store）
-- **Crash recovery**: Worker 崩溃后从 Checkpoint 继续
-- **Step timeout**: 超时自动重试或失败
+- **At-most-once**: Tool calls are not repeated (Ledger + Effect Store)
+- **Crash recovery**: After worker crash, execution continues from Checkpoint
+- **Step timeout**: Timeout triggers automatic retry or failure
 
-**Examples**: Salesforce 批量同步、Stripe 订单处理、数据清洗 pipeline、API 编排
+**Examples**: Salesforce batch sync, Stripe order processing, data cleansing pipelines, API orchestration
 
 ---
 
 ### 3. Auditable Decision Agents
 
-金融交易、医疗处方、政府系统 — 必须记录"谁、何时、为什么做了什么"
+Financial transactions, medical prescriptions, government systems — must record who did what, when, and why.
 
 **Why Aetheris**:
-- **Evidence Graph**: 记录 RAG doc IDs、tool invocations、LLM model/version
-- **Execution Proof Chain**: 不可篡改的决策历史
-- **Replay deterministic**: 可证明"决策可重现"
+- **Evidence Graph**: Records RAG doc IDs, tool invocations, LLM model/version
+- **Execution Proof Chain**: Tamper-evident decision history
+- **Replay deterministic**: Proven “decision is reproducible”
 
-**Examples**: 自动放款审批、处方推荐、补贴发放、合规决策
+**Examples**: Automated loan approval, prescription recommendations, subsidy disbursement, compliance decisions
 
 ---
 
 **Don't use Aetheris** for:
-- Stateless chatbots (单次请求/响应，无需持久化)
-- Prototype/demo agents (崩溃可接受，无审计需求)
+- Stateless chatbots (single request/response, no persistence needed)
+- Prototype/demo agents (crashes acceptable, no audit requirements)
 - Pure in-memory tasks (<1 min, no side effects)
 
 If your agent is becoming a "critical system" (customers depend on it, data loss is unacceptable, failures cost money), you need Aetheris.
@@ -208,7 +208,7 @@ The project provides a Makefile for one-command build and startup of all service
 | `make fmt` | gofmt -w |
 | `make tidy` | go mod tidy |
 
-**One-command run**: From the repo root, run `make run` to build and then start the API (default :8080) and Worker in the background; PIDs and logs are under `bin/`. Use `make stop` to stop. If using Postgres as jobstore, start Postgres first (see [docs/deployment.md](docs/deployment.md)). For a full walkthrough of core features (快速体验 vs 完整运行时), see [docs/get-started.md](docs/get-started.md).
+**One-command run**: From the repo root, run `make run` to build and then start the API (default :8080) and Worker in the background; PIDs and logs are under `bin/`. Use `make stop` to stop. If using Postgres as jobstore, start Postgres first (see [docs/deployment.md](docs/deployment.md)). For a full walkthrough of core features (quick trial vs full runtime), see [docs/get-started.md](docs/get-started.md).
 
 ---
 
