@@ -78,6 +78,17 @@ const (
 	MemoryRead    EventType = "memory_read"
 	MemoryWrite   EventType = "memory_write"
 	PlanEvolution EventType = "plan_evolution"
+
+	// 2.0-M2: Retention & Audit events
+	JobArchived   EventType = "job_archived"   // Job 已归档到冷存储
+	JobDeleted    EventType = "job_deleted"    // Job 已删除（tombstone）
+	AccessAudited EventType = "access_audited" // 访问审计（导出/查看）
+
+	// 2.0-M3: Critical decision markers
+	CriticalDecisionMade EventType = "critical_decision_made" // 关键决策（approve/deny/escalate）
+	HumanApprovalGiven   EventType = "human_approval_given"   // 人类审批
+	PaymentExecuted      EventType = "payment_executed"       // 支付执行
+	EmailSent            EventType = "email_sent"             // 邮件发送
 )
 
 // JobWaitingPayload job_waiting 事件 payload 契约；只有携带相同 correlation_key 的 signal 才能解除该 block（design/runtime-contract.md）
@@ -141,4 +152,8 @@ type JobEvent struct {
 	Type      EventType // 事件类型
 	Payload   []byte    // JSON，由各 EventType 语义定义
 	CreatedAt time.Time
+
+	// 2.0-M1: Proof chain for tamper detection
+	PrevHash string // 上一个事件的 hash（SHA256）
+	Hash     string // 当前事件 hash（SHA256(JobID|Type|Payload|Timestamp|PrevHash)）
 }

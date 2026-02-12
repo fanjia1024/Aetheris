@@ -16,6 +16,8 @@ package jobstore
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"sync"
 	"time"
 
@@ -100,6 +102,16 @@ func (s *memoryStore) Append(ctx context.Context, jobID string, expectedVersion 
 	if len(current) != expectedVersion {
 		return 0, ErrVersionMismatch
 	}
+
+	// 2.0-M1: 计算 proof chain hash
+	var prevHash string
+	if expectedVersion > 0 && len(current) > 0 {
+		prevHash = current[len(current)-1].Hash
+	}
+	eventHash := computeMemEventHash(jobID, event.Type, event.Payload, event.CreatedAt, prevHash)
+	event.PrevHash = prevHash
+	event.Hash = eventHash
+
 	s.byJob[jobID] = append(current, event)
 	newVersion := len(s.byJob[jobID])
 	s.notifyWatchersLocked(jobID, event)
@@ -227,4 +239,38 @@ func (s *memoryStore) Watch(ctx context.Context, jobID string) (<-chan JobEvent,
 		close(ch)
 	}()
 	return ch, nil
+}
+
+// CreateSnapshot 创建快照（内存实现）
+func (s *memoryStore) CreateSnapshot(ctx context.Context, jobID string, upToVersion int, snapshot []byte) error {
+	// Memory store doesn't need snapshots (replay is already fast), but implement for interface compatibility
+	return nil
+}
+
+// GetLatestSnapshot 获取最新快照（内存实现返回 nil）
+func (s *memoryStore) GetLatestSnapshot(ctx context.Context, jobID string) (*JobSnapshot, error) {
+	return nil, nil
+}
+
+// DeleteSnapshotsBefore 删除快照（内存实现无操作）
+func (s *memoryStore) DeleteSnapshotsBefore(ctx context.Context, jobID string, beforeVersion int) error {
+	return nil
+}
+
+// computeMemEventHash 计算事件哈希（2.0-M1 proof chain）
+// Hash = SHA256(JobID|Type|Payload|Timestamp|PrevHash)
+func computeMemEventHash(jobID string, eventType EventType, payload []byte, timestamp time.Time, prevHash string) string {
+	h := sha256.New()
+	h.Write([]byte(jobID))
+	h.Write([]byte("|"))
+	h.Write([]byte(eventType))
+	h.Write([]byte("|"))
+	if payload != nil {
+		h.Write(payload)
+	}
+	h.Write([]byte("|"))
+	h.Write([]byte(timestamp.Format(time.RFC3339Nano)))
+	h.Write([]byte("|"))
+	h.Write([]byte(prevHash))
+	return hex.EncodeToString(h.Sum(nil))
 }

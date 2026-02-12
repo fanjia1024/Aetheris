@@ -9,6 +9,14 @@ worker:
   poll_interval: "2s"
   # Worker 能力列表；仅认领 Job.required_capabilities 被满足的 Job；空表示接受任意 Job（如 llm, tool, rag）
   # capabilities: ["llm", "tool"]
+  
+  # 队列公平性策略（2.0 starvation prevention）
+  fairness_policy:
+    realtime_weight: 70    # 实时队列权重 70%
+    default_weight: 20     # 默认队列权重 20%
+    background_weight: 8   # 后台队列权重 8%
+    heavy_weight: 2        # 重任务队列权重 2%
+    starvation_threshold: "5m"  # 低优先级任务等待超过 5 分钟，临时提升优先级
 
 # 任务事件与元数据存储（与 API 共用 DSN 时，Worker Claim 执行 Job）
 jobstore:

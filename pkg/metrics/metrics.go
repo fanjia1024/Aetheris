@@ -30,6 +30,12 @@ func init() {
 		ToolDuration, LLMTokensTotal,
 		WorkerBusy,
 		QueueBacklog, StuckJobCount,
+		// 2.0 Rate limiting metrics
+		RateLimitWaitSeconds, RateLimitRejectionsTotal,
+		ToolConcurrentGauge, LLMConcurrentGauge,
+		JobParkedDuration,
+		// 3.0-M4 Advanced metrics
+		DecisionQualityScore, AnomalyDetectedTotal, SignatureVerificationTotal,
 	)
 }
 
@@ -104,6 +110,81 @@ var StuckJobCount = prometheus.NewGauge(
 		Name: "aetheris_stuck_job_count",
 		Help: "卡住的 Job 数（Running 且超过阈值未更新）",
 	},
+)
+
+// RateLimitWaitSeconds 限流等待时间（秒）
+var RateLimitWaitSeconds = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "aetheris_rate_limit_wait_seconds",
+		Help:    "限流等待时间（秒）",
+		Buckets: []float64{0.001, 0.01, 0.1, 0.5, 1, 2, 5, 10},
+	},
+	[]string{"type", "name"}, // type: tool|llm|queue, name: tool_name|provider|queue_class
+)
+
+// RateLimitRejectionsTotal 限流拒绝次数
+var RateLimitRejectionsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "aetheris_rate_limit_rejections_total",
+		Help: "限流拒绝次数",
+	},
+	[]string{"type", "name"},
+)
+
+// ToolConcurrentGauge Tool 当前并发数
+var ToolConcurrentGauge = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "aetheris_tool_concurrent",
+		Help: "Tool 当前并发数",
+	},
+	[]string{"tool"},
+)
+
+// LLMConcurrentGauge LLM Provider 当前并发数
+var LLMConcurrentGauge = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "aetheris_llm_concurrent",
+		Help: "LLM Provider 当前并发数",
+	},
+	[]string{"provider"},
+)
+
+// JobParkedDuration Job 处于 parked 状态的时长（秒）
+var JobParkedDuration = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "aetheris_job_parked_duration_seconds",
+		Help:    "Job 处于 parked 状态的时长（秒）",
+		Buckets: []float64{10, 60, 300, 600, 1800, 3600, 7200, 14400}, // 10s ~ 4h
+	},
+	[]string{"agent_id"},
+)
+
+// DecisionQualityScore 决策质量评分（3.0-M4）
+var DecisionQualityScore = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "aetheris_decision_quality_score",
+		Help:    "决策质量评分（0-100）",
+		Buckets: []float64{0, 20, 40, 60, 80, 100},
+	},
+	[]string{"job_id", "step_id"},
+)
+
+// AnomalyDetectedTotal 检测到的异常决策数（3.0-M4）
+var AnomalyDetectedTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "aetheris_anomaly_detected_total",
+		Help: "检测到的异常决策数",
+	},
+	[]string{"anomaly_type", "severity"},
+)
+
+// SignatureVerificationTotal 签名验证次数（3.0-M4）
+var SignatureVerificationTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "aetheris_signature_verification_total",
+		Help: "签名验证次数",
+	},
+	[]string{"result"}, // success | failed
 )
 
 // WritePrometheus 将 Prometheus 文本格式写入 w（供 Hertz 等复用）

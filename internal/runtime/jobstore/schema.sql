@@ -180,3 +180,108 @@ CREATE TABLE IF NOT EXISTS signal_inbox (
 );
 CREATE INDEX IF NOT EXISTS idx_signal_inbox_job_id ON signal_inbox (job_id);
 CREATE INDEX IF NOT EXISTS idx_signal_inbox_acked ON signal_inbox (job_id) WHERE acked_at IS NULL;
+
+-- Job Snapshots（2.0 event stream compaction）：优化长跑 job 的 replay 性能
+CREATE TABLE IF NOT EXISTS job_snapshots (
+    job_id      TEXT NOT NULL,
+    version     INT  NOT NULL,
+    snapshot    BYTEA NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (job_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_job_snapshots_job_id ON job_snapshots (job_id);
+CREATE INDEX IF NOT EXISTS idx_job_snapshots_created_at ON job_snapshots (created_at);
+
+-- 2.0-M1: Proof chain fields for event tamper detection
+ALTER TABLE job_events ADD COLUMN IF NOT EXISTS prev_hash TEXT DEFAULT '';
+ALTER TABLE job_events ADD COLUMN IF NOT EXISTS hash TEXT DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_job_events_hash ON job_events (hash);
+
+-- 2.0-M2: Multi-tenant and RBAC
+CREATE TABLE IF NOT EXISTS tenants (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'active',
+    quota_json  JSONB,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Add tenant_id to jobs table
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tenant_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_jobs_tenant_id ON jobs (tenant_id);
+
+-- User-Tenant-Role mapping (2.0-M2)
+CREATE TABLE IF NOT EXISTS user_roles (
+    user_id    TEXT NOT NULL,
+    tenant_id  TEXT NOT NULL,
+    role       TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, tenant_id)
+);
+
+-- Audit log for access (2.0-M2)
+CREATE TABLE IF NOT EXISTS access_audit_log (
+    id            BIGSERIAL PRIMARY KEY,
+    tenant_id     TEXT NOT NULL,
+    user_id       TEXT NOT NULL,
+    action        TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_id   TEXT NOT NULL,
+    success       BOOLEAN NOT NULL,
+    duration_ms   INT,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_access_audit_tenant ON access_audit_log (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_access_audit_user ON access_audit_log (user_id);
+CREATE INDEX IF NOT EXISTS idx_access_audit_created ON access_audit_log (created_at);
+
+-- Job tombstones (2.0-M2): 删除后的审计记录
+CREATE TABLE IF NOT EXISTS job_tombstones (
+    job_id         TEXT PRIMARY KEY,
+    tenant_id      TEXT NOT NULL,
+    agent_id       TEXT NOT NULL,
+    deleted_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_by     TEXT NOT NULL,
+    reason         TEXT NOT NULL,
+    event_count    INT,
+    retention_days INT,
+    archive_ref    TEXT,
+    metadata_json  JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_job_tombstones_tenant ON job_tombstones (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_job_tombstones_deleted ON job_tombstones (deleted_at);
+
+-- 3.0-M4: Signing keys
+CREATE TABLE IF NOT EXISTS signing_keys (
+    key_id       TEXT PRIMARY KEY,
+    public_key   TEXT NOT NULL,
+    private_key  TEXT,
+    key_type     TEXT NOT NULL DEFAULT 'ed25519',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at   TIMESTAMPTZ,
+    status       TEXT NOT NULL DEFAULT 'active'
+);
+
+-- 3.0-M4: Organizations (for distributed ledger)
+CREATE TABLE IF NOT EXISTS organizations (
+    org_id        TEXT PRIMARY KEY,
+    org_name      TEXT NOT NULL,
+    public_key    TEXT NOT NULL,
+    api_endpoint  TEXT NOT NULL,
+    trust_level   INT NOT NULL DEFAULT 0,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 3.0-M4: Cross-org sync log
+CREATE TABLE IF NOT EXISTS ledger_sync_log (
+    id            BIGSERIAL PRIMARY KEY,
+    job_id        TEXT NOT NULL,
+    source_org    TEXT NOT NULL,
+    target_org    TEXT NOT NULL,
+    event_count   INT NOT NULL,
+    sync_status   TEXT NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_ledger_sync_job ON ledger_sync_log (job_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_sync_created ON ledger_sync_log (created_at);
