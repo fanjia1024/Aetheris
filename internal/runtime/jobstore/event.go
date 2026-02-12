@@ -67,6 +67,11 @@ const (
 	ReasoningSnapshot EventType = "reasoning_snapshot"
 	// DecisionSnapshot Planner 决策快照：PlanGoal 返回后写入，含 goal、memory 摘要、reasoning 摘要、decision（TaskGraph），供可追责与 Trace 展示（design/execution-forensics.md）
 	DecisionSnapshot EventType = "decision_snapshot"
+
+	// Trace 2.0 Cognition（design/trace-2.0-cognition.md）：不参与 Replay，仅用于 Trace 叙事
+	MemoryRead    EventType = "memory_read"
+	MemoryWrite   EventType = "memory_write"
+	PlanEvolution EventType = "plan_evolution"
 )
 
 // JobWaitingPayload job_waiting 事件 payload 契约；只有携带相同 correlation_key 的 signal 才能解除该 block（design/runtime-contract.md）
@@ -95,6 +100,32 @@ type AgentMessagePayload struct {
 	Channel        string                 `json:"channel"`
 	CorrelationKey string                 `json:"correlation_key"`
 	Payload        map[string]interface{} `json:"payload"`
+}
+
+// MemoryReadPayload memory_read 事件 payload（design/trace-2.0-cognition.md）
+type MemoryReadPayload struct {
+	JobID      string `json:"job_id,omitempty"`
+	NodeID     string `json:"node_id,omitempty"`
+	StepIndex  int    `json:"step_index,omitempty"`
+	MemoryType string `json:"memory_type"` // working | long_term | episodic
+	KeyOrScope string `json:"key_or_scope,omitempty"`
+	Summary    string `json:"summary,omitempty"`
+}
+
+// MemoryWritePayload memory_write 事件 payload（design/trace-2.0-cognition.md）
+type MemoryWritePayload struct {
+	JobID      string `json:"job_id,omitempty"`
+	NodeID     string `json:"node_id,omitempty"`
+	StepIndex  int    `json:"step_index,omitempty"`
+	MemoryType string `json:"memory_type"` // working | long_term | episodic
+	KeyOrScope string `json:"key_or_scope,omitempty"`
+	Summary    string `json:"summary,omitempty"`
+}
+
+// PlanEvolutionPayload plan_evolution 事件 payload（design/trace-2.0-cognition.md）；可选，Trace 也可直接用 plan_generated + decision_snapshot 序列
+type PlanEvolutionPayload struct {
+	PlanVersion int    `json:"plan_version,omitempty"`
+	DiffSummary string `json:"diff_summary,omitempty"`
 }
 
 // JobEvent 单条不可变事件；Job 的真实形态是事件流

@@ -30,6 +30,7 @@ const (
 )
 
 // EffectRecord 单条副作用记录；用于两步提交：先持久化 effect，再 Append command_committed（design：强 Replay）
+// Metadata 推荐键（design/effect-log-and-provenance.md）：LLM: prompt_hash, response_hash, decision_snapshot_id；Tool: external_id, tool_name
 type EffectRecord struct {
 	JobID          string
 	CommandID      string
@@ -38,7 +39,7 @@ type EffectRecord struct {
 	Input          []byte
 	Output         []byte
 	Error          string
-	Metadata       map[string]any // 如 model, temperature（LLM）
+	Metadata       map[string]any // 如 model, temperature（LLM）；external_id, tool_name（Tool）
 	CreatedAt      time.Time
 }
 

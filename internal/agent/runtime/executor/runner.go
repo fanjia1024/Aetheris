@@ -123,6 +123,10 @@ type NodeEventSink interface {
 	AppendJobWaiting(ctx context.Context, jobID string, nodeID string, waitKind, reason string, expiresAt time.Time, correlationKey string, resumptionContext []byte) error
 	// AppendReasoningSnapshot 写入 reasoning_snapshot 事件，供因果调试（design：Causal Debugging）
 	AppendReasoningSnapshot(ctx context.Context, jobID string, payload []byte) error
+	// Trace 2.0 Cognition（design/trace-2.0-cognition.md）：memory_read / memory_write / plan_evolution，不参与 Replay
+	AppendMemoryRead(ctx context.Context, jobID string, nodeID string, stepIndex int, memoryType, keyOrScope, summary string) error
+	AppendMemoryWrite(ctx context.Context, jobID string, nodeID string, stepIndex int, memoryType, keyOrScope, summary string) error
+	AppendPlanEvolution(ctx context.Context, jobID string, planVersion int, diffSummary string) error
 }
 
 // ToolEventSink 工具调用事件写入：Tool 节点执行前后写入 ToolCalled/ToolReturned 与 tool_invocation_started/finished，供 Trace/审计与幂等重放
@@ -801,6 +805,12 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 			rctx, rerr := r.replayBuilder.BuildFromEvents(ctx, j.ID)
 			if rerr == nil && rctx != nil {
 				if recoveredGraph, rerr := rctx.TaskGraph(); rerr == nil && recoveredGraph != nil {
+					if len(rctx.WorkingMemorySnapshot) > 0 && agent != nil && agent.Session != nil {
+						var as runtime.AgentState
+						if json.Unmarshal(rctx.WorkingMemorySnapshot, &as) == nil {
+							runtime.ApplyAgentState(agent.Session, &as)
+						}
+					}
 					state := replay.NewExecutionState(rctx)
 					for {
 						done, advErr := r.Advance(ctx, j.ID, state, agent, j)
@@ -814,6 +824,12 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 						rctx, _ = r.replayBuilder.BuildFromEvents(ctx, j.ID)
 						if rctx == nil {
 							break
+						}
+						if len(rctx.WorkingMemorySnapshot) > 0 && agent != nil && agent.Session != nil {
+							var as runtime.AgentState
+							if json.Unmarshal(rctx.WorkingMemorySnapshot, &as) == nil {
+								runtime.ApplyAgentState(agent.Session, &as)
+							}
 						}
 						state = replay.NewExecutionState(rctx)
 					}
@@ -981,6 +997,16 @@ runLoop:
 					"payload_results":  payload.Results,
 					"plan_decision_id": PlanDecisionID(graphBytes),
 					"cursor_node":      step.NodeID,
+				}
+				if agent != nil && agent.Session != nil {
+					state := runtime.SessionToAgentState(agent.Session)
+					if state != nil {
+						wm, _ := json.Marshal(state)
+						resumptionCtx["memory_snapshot"] = map[string]interface{}{
+							"working_memory": json.RawMessage(wm),
+							"snapshot_at":    time.Now().Format(time.RFC3339),
+						}
+					}
 				}
 				resumptionBytes, _ := json.Marshal(resumptionCtx)
 				_ = r.nodeEventSink.AppendJobWaiting(ctx, j.ID, step.NodeID, waitKind, reason, expiresAt, correlationKey, resumptionBytes)

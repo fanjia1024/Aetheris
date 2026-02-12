@@ -87,6 +87,8 @@ CREATE INDEX IF NOT EXISTS idx_tool_invocations_job_id ON tool_invocations (job_
 
 -- 升级已有库时如缺少 confirmed_at 可执行：
 -- ALTER TABLE tool_invocations ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
+-- 工具调用溯源：外部系统返回的 ID（design/effect-log-and-provenance.md）
+ALTER TABLE tool_invocations ADD COLUMN IF NOT EXISTS external_id TEXT;
 
 -- 入库任务队列（API 入队、Worker 认领执行 ingest_pipeline）
 CREATE TABLE IF NOT EXISTS ingest_tasks (
@@ -103,3 +105,60 @@ CREATE TABLE IF NOT EXISTS ingest_tasks (
 
 CREATE INDEX IF NOT EXISTS idx_ingest_tasks_status ON ingest_tasks (status);
 CREATE INDEX IF NOT EXISTS idx_ingest_tasks_created_at ON ingest_tasks (created_at);
+
+-- Agent Instance 表（design/agent-instance-model.md）；2.0 第一公民身份
+CREATE TABLE IF NOT EXISTS agent_instances (
+    id                     TEXT PRIMARY KEY,
+    tenant_id              TEXT,
+    name                   TEXT,
+    status                 TEXT NOT NULL DEFAULT 'idle',
+    default_session_id     TEXT,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    meta                   JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_agent_instances_tenant_id ON agent_instances (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_agent_instances_status ON agent_instances (status);
+
+-- Agent 级消息表（design/agent-messaging-bus.md）
+CREATE TABLE IF NOT EXISTS agent_messages (
+    id                     TEXT PRIMARY KEY,
+    from_agent_id          TEXT,
+    to_agent_id            TEXT NOT NULL,
+    channel                TEXT,
+    kind                   TEXT NOT NULL,
+    payload                JSONB,
+    scheduled_at           TIMESTAMPTZ,
+    expires_at             TIMESTAMPTZ,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    delivered_at           TIMESTAMPTZ,
+    consumed_by_job_id     TEXT,
+    consumed_at            TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_agent_messages_to_agent ON agent_messages (to_agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_messages_to_agent_consumed ON agent_messages (to_agent_id) WHERE consumed_by_job_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_agent_messages_scheduled ON agent_messages (scheduled_at) WHERE scheduled_at IS NOT NULL;
+
+-- Long-Term Memory（design/durable-memory-layer.md）
+CREATE TABLE IF NOT EXISTS agent_long_term_memory (
+    agent_id   TEXT NOT NULL,
+    namespace  TEXT NOT NULL DEFAULT '',
+    key        TEXT NOT NULL,
+    value      BYTEA NOT NULL DEFAULT '',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (agent_id, namespace, key)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_long_term_memory_agent ON agent_long_term_memory (agent_id);
+
+-- Episodic Memory（design/durable-memory-layer.md）
+CREATE TABLE IF NOT EXISTS agent_episodic_chunks (
+    id         TEXT PRIMARY KEY,
+    agent_id   TEXT NOT NULL,
+    session_id TEXT,
+    job_id     TEXT,
+    summary    TEXT,
+    payload    JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_agent_episodic_chunks_agent ON agent_episodic_chunks (agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_episodic_chunks_session ON agent_episodic_chunks (agent_id, session_id);

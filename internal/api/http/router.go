@@ -115,6 +115,7 @@ func (r *Router) Build(addr string, opts ...config.Option) *server.Hertz {
 		jobs.GET("/:id/events", authHandler, r.handler.GetJobEvents)
 		jobs.GET("/:id/replay", authHandler, r.handler.GetJobReplay)
 		jobs.GET("/:id/trace", authHandler, r.handler.GetJobTrace)
+		jobs.GET("/:id/trace/cognition", authHandler, r.handler.GetJobCognitionTrace)
 		jobs.GET("/:id/nodes/:node_id", authHandler, r.handler.GetJobNode)
 		jobs.GET("/:id/trace/page", authHandler, r.handler.GetJobTracePage)
 	}

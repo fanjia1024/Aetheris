@@ -36,7 +36,9 @@ import (
 
 	"rag-platform/internal/agent"
 	"rag-platform/internal/agent/executor"
+	"rag-platform/internal/agent/instance"
 	"rag-platform/internal/agent/job"
+	"rag-platform/internal/agent/messaging"
 	"rag-platform/internal/agent/planner"
 	replaysandbox "rag-platform/internal/agent/replay/sandbox"
 	"rag-platform/internal/agent/runtime"
@@ -337,6 +339,28 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	} else {
 		agentStateStore = runtime.NewAgentStateStoreMem()
 	}
+	var agentInstanceStore instance.AgentInstanceStore
+	if bootstrap.Config != nil && bootstrap.Config.JobStore.Type == "postgres" && bootstrap.Config.JobStore.DSN != "" {
+		pgInst, errInst := instance.NewStorePg(context.Background(), bootstrap.Config.JobStore.DSN)
+		if errInst != nil {
+			return nil, fmt.Errorf("初始化 AgentInstanceStore(postgres) 失败: %w", errInst)
+		}
+		agentInstanceStore = pgInst
+	} else {
+		agentInstanceStore = instance.NewStoreMem()
+	}
+	handler.SetAgentInstanceStore(agentInstanceStore)
+	var agentMessagingBus messaging.AgentMessagingBus
+	if bootstrap.Config != nil && bootstrap.Config.JobStore.Type == "postgres" && bootstrap.Config.JobStore.DSN != "" {
+		pgBus, errBus := messaging.NewStorePg(context.Background(), bootstrap.Config.JobStore.DSN)
+		if errBus != nil {
+			return nil, fmt.Errorf("初始化 AgentMessagingBus(postgres) 失败: %w", errBus)
+		}
+		agentMessagingBus = pgBus
+	} else {
+		agentMessagingBus = messaging.NewStoreMem()
+	}
+	handler.SetAgentMessagingBus(agentMessagingBus)
 	if bootstrap.Config != nil && bootstrap.Config.JobStore.Type == "postgres" && bootstrap.Config.JobStore.DSN != "" {
 		ingestPoolConfig, errIngest := pgxpool.ParseConfig(bootstrap.Config.JobStore.DSN)
 		if errIngest == nil {

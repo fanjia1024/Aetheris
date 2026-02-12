@@ -91,7 +91,7 @@ func (l *ledgerStore) Commit(ctx context.Context, invocationID, idempotencyKey s
 			}
 		}
 	}
-	return l.store.SetFinished(ctx, idempotencyKey, ToolInvocationStatusSuccess, result, true)
+	return l.store.SetFinished(ctx, idempotencyKey, ToolInvocationStatusSuccess, result, true, "")
 }
 
 // Recover 实现 InvocationLedger

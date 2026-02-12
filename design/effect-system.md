@@ -125,6 +125,10 @@ Agent execution = **Deterministic State Machine + Recorded Effects**。本文档
 - **强保证**：配置 Effect Store 时，Aetheris **保证** Replay **绝不**调用 LLM API。两层防护：(1) Runner 层检查 `CompletedCommandIDs`，已提交命令不调用 `step.Run`；(2) Adapter 层检查 EffectStore，已有 effect 直接注入不调用 `Generate`。**生产环境必须配置 Effect Store**，否则无法保证 LLM 不可重现性（开发模式可选）。
 - **未来**：若支持单步内多次 LLM 调用，每次调用须有独立 command_id 并写入 Effect Log，Replay 时全部从事件注入。
 
+## 扩展阅读
+
+- [effect-log-and-provenance.md](effect-log-and-provenance.md) — Effect Log 显式视图、LLM Decision Log、Tool Provenance、Rollback-Safe 语义、Verifiable Agent 验收条件。
+
 ## 断言与测试
 
 - **Replay 确定性**：同一 job 事件流 Replay 两次（BuildFromEvents 或 RunForJob 从事件恢复），得到的 CompletedNodeIDs、CommandResults 注入与最终状态一致。

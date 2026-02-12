@@ -36,7 +36,9 @@ import (
 	"github.com/prometheus/common/expfmt"
 
 	"rag-platform/internal/agent"
+	"rag-platform/internal/agent/instance"
 	"rag-platform/internal/agent/job"
+	"rag-platform/internal/agent/messaging"
 	"rag-platform/internal/agent/planner"
 	"rag-platform/internal/agent/replay"
 	agentruntime "rag-platform/internal/agent/runtime"
@@ -86,13 +88,15 @@ type Handler struct {
 	ingestQueue IngestQueueForAPI
 
 	// v1 Agent Runtime
-	agentManager    *agentruntime.Manager
-	agentScheduler  *agentruntime.Scheduler
-	agentCreator    AgentCreator
-	jobStore        job.JobStore
-	jobEventStore   jobstore.JobStore
-	toolsRegistry   *tools.Registry
-	agentStateStore agentruntime.AgentStateStore
+	agentManager       *agentruntime.Manager
+	agentScheduler     *agentruntime.Scheduler
+	agentCreator       AgentCreator
+	jobStore           job.JobStore
+	jobEventStore      jobstore.JobStore
+	toolsRegistry      *tools.Registry
+	agentStateStore    agentruntime.AgentStateStore
+	agentInstanceStore instance.AgentInstanceStore
+	agentMessagingBus  messaging.AgentMessagingBus
 	// planAtJobCreation 在 Job 创建时生成并持久化 Plan（1.0：执行阶段只读，禁止再调 Planner）
 	planAtJobCreation func(ctx context.Context, agentID, goal string) (*planner.TaskGraph, error)
 	// wakeupQueue 可选；非 nil 时 JobSignal/JobMessage 在 UpdateStatus(Pending) 后调用 NotifyReady，供 Worker 事件驱动唤醒（design/wakeup-index）
@@ -152,6 +156,16 @@ func (h *Handler) SetToolsRegistry(reg *tools.Registry) {
 // SetAgentStateStore 设置 Agent 状态存储；设置后 message 与 runJob 会持久化/加载会话，供 Worker 恢复
 func (h *Handler) SetAgentStateStore(store agentruntime.AgentStateStore) {
 	h.agentStateStore = store
+}
+
+// SetAgentInstanceStore 设置 Agent Instance 存储；设置后 POST message 时若 Instance 不存在则 Create（design/agent-instance-model.md）
+func (h *Handler) SetAgentInstanceStore(store instance.AgentInstanceStore) {
+	h.agentInstanceStore = store
+}
+
+// SetAgentMessagingBus 设置 Agent 级消息总线；设置后 POST message 双写 agent_messages（design/agent-messaging-bus.md）
+func (h *Handler) SetAgentMessagingBus(bus messaging.AgentMessagingBus) {
+	h.agentMessagingBus = bus
 }
 
 // SetPlanAtJobCreation 设置 Job 创建时规划函数；传入后 POST message 将先 Append PlanGenerated 再返回 202（1.0 确定性执行）
@@ -863,6 +877,14 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 		})
 		return
 	}
+	if h.agentInstanceStore != nil {
+		inst, _ := h.agentInstanceStore.Get(ctx, id)
+		if inst == nil {
+			_ = h.agentInstanceStore.Create(ctx, &instance.AgentInstance{
+				ID: id, Status: instance.StatusIdle, Name: id,
+			})
+		}
+	}
 	// 幂等：若带 Idempotency-Key 且该 Agent 下已有同 key 的 Job，直接返回已有 job_id（202），不写 Session、不新建 Job
 	idempotencyKey := strings.TrimSpace(string(c.GetHeader("Idempotency-Key")))
 	if idempotencyKey != "" && h.jobStore != nil {
@@ -880,6 +902,9 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 	if h.agentStateStore != nil {
 		state := agentruntime.SessionToAgentState(agent.Session)
 		_ = h.agentStateStore.SaveAgentState(ctx, id, agent.Session.ID, state)
+	}
+	if h.agentMessagingBus != nil {
+		_, _ = h.agentMessagingBus.Send(ctx, "", id, map[string]any{"message": req.Message}, &messaging.SendOptions{Kind: messaging.KindUser})
 	}
 	if h.jobStore != nil {
 		// 先创建 Job 得到稳定 jobID，再双写事件流，避免 Create 失败时留下孤立事件
@@ -1375,6 +1400,9 @@ func (h *Handler) JobMessage(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "写入消息失败"})
 		return
 	}
+	if h.agentMessagingBus != nil {
+		_, _ = h.agentMessagingBus.Send(ctx, "", j.AgentID, req.Payload, &messaging.SendOptions{Channel: req.Channel, Kind: messaging.KindUser})
+	}
 	if j.Status == job.StatusWaiting || j.Status == job.StatusParked {
 		var waitPayload jobstore.JobWaitingPayload
 		for i := len(events) - 1; i >= 0; i-- {
@@ -1637,6 +1665,107 @@ func (h *Handler) GetJobNode(ctx context.Context, c *app.RequestContext) {
 		"job_id":  jobID,
 		"node_id": nodeID,
 		"events":  nodeEvents,
+	})
+}
+
+// GetJobCognitionTrace 返回 Trace 2.0 Cognition 聚合（design/trace-2.0-cognition.md）：reasoning_step_timeline、decision_tree、plan_evolution、tool_dependency_graph、memory_read_write
+func (h *Handler) GetJobCognitionTrace(ctx context.Context, c *app.RequestContext) {
+	if h.jobEventStore == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "事件存储未启用"})
+		return
+	}
+	jobID := c.Param("id")
+	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
+	if err != nil {
+		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件失败"})
+		return
+	}
+	// reasoning_step_timeline: node_*, agent_thought_recorded, decision_made, tool_selected, tool_result_summarized
+	reasoningTypes := map[jobstore.EventType]bool{
+		jobstore.NodeStarted: true, jobstore.NodeFinished: true,
+		jobstore.AgentThoughtRecorded: true, jobstore.DecisionMade: true,
+		jobstore.ToolSelected: true, jobstore.ToolResultSummarized: true,
+	}
+	reasoningStepTimeline := make([]map[string]interface{}, 0)
+	for _, e := range events {
+		if !reasoningTypes[e.Type] {
+			continue
+		}
+		payload := json.RawMessage(e.Payload)
+		if len(e.Payload) == 0 {
+			payload = []byte("null")
+		}
+		reasoningStepTimeline = append(reasoningStepTimeline, map[string]interface{}{
+			"type":       string(e.Type),
+			"created_at": e.CreatedAt,
+			"payload":    payload,
+		})
+	}
+	// decision_tree: 使用现有 BuildExecutionTree
+	decisionTree := BuildExecutionTree(events)
+	// plan_evolution: plan_generated + decision_snapshot + plan_evolution
+	planEvolution := make([]map[string]interface{}, 0)
+	for _, e := range events {
+		if e.Type != jobstore.PlanGenerated && e.Type != jobstore.DecisionSnapshot && e.Type != jobstore.PlanEvolution {
+			continue
+		}
+		payload := json.RawMessage(e.Payload)
+		if len(e.Payload) == 0 {
+			payload = []byte("null")
+		}
+		planEvolution = append(planEvolution, map[string]interface{}{
+			"type":       string(e.Type),
+			"created_at": e.CreatedAt,
+			"payload":    payload,
+		})
+	}
+	// tool_dependency_graph: TaskGraph 结构 + 工具相关事件摘要
+	toolDepGraph := map[string]interface{}{"nodes": []interface{}{}, "edges": []interface{}{}, "tool_events": []interface{}{}}
+	for _, e := range events {
+		if e.Type == jobstore.PlanGenerated && len(e.Payload) > 0 {
+			var pl map[string]interface{}
+			if json.Unmarshal(e.Payload, &pl) == nil && pl != nil {
+				if tg, ok := pl["task_graph"]; ok {
+					toolDepGraph["task_graph"] = tg
+				}
+			}
+			break
+		}
+	}
+	for _, e := range events {
+		if e.Type == jobstore.ToolSelected || e.Type == jobstore.ToolResultSummarized || e.Type == jobstore.ToolInvocationStarted || e.Type == jobstore.ToolInvocationFinished {
+			payload := json.RawMessage(e.Payload)
+			if len(e.Payload) == 0 {
+				payload = []byte("null")
+			}
+			toolEvs, _ := toolDepGraph["tool_events"].([]interface{})
+			toolDepGraph["tool_events"] = append(toolEvs, map[string]interface{}{"type": string(e.Type), "created_at": e.CreatedAt, "payload": payload})
+		}
+	}
+	// memory_read_write: memory_read / memory_write 事件
+	memoryReadWrite := make([]map[string]interface{}, 0)
+	for _, e := range events {
+		if e.Type != jobstore.MemoryRead && e.Type != jobstore.MemoryWrite {
+			continue
+		}
+		payload := json.RawMessage(e.Payload)
+		if len(e.Payload) == 0 {
+			payload = []byte("null")
+		}
+		memoryReadWrite = append(memoryReadWrite, map[string]interface{}{
+			"type":       string(e.Type),
+			"created_at": e.CreatedAt,
+			"payload":    payload,
+		})
+	}
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"job_id":                  jobID,
+		"reasoning_step_timeline": reasoningStepTimeline,
+		"decision_tree":           decisionTree,
+		"plan_evolution":          planEvolution,
+		"tool_dependency_graph":   toolDepGraph,
+		"memory_read_write":       memoryReadWrite,
 	})
 }
 

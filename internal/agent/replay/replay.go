@@ -47,6 +47,8 @@ type ReplayContext struct {
 	PendingToolInvocations   map[string]struct{}            // 事件流中「有 tool_invocation_started 无对应 tool_invocation_finished」的 idempotency_key，禁止再次执行（Activity Log Barrier）
 	StateChangesByStep       map[string][]StateChangeRecord // node_id -> 该步的 state_changed 列表，供 Confirmation Replay
 	ApprovedCorrelationKeys  map[string]struct{}            // wait_completed 中的 correlation_key 集合，供 CapabilityPolicyChecker 审批后放行（design/capability-policy.md）
+	// WorkingMemorySnapshot 最近一次 job_waiting 的 resumption_context.memory_snapshot.working_memory（AgentState JSON）；恢复时 Apply 到 Session（design/durable-memory-layer.md）
+	WorkingMemorySnapshot []byte
 	// Phase 由事件流推导的执行阶段（plan 3.4），用于观测与「Agent 即长期进程」表述
 	Phase ExecutionPhase
 }
@@ -209,6 +211,32 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 				continue
 			}
 			out.StateChangesByStep[pl.NodeID] = append(out.StateChangesByStep[pl.NodeID], pl.StateChanges...)
+		case jobstore.JobWaiting:
+			p, err := jobstore.ParseJobWaitingPayload(e.Payload)
+			if err != nil || len(p.ResumptionContext) == 0 {
+				continue
+			}
+			var resumption map[string]interface{}
+			if json.Unmarshal(p.ResumptionContext, &resumption) != nil {
+				continue
+			}
+			ms, _ := resumption["memory_snapshot"].(map[string]interface{})
+			if ms != nil {
+				if wm, ok := ms["working_memory"]; ok && wm != nil {
+					switch v := wm.(type) {
+					case string:
+						out.WorkingMemorySnapshot = []byte(v)
+					case []byte:
+						out.WorkingMemorySnapshot = v
+					case json.RawMessage:
+						out.WorkingMemorySnapshot = v
+					default:
+						if b, err := json.Marshal(wm); err == nil {
+							out.WorkingMemorySnapshot = b
+						}
+					}
+				}
+			}
 		case jobstore.WaitCompleted:
 			var pl struct {
 				NodeID         string          `json:"node_id"`

@@ -433,6 +433,60 @@ func (s *nodeEventSinkImpl) AppendReasoningSnapshot(ctx context.Context, jobID s
 	return err
 }
 
+// AppendMemoryRead 实现 NodeEventSink；Trace 2.0 memory_read（design/trace-2.0-cognition.md）
+func (s *nodeEventSinkImpl) AppendMemoryRead(ctx context.Context, jobID string, nodeID string, stepIndex int, memoryType, keyOrScope, summary string) error {
+	if s.store == nil {
+		return nil
+	}
+	_, ver, err := s.store.ListEvents(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	pl := jobstore.MemoryReadPayload{JobID: jobID, NodeID: nodeID, StepIndex: stepIndex, MemoryType: memoryType, KeyOrScope: keyOrScope, Summary: summary}
+	payload, err := json.Marshal(pl)
+	if err != nil {
+		return err
+	}
+	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{JobID: jobID, Type: jobstore.MemoryRead, Payload: payload})
+	return err
+}
+
+// AppendMemoryWrite 实现 NodeEventSink；Trace 2.0 memory_write（design/trace-2.0-cognition.md）
+func (s *nodeEventSinkImpl) AppendMemoryWrite(ctx context.Context, jobID string, nodeID string, stepIndex int, memoryType, keyOrScope, summary string) error {
+	if s.store == nil {
+		return nil
+	}
+	_, ver, err := s.store.ListEvents(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	pl := jobstore.MemoryWritePayload{JobID: jobID, NodeID: nodeID, StepIndex: stepIndex, MemoryType: memoryType, KeyOrScope: keyOrScope, Summary: summary}
+	payload, err := json.Marshal(pl)
+	if err != nil {
+		return err
+	}
+	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{JobID: jobID, Type: jobstore.MemoryWrite, Payload: payload})
+	return err
+}
+
+// AppendPlanEvolution 实现 NodeEventSink；Trace 2.0 plan_evolution（design/trace-2.0-cognition.md），可选
+func (s *nodeEventSinkImpl) AppendPlanEvolution(ctx context.Context, jobID string, planVersion int, diffSummary string) error {
+	if s.store == nil {
+		return nil
+	}
+	_, ver, err := s.store.ListEvents(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	pl := jobstore.PlanEvolutionPayload{PlanVersion: planVersion, DiffSummary: diffSummary}
+	payload, err := json.Marshal(pl)
+	if err != nil {
+		return err
+	}
+	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{JobID: jobID, Type: jobstore.PlanEvolution, Payload: payload})
+	return err
+}
+
 // NewReplayContextBuilder 创建从事件流重建 ReplayContext 的 Builder（供 Runner 无 Checkpoint 时恢复）
 func NewReplayContextBuilder(store jobstore.JobStore) replay.ReplayContextBuilder {
 	return replay.NewReplayContextBuilder(store)

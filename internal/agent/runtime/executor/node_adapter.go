@@ -64,6 +64,26 @@ func attachToolEvidence(m map[string]any, idempotencyKey string) {
 	m["_evidence"] = map[string]interface{}{"tool_invocation_ids": []string{idempotencyKey}}
 }
 
+// extractExternalIDFromToolResult 从工具返回的 output（JSON）或 state 中提取 external_id（design/effect-log-and-provenance.md）
+func extractExternalIDFromToolResult(output string, state interface{}) string {
+	if output != "" {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(output), &m); err == nil && m != nil {
+			if id, ok := m["external_id"].(string); ok && id != "" {
+				return id
+			}
+		}
+	}
+	if state != nil {
+		if m, ok := state.(map[string]any); ok {
+			if id, ok := m["external_id"].(string); ok && id != "" {
+				return id
+			}
+		}
+	}
+	return ""
+}
+
 // WorkflowExec 执行工作流（由应用层注入，如 Engine.ExecuteWorkflow）
 type WorkflowExec interface {
 	ExecuteWorkflow(ctx context.Context, name string, params map[string]any) (interface{}, error)
@@ -347,7 +367,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 			if err := a.runConfirmation(ctx, jobID, taskID, stepChanges); err != nil {
 				return nil, err
 			}
-			_ = a.InvocationStore.SetFinished(ctx, idempotencyKey, ToolInvocationStatusConfirmed, rec.Result, true)
+			_ = a.InvocationStore.SetFinished(ctx, idempotencyKey, ToolInvocationStatusConfirmed, rec.Result, true, "")
 			var nodeResult map[string]any
 			_ = json.Unmarshal(rec.Result, &nodeResult)
 			if nodeResult == nil {
@@ -395,7 +415,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 				_ = a.InvocationLedger.Commit(ctx, "catchup-"+idempotencyKey, idempotencyKey, eff.Output)
 			}
 			if a.InvocationStore != nil {
-				_ = a.InvocationStore.SetFinished(ctx, idempotencyKey, ToolInvocationStatusSuccess, eff.Output, true)
+				_ = a.InvocationStore.SetFinished(ctx, idempotencyKey, ToolInvocationStatusSuccess, eff.Output, true, "")
 			}
 			var nodeResult map[string]any
 			_ = json.Unmarshal(eff.Output, &nodeResult)
@@ -490,7 +510,7 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 	if err != nil {
 		if a.InvocationLedger == nil && a.InvocationStore != nil && jobID != "" {
 			errResult, _ := json.Marshal(map[string]any{"error": err.Error()})
-			_ = a.InvocationStore.SetFinished(ctx, idempotencyKey, ToolInvocationStatusFailure, errResult, false)
+			_ = a.InvocationStore.SetFinished(ctx, idempotencyKey, ToolInvocationStatusFailure, errResult, false, "")
 		}
 		if p.Results == nil {
 			p.Results = make(map[string]any)
@@ -522,9 +542,14 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 		"done": result.Done, "state": result.State, "output": result.Output, "error": result.Err,
 	}
 	resultBytes, _ := json.Marshal(nodeResult)
-	// 两步提交 Phase 1：先写 Effect Store，崩溃恢复时 Replay 可从 Effect Store catch-up，不重执行（强 Replay）
+	externalID := extractExternalIDFromToolResult(result.Output, result.State)
+	// 两步提交 Phase 1：先写 Effect Store；Metadata 写入 tool_name / external_id（design/effect-log-and-provenance.md）
 	if a.EffectStore != nil && jobID != "" {
 		inputBytes, _ := json.Marshal(cfg)
+		meta := map[string]any{"tool_name": toolName}
+		if externalID != "" {
+			meta["external_id"] = externalID
+		}
 		_ = a.EffectStore.PutEffect(ctx, &EffectRecord{
 			JobID:          jobID,
 			CommandID:      nodeIDForEvent,
@@ -533,6 +558,7 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 			Input:          inputBytes,
 			Output:         resultBytes,
 			Error:          result.Err,
+			Metadata:       meta,
 		})
 	}
 	// Phase 2：写事件流与 Ledger/Store
@@ -551,7 +577,7 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 	if a.InvocationLedger != nil && jobID != "" {
 		_ = a.InvocationLedger.Commit(ctx, invocationID, idempotencyKey, resultBytes)
 	} else if a.InvocationStore != nil && jobID != "" {
-		_ = a.InvocationStore.SetFinished(ctx, idempotencyKey, ToolInvocationStatusSuccess, resultBytes, true)
+		_ = a.InvocationStore.SetFinished(ctx, idempotencyKey, ToolInvocationStatusSuccess, resultBytes, true, externalID)
 	}
 	if p.Results == nil {
 		p.Results = make(map[string]any)

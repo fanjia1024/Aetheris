@@ -45,6 +45,6 @@ type ToolInvocationStore interface {
 	GetByJobAndIdempotencyKey(ctx context.Context, jobID, idempotencyKey string) (*ToolInvocationRecord, error)
 	// SetStarted 创建或更新为 started（执行前调用）
 	SetStarted(ctx context.Context, r *ToolInvocationRecord) error
-	// SetFinished 更新为完成态并设置 committed（执行成功后调用，再写事件）
-	SetFinished(ctx context.Context, idempotencyKey string, status string, result []byte, committed bool) error
+	// SetFinished 更新为完成态并设置 committed（执行成功后调用，再写事件）；externalID 可选，非空时写入 tool_invocations.external_id（provenance）
+	SetFinished(ctx context.Context, idempotencyKey string, status string, result []byte, committed bool, externalID string) error
 }

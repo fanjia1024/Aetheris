@@ -74,8 +74,8 @@ func (s *ToolInvocationStoreMem) SetStarted(ctx context.Context, r *ToolInvocati
 	return nil
 }
 
-// SetFinished 实现 ToolInvocationStore
-func (s *ToolInvocationStoreMem) SetFinished(ctx context.Context, idempotencyKey string, status string, result []byte, committed bool) error {
+// SetFinished 实现 ToolInvocationStore；externalID 在内存实现中不持久化
+func (s *ToolInvocationStoreMem) SetFinished(ctx context.Context, idempotencyKey string, status string, result []byte, committed bool, externalID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r := s.byKey[idempotencyKey]
