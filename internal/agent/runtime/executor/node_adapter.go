@@ -218,6 +218,8 @@ type ToolNodeAdapter struct {
 	// CapabilityPolicyChecker 执行前校验；非 nil 时在 Tools.Execute 前按能力/策略 Check，deny 则失败该步，require_approval 则返回 CapabilityRequiresApproval（design/capability-policy.md）
 	CapabilityPolicyChecker CapabilityPolicyChecker
 	ResourceVerifier        ResourceVerifier // 可选；Confirmation Replay 时校验外部资源仍存在，不通过则失败 job
+	// RetryPolicy 可选；Tool 执行失败时按策略重试（2.0 Tool Contract），同一 idempotency_key 下为同步重试
+	RetryPolicy *RetryPolicy
 }
 
 // runConfirmation 在注入前校验本步的 StateChanged；若 verifier 存在且有待校验项且任一项失败则返回永久失败错误
@@ -505,7 +507,27 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 			return nil, &StepFailure{Type: StepResultPermanentFailure, Inner: fmt.Errorf("capability denied: %s", capability), NodeID: taskID}
 		}
 	}
-	result, err := a.Tools.Execute(ctx, toolName, cfg, state)
+	var result ToolResult
+	var err error
+	maxAttempts := 1
+	if a.RetryPolicy != nil && a.RetryPolicy.MaxRetries > 0 {
+		maxAttempts = 1 + a.RetryPolicy.MaxRetries
+	}
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 && a.RetryPolicy != nil && a.RetryPolicy.Backoff > 0 {
+			time.Sleep(a.RetryPolicy.Backoff)
+		}
+		result, err = a.Tools.Execute(ctx, toolName, cfg, state)
+		if err == nil {
+			break
+		}
+		if !IsRetryable(err, a.RetryPolicy) {
+			break
+		}
+		if result.State != nil {
+			state = result.State
+		}
+	}
 	finishedAt := time.Now().UTC()
 	if err != nil {
 		if a.InvocationLedger == nil && a.InvocationStore != nil && jobID != "" {

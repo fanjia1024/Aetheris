@@ -27,6 +27,8 @@ import (
 	"rag-platform/internal/agent/replay"
 	replaysandbox "rag-platform/internal/agent/replay/sandbox"
 	"rag-platform/internal/agent/runtime"
+	agenteffects "rag-platform/internal/agent/runtime/effects"
+	"rag-platform/pkg/agent/sdk"
 )
 
 // StepResultType classifies a step completion (Production Semantics Phase A). See design/step-result-failure-model.md.
@@ -125,6 +127,8 @@ type NodeEventSink interface {
 	AppendJobWaiting(ctx context.Context, jobID string, nodeID string, waitKind, reason string, expiresAt time.Time, correlationKey string, resumptionContext []byte) error
 	// AppendReasoningSnapshot 写入 reasoning_snapshot 事件，供因果调试（design：Causal Debugging）
 	AppendReasoningSnapshot(ctx context.Context, jobID string, payload []byte) error
+	// AppendStepCompensated 写入 step_compensated 事件（2.0 Tool Contract）；补偿回调执行后调用
+	AppendStepCompensated(ctx context.Context, jobID string, nodeID string, stepID string, commandID string, reason string) error
 	// Trace 2.0 Cognition（design/trace-2.0-cognition.md）：memory_read / memory_write / plan_evolution，不参与 Replay
 	AppendMemoryRead(ctx context.Context, jobID string, nodeID string, stepIndex int, memoryType, keyOrScope, summary string) error
 	AppendMemoryWrite(ctx context.Context, jobID string, nodeID string, stepIndex int, memoryType, keyOrScope, summary string) error
@@ -163,16 +167,18 @@ type NodeToolAndCommandEventSink interface {
 
 // Runner 单轮执行：PlanGoal → Compile → Invoke；可选 Checkpoint/JobStore 时支持 RunForJob 逐节点 checkpoint 与恢复
 type Runner struct {
-	compiler          *Compiler
-	checkpointStore   runtime.CheckpointStore
-	jobStore          JobStoreForRunner
-	planGeneratedSink PlanGeneratedSink
-	nodeEventSink     NodeEventSink
-	replayBuilder     replay.ReplayContextBuilder
-	replayPolicy      replaysandbox.ReplayPolicy // 可选；Replay 时按策略决定执行或注入
-	stepTimeout       time.Duration              // 可选；单步最大执行时间，超时按 retryable_failure（design/scheduler-correctness.md Step timeout）
-	stepValidators    []StepValidator            // 可选；Step Contract 2.0 校验（design/step-contract.md）
-	maxParallelSteps  int                        // 可选；>0 时同层节点可并行执行（design/dag-parallel-execution.md），0=仅顺序
+	compiler                *Compiler
+	checkpointStore         runtime.CheckpointStore
+	jobStore                JobStoreForRunner
+	planGeneratedSink       PlanGeneratedSink
+	nodeEventSink           NodeEventSink
+	recordedEffectsRecorder agenteffects.RecordedEffectsRecorder // 可选；2.0 Step Contract，step 内 Now/UUID/HTTP 经此记录
+	compensationRegistry    CompensationRegistry                 // 可选；compensatable_failure 时调用补偿并写 step_compensated
+	replayBuilder           replay.ReplayContextBuilder
+	replayPolicy            replaysandbox.ReplayPolicy // 可选；Replay 时按策略决定执行或注入
+	stepTimeout             time.Duration              // 可选；单步最大执行时间，超时按 retryable_failure（design/scheduler-correctness.md Step timeout）
+	stepValidators          []StepValidator            // 可选；Step Contract 2.0 校验（design/step-contract.md）
+	maxParallelSteps        int                        // 可选；>0 时同层节点可并行执行（design/dag-parallel-execution.md），0=仅顺序
 }
 
 // NewRunner 创建 Runner（仅编译与单次 Invoke）
@@ -194,6 +200,16 @@ func (r *Runner) SetPlanGeneratedSink(sink PlanGeneratedSink) {
 // SetNodeEventSink 设置节点事件写入（可选）；RunForJob 每步前后写入 NodeStarted/NodeFinished，供 Replay 使用
 func (r *Runner) SetNodeEventSink(sink NodeEventSink) {
 	r.nodeEventSink = sink
+}
+
+// SetRecordedEffectsRecorder 设置 Recorded Effects 记录器（可选）；2.0 Step Contract，step 内 Now/UUID/HTTP 经此记录，Replay 时从事件注入
+func (r *Runner) SetRecordedEffectsRecorder(rec agenteffects.RecordedEffectsRecorder) {
+	r.recordedEffectsRecorder = rec
+}
+
+// SetCompensationRegistry 设置补偿注册表（可选）；某步返回 compensatable_failure 时调用对应补偿并写 step_compensated
+func (r *Runner) SetCompensationRegistry(registry CompensationRegistry) {
+	r.compensationRegistry = registry
 }
 
 // SetReplayContextBuilder 设置从事件流重建执行上下文的 Builder（可选）；无 Checkpoint 时尝试从事件恢复
@@ -650,6 +666,11 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 		runCtx, cancel = context.WithTimeout(runCtx, r.stepTimeout)
 		defer cancel()
 	}
+	// 2.0 Step Contract：注入 RecordedEffects 与 sdk.RuntimeContext，step 内仅能通过 Runtime Now/UUID/HTTP
+	if r.recordedEffectsRecorder != nil || replayCtx != nil {
+		runCtx = agenteffects.WithRecordedEffects(runCtx, jobID, effectiveStepID, replayCtx, r.recordedEffectsRecorder)
+	}
+	runCtx = sdk.WithRuntimeContext(runCtx, newRuntimeContextAdapter(jobID, effectiveStepID))
 	var runErr error
 	if len(r.stepValidators) > 0 {
 		if err := r.runStepValidators(runCtx, jobID, effectiveStepID, step.NodeID, step.NodeType, nil); err != nil {
@@ -685,6 +706,14 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 		_ = r.nodeEventSink.AppendStepCommitted(ctx, jobID, step.NodeID, effectiveStepID, effectiveStepID, "")
 	}
 	if isStepFailure(resultType) {
+		if resultType == StepResultCompensatableFailure && r.compensationRegistry != nil {
+			if fn := r.compensationRegistry.GetCompensation(step.NodeID); fn != nil {
+				_ = fn(ctx, jobID, step.NodeID, effectiveStepID, effectiveStepID)
+				if r.nodeEventSink != nil {
+					_ = r.nodeEventSink.AppendStepCompensated(ctx, jobID, step.NodeID, effectiveStepID, effectiveStepID, reason)
+				}
+			}
+		}
 		_ = r.jobStore.UpdateStatus(ctx, jobID, statusFailed)
 		sf := &StepFailure{Type: resultType, Inner: runErr, NodeID: step.NodeID}
 		return false, fmt.Errorf("executor: 节点 %s 执行失败 (%s): %w", step.NodeID, resultType, sf)
@@ -1065,6 +1094,11 @@ runLoop:
 			runCtx, cancel = context.WithTimeout(runCtx, r.stepTimeout)
 			defer cancel()
 		}
+		// 2.0 Step Contract：注入 RecordedEffects 与 sdk.RuntimeContext
+		if r.recordedEffectsRecorder != nil || replayCtx != nil {
+			runCtx = agenteffects.WithRecordedEffects(runCtx, j.ID, effectiveStepID, replayCtx, r.recordedEffectsRecorder)
+		}
+		runCtx = sdk.WithRuntimeContext(runCtx, newRuntimeContextAdapter(j.ID, effectiveStepID))
 		var runErr error
 		if len(r.stepValidators) > 0 {
 			if err := r.runStepValidators(runCtx, j.ID, effectiveStepID, step.NodeID, step.NodeType, nil); err != nil {
@@ -1116,6 +1150,14 @@ runLoop:
 			_ = r.nodeEventSink.AppendStepCommitted(ctx, j.ID, step.NodeID, effectiveStepID, effectiveStepID, "")
 		}
 		if isStepFailure(resultType) {
+			if resultType == StepResultCompensatableFailure && r.compensationRegistry != nil {
+				if fn := r.compensationRegistry.GetCompensation(step.NodeID); fn != nil {
+					_ = fn(ctx, j.ID, step.NodeID, effectiveStepID, effectiveStepID)
+					if r.nodeEventSink != nil {
+						_ = r.nodeEventSink.AppendStepCompensated(ctx, j.ID, step.NodeID, effectiveStepID, effectiveStepID, reason)
+					}
+				}
+			}
 			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
 			sf := &StepFailure{Type: resultType, Inner: runErr, NodeID: step.NodeID}
 			return fmt.Errorf("executor: 节点 %s 执行失败 (%s): %w", step.NodeID, resultType, sf)

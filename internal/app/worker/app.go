@@ -156,6 +156,7 @@ func NewApp(cfg *config.Config) (*App, error) {
 		dagRunner.SetCheckpointStores(checkpointStore, &jobStoreForRunnerAdapter{JobStore: pgJobStore})
 		dagRunner.SetPlanGeneratedSink(api.NewPlanGeneratedSink(pgEventStore))
 		dagRunner.SetNodeEventSink(nodeEventSink)
+		dagRunner.SetRecordedEffectsRecorder(api.NewRecordedEffectsRecorder(pgEventStore))
 		dagRunner.SetReplayContextBuilder(api.NewReplayContextBuilder(pgEventStore))
 		dagRunner.SetReplayPolicy(replaysandbox.DefaultPolicy{})
 		maxAttempts := cfg.Worker.MaxAttempts

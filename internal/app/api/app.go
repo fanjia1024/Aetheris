@@ -373,6 +373,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	dagRunner.SetCheckpointStores(checkpointStore, &jobStoreForRunnerAdapter{JobStore: jobStore})
 	dagRunner.SetPlanGeneratedSink(NewPlanGeneratedSink(jobEventStore))
 	dagRunner.SetNodeEventSink(nodeEventSink)
+	dagRunner.SetRecordedEffectsRecorder(NewRecordedEffectsRecorder(jobEventStore))
 	dagRunner.SetReplayContextBuilder(NewReplayContextBuilder(jobEventStore))
 	dagRunner.SetReplayPolicy(replaysandbox.DefaultPolicy{})
 	runJob := func(ctx context.Context, j *job.Job) error {

@@ -62,3 +62,4 @@ Recommended **Go 1.25.7+**, aligned with go.mod and CI.
 - [release-acceptance-v0.9.md](release-acceptance-v0.9.md) — v0.9 runtime correctness (Worker crash recovery, API restart, multi-Worker, Replay)
 - [release-certification-1.0.md](release-certification-1.0.md) — 1.0 release gate checklist
 - [release-checklist-v1.0.md](release-checklist-v1.0.md) — Post-release checklist (core features, distributed, CLI/API, logging and docs)
+- [2.0-roadmap.md](2.0-roadmap.md) — 2.0 升级指引与路线图（当前状态、流程图、优先级、发布判定清单）

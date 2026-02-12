@@ -463,6 +463,27 @@ func (s *nodeEventSinkImpl) AppendReasoningSnapshot(ctx context.Context, jobID s
 	return err
 }
 
+// AppendStepCompensated 实现 NodeEventSink；写入 step_compensated 事件（2.0 Tool Contract），补偿回调执行后调用
+func (s *nodeEventSinkImpl) AppendStepCompensated(ctx context.Context, jobID string, nodeID string, stepID string, commandID string, reason string) error {
+	if s.store == nil {
+		return nil
+	}
+	_, ver, err := s.store.ListEvents(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	pl := map[string]interface{}{"node_id": nodeID, "step_id": stepID, "command_id": commandID}
+	if reason != "" {
+		pl["reason"] = reason
+	}
+	payload, err := json.Marshal(pl)
+	if err != nil {
+		return err
+	}
+	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{JobID: jobID, Type: jobstore.StepCompensated, Payload: payload})
+	return err
+}
+
 // AppendMemoryRead 实现 NodeEventSink；Trace 2.0 memory_read（design/trace-2.0-cognition.md）
 func (s *nodeEventSinkImpl) AppendMemoryRead(ctx context.Context, jobID string, nodeID string, stepIndex int, memoryType, keyOrScope, summary string) error {
 	if s.store == nil {
