@@ -16,13 +16,15 @@ package instance
 
 import "time"
 
-// AgentInstance 持久化实体；与 design/agent-instance-model.md 表 agent_instances 对应
+// AgentInstance 持久化实体；与 design/agent-instance-model.md 表 agent_instances 对应；design/plan.md Phase B 增加 CurrentJobID、BehaviorID
 type AgentInstance struct {
 	ID               string
 	TenantID         string
 	Name             string
 	Status           string
 	DefaultSessionID string
+	CurrentJobID     string // 当前运行或挂起的 Job，便于观测与恢复（design/plan.md Phase B）
+	BehaviorID       string // 可选：agent 定义/图引用
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	Meta             map[string]any

@@ -55,6 +55,7 @@ func (s *StorePg) Send(ctx context.Context, fromAgentID, toAgentID string, paylo
 	id := "msg-" + uuid.New().String()
 	kind := KindUser
 	channel := ""
+	causationID := ""
 	var scheduledAt, expiresAt, deliveredAt *time.Time
 	now := time.Now()
 	deliveredAt = &now
@@ -63,14 +64,15 @@ func (s *StorePg) Send(ctx context.Context, fromAgentID, toAgentID string, paylo
 			kind = opts.Kind
 		}
 		channel = opts.Channel
+		causationID = opts.CausationID
 		scheduledAt = opts.ScheduledAt
 		expiresAt = opts.ExpiresAt
 	}
 	pl, _ := json.Marshal(payload)
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO agent_messages (id, from_agent_id, to_agent_id, channel, kind, payload, scheduled_at, expires_at, created_at, delivered_at)
-		 VALUES ($1, NULLIF($2,''), $3, NULLIF($4,''), $5, $6, $7, $8, $9, $10)`,
-		id, fromAgentID, toAgentID, channel, kind, pl, scheduledAt, expiresAt, now, deliveredAt)
+		`INSERT INTO agent_messages (id, from_agent_id, to_agent_id, channel, kind, payload, causation_id, scheduled_at, expires_at, created_at, delivered_at)
+		 VALUES ($1, NULLIF($2,''), $3, NULLIF($4,''), $5, $6, NULLIF($7,''), $8, $9, $10, $11)`,
+		id, fromAgentID, toAgentID, channel, kind, pl, causationID, scheduledAt, expiresAt, now, deliveredAt)
 	if err != nil {
 		return "", err
 	}
@@ -81,20 +83,22 @@ func (s *StorePg) SendDelayed(ctx context.Context, toAgentID string, payload map
 	id := "msg-" + uuid.New().String()
 	kind := KindTimer
 	channel := ""
+	causationID := ""
 	var expiresAt *time.Time
 	if opts != nil {
 		if opts.Kind != "" {
 			kind = opts.Kind
 		}
 		channel = opts.Channel
+		causationID = opts.CausationID
 		expiresAt = opts.ExpiresAt
 	}
 	pl, _ := json.Marshal(payload)
 	now := time.Now()
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO agent_messages (id, from_agent_id, to_agent_id, channel, kind, payload, scheduled_at, expires_at, created_at)
-		 VALUES ($1, '', $2, NULLIF($3,''), $4, $5, $6, $7, $8)`,
-		id, toAgentID, channel, kind, pl, at, expiresAt, now)
+		`INSERT INTO agent_messages (id, from_agent_id, to_agent_id, channel, kind, payload, causation_id, scheduled_at, expires_at, created_at)
+		 VALUES ($1, '', $2, NULLIF($3,''), $4, $5, NULLIF($6,''), $7, $8, $9)`,
+		id, toAgentID, channel, kind, pl, causationID, at, expiresAt, now)
 	if err != nil {
 		return "", err
 	}
@@ -107,7 +111,7 @@ func (s *StorePg) PeekInbox(ctx context.Context, agentID string, limit int) ([]*
 	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, COALESCE(from_agent_id,''), to_agent_id, COALESCE(channel,''), kind, COALESCE(payload,'{}'::jsonb),
-		 scheduled_at, expires_at, created_at, delivered_at, COALESCE(consumed_by_job_id,''), consumed_at
+		 COALESCE(causation_id,''), scheduled_at, expires_at, created_at, delivered_at, COALESCE(consumed_by_job_id,''), consumed_at
 		 FROM agent_messages WHERE to_agent_id = $1 AND consumed_by_job_id IS NULL
 		 AND (delivered_at IS NOT NULL OR (scheduled_at IS NOT NULL AND scheduled_at <= now()))
 		 ORDER BY created_at ASC LIMIT $2`,
@@ -130,16 +134,41 @@ func (s *StorePg) MarkConsumed(ctx context.Context, messageID, jobID string) err
 	return err
 }
 
+// ListAgentIDsWithUnconsumedMessages 返回有未消费消息的 to_agent_id 列表（design/plan.md Phase A）
+func (s *StorePg) ListAgentIDsWithUnconsumedMessages(ctx context.Context, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT DISTINCT to_agent_id FROM agent_messages WHERE consumed_by_job_id IS NULL AND (delivered_at IS NOT NULL OR (scheduled_at IS NOT NULL AND scheduled_at <= now())) LIMIT $1`,
+		limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		if id != "" {
+			out = append(out, id)
+		}
+	}
+	return out, rows.Err()
+}
+
 func scanMessages(rows pgx.Rows) ([]*Message, error) {
 	var out []*Message
 	for rows.Next() {
-		var id, fromID, toID, channel, kind string
+		var id, fromID, toID, channel, kind, causationID string
 		var payload []byte
 		var scheduledAt, expiresAt, deliveredAt *time.Time
 		var createdAt time.Time
 		var consumedByJobID string
 		var consumedAt *time.Time
-		err := rows.Scan(&id, &fromID, &toID, &channel, &kind, &payload, &scheduledAt, &expiresAt, &createdAt, &deliveredAt, &consumedByJobID, &consumedAt)
+		err := rows.Scan(&id, &fromID, &toID, &channel, &kind, &payload, &causationID, &scheduledAt, &expiresAt, &createdAt, &deliveredAt, &consumedByJobID, &consumedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -149,6 +178,7 @@ func scanMessages(rows pgx.Rows) ([]*Message, error) {
 			ToAgentID:       toID,
 			Channel:         channel,
 			Kind:            kind,
+			CausationID:     causationID,
 			CreatedAt:       createdAt,
 			ScheduledAt:     scheduledAt,
 			ExpiresAt:       expiresAt,

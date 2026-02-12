@@ -71,6 +71,7 @@ func (s *StoreMem) Send(ctx context.Context, fromAgentID, toAgentID string, payl
 		DeliveredAt: &delivered,
 	}
 	if opts != nil {
+		msg.CausationID = opts.CausationID
 		msg.ScheduledAt = opts.ScheduledAt
 		msg.ExpiresAt = opts.ExpiresAt
 	}
@@ -102,6 +103,7 @@ func (s *StoreMem) SendDelayed(ctx context.Context, toAgentID string, payload ma
 		ScheduledAt: &at,
 	}
 	if opts != nil {
+		msg.CausationID = opts.CausationID
 		msg.ExpiresAt = opts.ExpiresAt
 	}
 	s.mu.Lock()
@@ -165,4 +167,31 @@ func (s *StoreMem) MarkConsumed(ctx context.Context, messageID, jobID string) er
 		m.ConsumedAt = &t
 	}
 	return nil
+}
+
+// ListAgentIDsWithUnconsumedMessages 返回有未消费消息的 to_agent_id 列表（design/plan.md Phase A）
+func (s *StoreMem) ListAgentIDsWithUnconsumedMessages(ctx context.Context, limit int) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	seen := make(map[string]struct{})
+	now := time.Now()
+	for _, m := range s.messages {
+		if m.ConsumedByJobID != "" {
+			continue
+		}
+		if m.DeliveredAt == nil && m.ScheduledAt != nil && m.ScheduledAt.After(now) {
+			continue
+		}
+		if m.ToAgentID != "" {
+			seen[m.ToAgentID] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
 }

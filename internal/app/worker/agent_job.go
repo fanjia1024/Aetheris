@@ -22,7 +22,9 @@ import (
 	"sync"
 	"time"
 
+	"rag-platform/internal/agent/instance"
 	"rag-platform/internal/agent/job"
+	"rag-platform/internal/agent/messaging"
 	agentexec "rag-platform/internal/agent/runtime/executor"
 	"rag-platform/internal/runtime/jobstore"
 	"rag-platform/pkg/log"
@@ -40,8 +42,10 @@ type AgentJobRunner struct {
 	leaseDuration   time.Duration
 	heartbeatTicker time.Duration
 	maxConcurrency  int
-	limiter         chan struct{}   // 信号量，限制同时执行的 Job 数，避免 goroutine/LLM 爆炸
-	wakeupQueue     job.WakeupQueue // 可选；非 nil 时无 job 时用 Receive(timeout) 替代固定 sleep，实现 signal/message 后立即唤醒（design/wakeup-index）
+	limiter         chan struct{}               // 信号量，限制同时执行的 Job 数，避免 goroutine/LLM 爆炸
+	wakeupQueue     job.WakeupQueue             // 可选；非 nil 时无 job 时用 Receive(timeout) 替代固定 sleep，实现 signal/message 后立即唤醒（design/wakeup-index）
+	inboxReader     messaging.InboxReader       // 可选；非 nil 时轮询收件箱并创建 Job，实现 inbox-driven execution（design/plan.md Phase A）
+	instanceStore   instance.AgentInstanceStore // 可选；非 nil 时在 Job 认领/结束时更新 Instance.current_job_id（design/plan.md Phase B）
 	logger          *log.Logger
 	stopCh          chan struct{}
 	wg              sync.WaitGroup
@@ -86,8 +90,22 @@ func (r *AgentJobRunner) SetWakeupQueue(q job.WakeupQueue) {
 	r.wakeupQueue = q
 }
 
-// Start 启动 Claim 循环；先占并发槽位再 Claim，执行后释放槽位（Backpressure）；capabilities 非空时按能力从 jobStore 选 Job 再在 eventStore 占租约
+// SetInboxReader 设置收件箱读取器；非 nil 时启动 inbox 轮询，将未消费消息转为 Job 并 NotifyReady（design/plan.md Phase A）
+func (r *AgentJobRunner) SetInboxReader(inbox messaging.InboxReader) {
+	r.inboxReader = inbox
+}
+
+// SetInstanceStore 设置 Agent Instance 存储；非 nil 时在 Job 认领时设置 current_job_id、结束时清空（design/plan.md Phase B）
+func (r *AgentJobRunner) SetInstanceStore(store instance.AgentInstanceStore) {
+	r.instanceStore = store
+}
+
+// Start 启动 Claim 循环；先占并发槽位再 Claim，执行后释放槽位（Backpressure）；capabilities 非空时按能力从 jobStore 选 Job 再在 eventStore 占租约；若 SetInboxReader 则同时启动 inbox 轮询
 func (r *AgentJobRunner) Start(ctx context.Context) {
+	if r.inboxReader != nil {
+		r.wg.Add(1)
+		go r.runInboxPollLoop(ctx)
+	}
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
@@ -174,6 +192,30 @@ func (r *AgentJobRunner) Start(ctx context.Context) {
 	}()
 }
 
+// runInboxPollLoop 轮询收件箱：对有未消费消息的 agent 创建 Job 并 NotifyReady（design/plan.md Phase A）
+func (r *AgentJobRunner) runInboxPollLoop(ctx context.Context) {
+	defer r.wg.Done()
+	for {
+		select {
+		case <-r.stopCh:
+			return
+		case <-ctx.Done():
+			return
+		case <-time.After(r.pollInterval):
+		}
+		agentIDs, err := r.inboxReader.ListAgentIDsWithUnconsumedMessages(ctx, 10)
+		if err != nil || len(agentIDs) == 0 {
+			continue
+		}
+		for _, agentID := range agentIDs {
+			jobID, created, _ := job.CreateJobFromInbox(ctx, agentID, r.inboxReader, r.jobStore, r.jobEventStore)
+			if created && jobID != "" && r.wakeupQueue != nil {
+				_ = r.wakeupQueue.NotifyReady(ctx, jobID)
+			}
+		}
+	}
+}
+
 // Stop 停止 Claim 循环并等待当前执行中的 Job 结束
 func (r *AgentJobRunner) Stop() {
 	close(r.stopCh)
@@ -235,6 +277,10 @@ func (r *AgentJobRunner) executeJob(ctx context.Context, jobID string, attemptID
 			}
 		}
 	}()
+	if r.instanceStore != nil {
+		_ = r.instanceStore.UpdateCurrentJob(ctx, j.AgentID, jobID)
+		defer func() { _ = r.instanceStore.UpdateCurrentJob(context.Background(), j.AgentID, "") }()
+	}
 	err = r.runJob(runCtx, j)
 	<-heartbeatDone
 	if runCtx.Err() == context.Canceled {

@@ -16,7 +16,7 @@ package messaging
 
 import "time"
 
-// Message Agent 级消息；design/agent-messaging-bus.md
+// Message Agent 级消息；design/agent-messaging-bus.md；design/plan.md Phase C 增加 CausationID 用于追踪与多 Agent 链
 type Message struct {
 	ID              string
 	FromAgentID     string
@@ -24,6 +24,7 @@ type Message struct {
 	Channel         string
 	Kind            string
 	Payload         map[string]any
+	CausationID     string // 可选：触发本消息的 message_id 或 job_id，供 Trace 与多 Agent 链（design/plan.md Phase C）
 	ScheduledAt     *time.Time
 	ExpiresAt       *time.Time
 	CreatedAt       time.Time
@@ -45,6 +46,7 @@ const (
 type SendOptions struct {
 	Channel        string
 	Kind           string
+	CausationID    string // 可选：上游 message_id 或 job_id（design/plan.md Phase C）
 	ScheduledAt    *time.Time
 	ExpiresAt      *time.Time
 	IdempotencyKey string

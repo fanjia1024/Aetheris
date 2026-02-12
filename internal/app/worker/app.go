@@ -29,7 +29,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/common/expfmt"
 
+	"rag-platform/internal/agent/instance"
 	"rag-platform/internal/agent/job"
+	"rag-platform/internal/agent/messaging"
 	"rag-platform/internal/agent/planner"
 	replaysandbox "rag-platform/internal/agent/replay/sandbox"
 	"rag-platform/internal/agent/runtime"
@@ -225,6 +227,15 @@ func NewApp(cfg *config.Config) (*App, error) {
 		// 唤醒队列：无 job 时用 Receive(pollInterval) 替代固定 sleep，API 侧 JobSignal/JobMessage 若设置同一 WakeupQueue 可立即唤醒（单进程部署时注入同一实例）
 		wakeupQueue := job.NewWakeupQueueMem(256)
 		runner.SetWakeupQueue(wakeupQueue)
+		// Inbox 驱动创建 Job：轮询 agent_messages 未消费消息，创建 Job 后 NotifyReady（design/plan.md Phase A）
+		if inboxStore, errInbox := messaging.NewStorePg(context.Background(), dsn); errInbox == nil {
+			runner.SetInboxReader(inboxStore)
+			logger.Info("Worker Inbox 轮询已启用，支持 message arrival → job run")
+		}
+		// Instance current_job_id：Job 认领/结束时更新（design/plan.md Phase B）
+		if instanceStore, errInst := instance.NewStorePg(context.Background(), dsn); errInst == nil {
+			runner.SetInstanceStore(instanceStore)
+		}
 		appObj.agentJobRunner = runner
 		logger.Info("Worker Agent Job 模式已启用", "worker_id", DefaultWorkerID(), "dsn", dsn)
 	}

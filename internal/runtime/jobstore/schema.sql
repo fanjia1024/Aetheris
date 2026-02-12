@@ -119,6 +119,10 @@ CREATE TABLE IF NOT EXISTS agent_instances (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_instances_tenant_id ON agent_instances (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_agent_instances_status ON agent_instances (status);
+-- design/plan.md Phase B：Instance 当前 Job 与行为引用
+ALTER TABLE agent_instances ADD COLUMN IF NOT EXISTS current_job_id TEXT;
+ALTER TABLE agent_instances ADD COLUMN IF NOT EXISTS behavior_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_agent_instances_current_job_id ON agent_instances (current_job_id) WHERE current_job_id IS NOT NULL;
 
 -- Agent 级消息表（design/agent-messaging-bus.md）
 CREATE TABLE IF NOT EXISTS agent_messages (
@@ -135,6 +139,8 @@ CREATE TABLE IF NOT EXISTS agent_messages (
     consumed_by_job_id     TEXT,
     consumed_at            TIMESTAMPTZ
 );
+-- design/plan.md Phase C：消息因果链（上游 message_id 或 job_id）
+ALTER TABLE agent_messages ADD COLUMN IF NOT EXISTS causation_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_agent_messages_to_agent ON agent_messages (to_agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_messages_to_agent_consumed ON agent_messages (to_agent_id) WHERE consumed_by_job_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_agent_messages_scheduled ON agent_messages (scheduled_at) WHERE scheduled_at IS NOT NULL;

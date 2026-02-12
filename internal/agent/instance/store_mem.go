@@ -103,12 +103,25 @@ func (s *StoreMem) Update(ctx context.Context, instance *AgentInstance) error {
 	p.Name = instance.Name
 	p.Status = instance.Status
 	p.DefaultSessionID = instance.DefaultSessionID
+	p.CurrentJobID = instance.CurrentJobID
+	p.BehaviorID = instance.BehaviorID
 	p.UpdatedAt = time.Now()
 	if instance.Meta != nil {
 		p.Meta = make(map[string]any, len(instance.Meta))
 		for k, v := range instance.Meta {
 			p.Meta[k] = v
 		}
+	}
+	return nil
+}
+
+// UpdateCurrentJob 实现 AgentInstanceStore；仅更新 current_job_id（design/plan.md Phase B）
+func (s *StoreMem) UpdateCurrentJob(ctx context.Context, agentID, currentJobID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if p := s.byID[agentID]; p != nil {
+		p.CurrentJobID = currentJobID
+		p.UpdatedAt = time.Now()
 	}
 	return nil
 }

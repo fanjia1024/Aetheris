@@ -52,14 +52,14 @@ func (s *StorePg) Close() {
 }
 
 func (s *StorePg) Get(ctx context.Context, agentID string) (*AgentInstance, error) {
-	var id, tenantID, name, status, defaultSessionID string
+	var id, tenantID, name, status, defaultSessionID, currentJobID, behaviorID string
 	var createdAt, updatedAt time.Time
 	var meta []byte
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, COALESCE(tenant_id,''), COALESCE(name,''), status, COALESCE(default_session_id,''),
-		 created_at, updated_at, COALESCE(meta, '{}'::jsonb)
+		 COALESCE(current_job_id,''), COALESCE(behavior_id,''), created_at, updated_at, COALESCE(meta, '{}'::jsonb)
 		 FROM agent_instances WHERE id = $1`,
-		agentID).Scan(&id, &tenantID, &name, &status, &defaultSessionID, &createdAt, &updatedAt, &meta)
+		agentID).Scan(&id, &tenantID, &name, &status, &defaultSessionID, &currentJobID, &behaviorID, &createdAt, &updatedAt, &meta)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -72,6 +72,8 @@ func (s *StorePg) Get(ctx context.Context, agentID string) (*AgentInstance, erro
 		Name:             name,
 		Status:           status,
 		DefaultSessionID: defaultSessionID,
+		CurrentJobID:     currentJobID,
+		BehaviorID:       behaviorID,
 		CreatedAt:        createdAt,
 		UpdatedAt:        updatedAt,
 	}
@@ -97,11 +99,11 @@ func (s *StorePg) Create(ctx context.Context, instance *AgentInstance) error {
 		instance.Status = StatusIdle
 	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO agent_instances (id, tenant_id, name, status, default_session_id, created_at, updated_at, meta)
-		 VALUES ($1, NULLIF($2,''), NULLIF($3,''), $4, NULLIF($5,''), $6, $7, $8)
+		`INSERT INTO agent_instances (id, tenant_id, name, status, default_session_id, current_job_id, behavior_id, created_at, updated_at, meta)
+		 VALUES ($1, NULLIF($2,''), NULLIF($3,''), $4, NULLIF($5,''), NULLIF($6,''), NULLIF($7,''), $8, $9, $10)
 		 ON CONFLICT (id) DO NOTHING`,
 		instance.ID, instance.TenantID, instance.Name, instance.Status, instance.DefaultSessionID,
-		instance.CreatedAt, instance.UpdatedAt, meta)
+		instance.CurrentJobID, instance.BehaviorID, instance.CreatedAt, instance.UpdatedAt, meta)
 	return err
 }
 
@@ -119,14 +121,22 @@ func (s *StorePg) Update(ctx context.Context, instance *AgentInstance) error {
 	meta, _ := json.Marshal(instance.Meta)
 	_, err := s.pool.Exec(ctx,
 		`UPDATE agent_instances SET tenant_id = NULLIF($1,''), name = NULLIF($2,''), status = $3,
-		 default_session_id = NULLIF($4,''), updated_at = now(), meta = $5 WHERE id = $6`,
-		instance.TenantID, instance.Name, instance.Status, instance.DefaultSessionID, meta, instance.ID)
+		 default_session_id = NULLIF($4,''), current_job_id = NULLIF($5,''), behavior_id = NULLIF($6,''), updated_at = now(), meta = $7 WHERE id = $8`,
+		instance.TenantID, instance.Name, instance.Status, instance.DefaultSessionID, instance.CurrentJobID, instance.BehaviorID, meta, instance.ID)
+	return err
+}
+
+// UpdateCurrentJob 实现 AgentInstanceStore；仅更新 current_job_id（design/plan.md Phase B）
+func (s *StorePg) UpdateCurrentJob(ctx context.Context, agentID, currentJobID string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE agent_instances SET current_job_id = NULLIF($1,''), updated_at = now() WHERE id = $2`,
+		currentJobID, agentID)
 	return err
 }
 
 func (s *StorePg) ListByTenant(ctx context.Context, tenantID string, limit int) ([]*AgentInstance, error) {
 	q := `SELECT id, COALESCE(tenant_id,''), COALESCE(name,''), status, COALESCE(default_session_id,''),
-	      created_at, updated_at, COALESCE(meta, '{}'::jsonb) FROM agent_instances`
+	      COALESCE(current_job_id,''), COALESCE(behavior_id,''), created_at, updated_at, COALESCE(meta, '{}'::jsonb) FROM agent_instances`
 	args := []any{}
 	if tenantID != "" {
 		q += ` WHERE tenant_id = $1`
@@ -149,10 +159,10 @@ func (s *StorePg) ListByTenant(ctx context.Context, tenantID string, limit int) 
 	defer rows.Close()
 	var out []*AgentInstance
 	for rows.Next() {
-		var id, tID, name, status, defaultSessionID string
+		var id, tID, name, status, defaultSessionID, currentJobID, behaviorID string
 		var createdAt, updatedAt time.Time
 		var meta []byte
-		if err := rows.Scan(&id, &tID, &name, &status, &defaultSessionID, &createdAt, &updatedAt, &meta); err != nil {
+		if err := rows.Scan(&id, &tID, &name, &status, &defaultSessionID, &currentJobID, &behaviorID, &createdAt, &updatedAt, &meta); err != nil {
 			return nil, err
 		}
 		inst := &AgentInstance{
@@ -161,6 +171,8 @@ func (s *StorePg) ListByTenant(ctx context.Context, tenantID string, limit int) 
 			Name:             name,
 			Status:           status,
 			DefaultSessionID: defaultSessionID,
+			CurrentJobID:     currentJobID,
+			BehaviorID:       behaviorID,
 			CreatedAt:        createdAt,
 			UpdatedAt:        updatedAt,
 		}

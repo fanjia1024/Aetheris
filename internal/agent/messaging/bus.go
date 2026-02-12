@@ -30,4 +30,6 @@ type InboxReader interface {
 	PeekInbox(ctx context.Context, agentID string, limit int) ([]*Message, error)
 	ConsumeInbox(ctx context.Context, agentID string, limit int) ([]*Message, error)
 	MarkConsumed(ctx context.Context, messageID, jobID string) error
+	// ListAgentIDsWithUnconsumedMessages 返回有未消费消息的 agent_id 列表，供 inbox 驱动创建 Job（design/plan.md Phase A）
+	ListAgentIDsWithUnconsumedMessages(ctx context.Context, limit int) ([]string, error)
 }
