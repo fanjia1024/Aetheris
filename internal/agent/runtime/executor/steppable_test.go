@@ -132,3 +132,41 @@ func TestTopoOrder_Cycle(t *testing.T) {
 		t.Errorf("expected nil order on cycle, got %v", order)
 	}
 }
+
+func TestLevelGroups_Diamond(t *testing.T) {
+	//   a (level 0)
+	//  / \
+	// b   c (level 1)
+	//  \ /
+	//   d (level 2)
+	g := &planner.TaskGraph{
+		Nodes: []planner.TaskNode{
+			{ID: "a", Type: "llm"},
+			{ID: "b", Type: "llm"},
+			{ID: "c", Type: "llm"},
+			{ID: "d", Type: "llm"},
+		},
+		Edges: []planner.TaskEdge{
+			{From: "a", To: "b"},
+			{From: "a", To: "c"},
+			{From: "b", To: "d"},
+			{From: "c", To: "d"},
+		},
+	}
+	groups, err := LevelGroups(g)
+	if err != nil {
+		t.Fatalf("LevelGroups: %v", err)
+	}
+	if len(groups) != 3 {
+		t.Fatalf("expected 3 levels, got %d: %v", len(groups), groups)
+	}
+	if len(groups[0]) != 1 || groups[0][0] != "a" {
+		t.Errorf("level 0 want [a], got %v", groups[0])
+	}
+	if len(groups[1]) != 2 {
+		t.Errorf("level 1 want 2 nodes (b,c), got %v", groups[1])
+	}
+	if len(groups[2]) != 1 || groups[2][0] != "d" {
+		t.Errorf("level 2 want [d], got %v", groups[2])
+	}
+}

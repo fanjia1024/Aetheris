@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -164,6 +165,8 @@ type Runner struct {
 	replayBuilder     replay.ReplayContextBuilder
 	replayPolicy      replaysandbox.ReplayPolicy // 可选；Replay 时按策略决定执行或注入
 	stepTimeout       time.Duration              // 可选；单步最大执行时间，超时按 retryable_failure（design/scheduler-correctness.md Step timeout）
+	stepValidators    []StepValidator            // 可选；Step Contract 2.0 校验（design/step-contract.md）
+	maxParallelSteps  int                        // 可选；>0 时同层节点可并行执行（design/dag-parallel-execution.md），0=仅顺序
 }
 
 // NewRunner 创建 Runner（仅编译与单次 Invoke）
@@ -200,6 +203,232 @@ func (r *Runner) SetReplayPolicy(p replaysandbox.ReplayPolicy) {
 // SetStepTimeout 设置单步最大执行时间；超时后该步按 retryable_failure 处理（design/scheduler-correctness.md）
 func (r *Runner) SetStepTimeout(d time.Duration) {
 	r.stepTimeout = d
+}
+
+// SetStepValidators 设置 Step Contract 校验器（可选）；任一返回错误则视为契约违反，步标记为 permanent_failure（design/step-contract.md § StepValidator 2.0）
+func (r *Runner) SetStepValidators(vs ...StepValidator) {
+	r.stepValidators = nil
+	if len(vs) > 0 {
+		r.stepValidators = make([]StepValidator, len(vs))
+		copy(r.stepValidators, vs)
+	}
+}
+
+// runStepValidators 调用所有已注册的 StepValidator，返回第一个错误
+func (r *Runner) runStepValidators(ctx context.Context, jobID, stepID, nodeID, nodeType string, runInSandbox func(context.Context) error) error {
+	for _, v := range r.stepValidators {
+		if v == nil {
+			continue
+		}
+		req := StepValidationRequest{JobID: jobID, StepID: stepID, NodeID: nodeID, NodeType: nodeType, RunInSandbox: runInSandbox}
+		if err := v.ValidateStep(ctx, req); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SetMaxParallelSteps 设置同层最大并行步数；0=仅顺序执行，>0 时同层节点可并行（design/dag-parallel-execution.md）
+func (r *Runner) SetMaxParallelSteps(n int) {
+	if n < 0 {
+		n = 0
+	}
+	r.maxParallelSteps = n
+}
+
+// nextRunnableBatch 返回下一可执行步的索引列表（同层或单步）。completedSet 的 key 为 effectiveStepID。
+// 若 levelGroups 为 nil 则按顺序返回第一个未完成的步。
+func (r *Runner) nextRunnableBatch(steps []SteppableStep, levelGroups [][]string, completedSet map[string]struct{}, jobID, decisionID string) []int {
+	nodeToIndex := make(map[string]int)
+	for i, s := range steps {
+		nodeToIndex[s.NodeID] = i
+	}
+	if levelGroups != nil && r.maxParallelSteps > 0 {
+		for _, level := range levelGroups {
+			var indices []int
+			for _, nodeID := range level {
+				idx, ok := nodeToIndex[nodeID]
+				if !ok {
+					continue
+				}
+				effectiveStepID := DeterministicStepID(jobID, decisionID, idx, steps[idx].NodeType)
+				if _, done := completedSet[effectiveStepID]; !done {
+					indices = append(indices, idx)
+				}
+			}
+			if len(indices) > 0 {
+				return indices
+			}
+		}
+		return nil
+	}
+	// Sequential: first incomplete step
+	for i := range steps {
+		effectiveStepID := DeterministicStepID(jobID, decisionID, i, steps[i].NodeType)
+		if _, done := completedSet[effectiveStepID]; !done {
+			return []int{i}
+		}
+	}
+	return nil
+}
+
+// runParallelLevel runs all steps in batch in parallel, merges payload.Results, writes events, updates completedSet and cursor. See design/dag-parallel-execution.md.
+func (r *Runner) runParallelLevel(
+	ctx context.Context, j *JobForRunner, steps []SteppableStep, batch []int, taskGraph *planner.TaskGraph,
+	payload *AgentDAGPayload, agent *runtime.Agent, replayCtx *replay.ReplayContext, completedSet map[string]struct{},
+	graphBytes []byte, runLoopDecisionID, sessionID string,
+) error {
+	type result struct {
+		idx     int
+		payload *AgentDAGPayload
+		err     error
+	}
+	runCtx := WithJobID(ctx, j.ID)
+	runCtx = WithAgent(runCtx, agent)
+	if replayCtx != nil && len(replayCtx.CompletedToolInvocations) > 0 {
+		runCtx = WithCompletedToolInvocations(runCtx, replayCtx.CompletedToolInvocations)
+	}
+	if replayCtx != nil && len(replayCtx.PendingToolInvocations) > 0 {
+		runCtx = WithPendingToolInvocations(runCtx, replayCtx.PendingToolInvocations)
+	}
+	if replayCtx != nil && len(replayCtx.StateChangesByStep) > 0 {
+		m := make(map[string][]StateChangeForVerify)
+		for nodeID, recs := range replayCtx.StateChangesByStep {
+			for _, rec := range recs {
+				m[nodeID] = append(m[nodeID], StateChangeForVerify{ResourceType: rec.ResourceType, ResourceID: rec.ResourceID, Operation: rec.Operation, ExternalRef: rec.ExternalRef})
+			}
+		}
+		runCtx = WithStateChangesByStep(runCtx, m)
+	}
+	if replayCtx != nil && len(replayCtx.ApprovedCorrelationKeys) > 0 {
+		runCtx = WithApprovedCorrelationKeys(runCtx, replayCtx.ApprovedCorrelationKeys)
+	}
+
+	// NodeStarted for each step (deterministic order by node ID)
+	nodeIDsForBatch := make([]string, 0, len(batch))
+	for _, idx := range batch {
+		nodeIDsForBatch = append(nodeIDsForBatch, steps[idx].NodeID)
+	}
+	sort.Strings(nodeIDsForBatch)
+	for _, nodeID := range nodeIDsForBatch {
+		if r.nodeEventSink != nil {
+			_ = r.nodeEventSink.AppendNodeStarted(ctx, j.ID, nodeID, 1, "")
+		}
+	}
+	ch := make(chan result, len(batch))
+	for _, idx := range batch {
+		idx := idx
+		step := steps[idx]
+		effectiveStepID := DeterministicStepID(j.ID, runLoopDecisionID, idx, step.NodeType)
+		stepCtx := WithExecutionStepID(runCtx, effectiveStepID)
+		if replayCtx != nil {
+			stepCtx = runtime.WithClock(stepCtx, runtime.ReplayClock(j.ID, effectiveStepID))
+			stepCtx = runtime.WithRNG(stepCtx, runtime.ReplayRNG(j.ID, effectiveStepID))
+		} else {
+			stepCtx = runtime.WithClock(stepCtx, func() time.Time { return time.Now() })
+		}
+		if r.stepTimeout > 0 {
+			var cancel context.CancelFunc
+			stepCtx, cancel = context.WithTimeout(stepCtx, r.stepTimeout)
+			defer cancel()
+		}
+		payloadCopy := &AgentDAGPayload{Goal: payload.Goal, AgentID: payload.AgentID, SessionID: payload.SessionID, Results: make(map[string]any)}
+		for k, v := range payload.Results {
+			payloadCopy.Results[k] = v
+		}
+		s, sCtx, eid := step, stepCtx, effectiveStepID
+		go func() {
+			var runErr error
+			if len(r.stepValidators) > 0 {
+				runErr = r.runStepValidators(sCtx, j.ID, eid, s.NodeID, s.NodeType, nil)
+			}
+			if runErr == nil {
+				_, runErr = s.Run(sCtx, payloadCopy)
+			}
+			ch <- result{idx: idx, payload: payloadCopy, err: runErr}
+		}()
+	}
+	var firstErr error
+	var failedIdx int
+	results := make([]result, 0, len(batch))
+	for range batch {
+		res := <-ch
+		results = append(results, res)
+		if res.err != nil && firstErr == nil {
+			firstErr = res.err
+			failedIdx = res.idx
+		}
+	}
+	if firstErr != nil {
+		step := steps[failedIdx]
+		effectiveStepID := DeterministicStepID(j.ID, runLoopDecisionID, failedIdx, step.NodeType)
+		resultType, reason := ClassifyError(firstErr)
+		if errors.Is(firstErr, context.DeadlineExceeded) {
+			resultType = StepResultRetryableFailure
+			reason = "step timeout"
+		}
+		if r.nodeEventSink != nil {
+			_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, []byte("{}"), 0, string(resultType), 1, resultType, reason, effectiveStepID, "")
+		}
+		_ = r.jobStore.UpdateStatus(ctx, j.ID, 3)
+		return fmt.Errorf("executor: 节点 %s 并行执行失败: %w", step.NodeID, firstErr)
+	}
+	// Merge results (deterministic order by node ID)
+	nodeIDs := make([]string, 0, len(batch))
+	for _, res := range results {
+		nodeIDs = append(nodeIDs, steps[res.idx].NodeID)
+	}
+	sort.Strings(nodeIDs)
+	for _, nodeID := range nodeIDs {
+		for _, res := range results {
+			if steps[res.idx].NodeID != nodeID {
+				continue
+			}
+			if v, ok := res.payload.Results[nodeID]; ok {
+				if payload.Results == nil {
+					payload.Results = make(map[string]any)
+				}
+				payload.Results[nodeID] = v
+			}
+			break
+		}
+	}
+	// NodeFinished for each (sorted by node ID)
+	payloadResultsMerged, _ := json.Marshal(payload.Results)
+	for _, nodeID := range nodeIDs {
+		for _, res := range results {
+			if steps[res.idx].NodeID != nodeID {
+				continue
+			}
+			step := steps[res.idx]
+			effectiveStepID := DeterministicStepID(j.ID, runLoopDecisionID, res.idx, step.NodeType)
+			rt := StepResultPure
+			if step.NodeType == "tool" {
+				rt = StepResultSideEffectCommitted
+			}
+			if r.nodeEventSink != nil {
+				_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResultsMerged, 0, "ok", 1, rt, "", effectiveStepID, "")
+			}
+			if completedSet != nil {
+				completedSet[effectiveStepID] = struct{}{}
+			}
+			break
+		}
+	}
+	payloadResults, _ := json.Marshal(payload.Results)
+	lastIdx := results[len(results)-1].idx
+	lastNodeID := steps[lastIdx].NodeID
+	cp := runtime.NewNodeCheckpoint(agent.ID, sessionID, j.ID, lastNodeID, graphBytes, payloadResults, nil)
+	cpID, saveErr := r.checkpointStore.Save(ctx, cp)
+	if saveErr != nil {
+		_ = r.jobStore.UpdateStatus(ctx, j.ID, 3)
+		return fmt.Errorf("executor: 保存 checkpoint 失败: %w", saveErr)
+	}
+	if agent.Session != nil {
+		agent.Session.SetLastCheckpoint(cpID)
+	}
+	_ = r.jobStore.UpdateCursor(ctx, j.ID, cpID)
+	return nil
 }
 
 // Run 执行单轮：通过 Agent 的 Planner 得到 TaskGraph，编译为 DAG 并执行
@@ -413,7 +642,14 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 		defer cancel()
 	}
 	var runErr error
-	payload, runErr = step.Run(runCtx, payload)
+	if len(r.stepValidators) > 0 {
+		if err := r.runStepValidators(runCtx, jobID, effectiveStepID, step.NodeID, step.NodeType, nil); err != nil {
+			runErr = err
+		}
+	}
+	if runErr == nil {
+		payload, runErr = step.Run(runCtx, payload)
+	}
 	durationMs := time.Since(stepStart).Milliseconds()
 	resultType, reason := ClassifyError(runErr)
 	if runErr != nil && errors.Is(runErr, context.DeadlineExceeded) {
@@ -596,7 +832,27 @@ runLoop:
 	const statusWaiting = 5   // 对应 job.StatusWaiting（design/job-state-machine.md）
 	graphBytes, _ := taskGraph.Marshal()
 	runLoopDecisionID := PlanDecisionID(graphBytes)
-	for i := startIndex; i < len(steps); i++ {
+	levelGroups, _ := LevelGroups(taskGraph)
+	for {
+		batch := r.nextRunnableBatch(steps, levelGroups, completedSet, j.ID, runLoopDecisionID)
+		if len(batch) == 0 {
+			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusCompleted)
+			return nil
+		}
+		hasWait := false
+		for _, idx := range batch {
+			if steps[idx].NodeType == planner.NodeWait {
+				hasWait = true
+				break
+			}
+		}
+		if len(batch) > 1 && r.maxParallelSteps > 0 && !hasWait {
+			if err := r.runParallelLevel(ctx, j, steps, batch, taskGraph, payload, agent, replayCtx, completedSet, graphBytes, runLoopDecisionID, sessionID); err != nil {
+				return err
+			}
+			continue
+		}
+		i := batch[0]
 		step := steps[i]
 		effectiveStepID := DeterministicStepID(j.ID, runLoopDecisionID, i, step.NodeType)
 		ctx = WithExecutionStepID(ctx, effectiveStepID)
@@ -776,7 +1032,14 @@ runLoop:
 			defer cancel()
 		}
 		var runErr error
-		payload, runErr = step.Run(runCtx, payload)
+		if len(r.stepValidators) > 0 {
+			if err := r.runStepValidators(runCtx, j.ID, effectiveStepID, step.NodeID, step.NodeType, nil); err != nil {
+				runErr = err
+			}
+		}
+		if runErr == nil {
+			payload, runErr = step.Run(runCtx, payload)
+		}
 		durationMs := time.Since(stepStart).Milliseconds()
 		var capReq *CapabilityRequiresApproval
 		if errors.As(runErr, &capReq) && capReq != nil {
@@ -879,8 +1142,6 @@ runLoop:
 			agent.Session.SetLastCheckpoint(cpID)
 		}
 		_ = r.jobStore.UpdateCursor(ctx, j.ID, cpID)
+		continue
 	}
-
-	_ = r.jobStore.UpdateStatus(ctx, j.ID, statusCompleted)
-	return nil
 }

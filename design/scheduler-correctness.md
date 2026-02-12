@@ -49,3 +49,13 @@ Replay/恢复时：若事件流无 command_committed 但 Effect Store 有该 ste
 - **当前**：Job 租约 + attempt_id + Reclaim 以 event store 为准 + Append 校验。见 [internal/runtime/jobstore/store.go](../internal/runtime/jobstore/store.go)、[internal/agent/job/reclaim.go](../internal/agent/job/reclaim.go)。
 - **P2**：Lease fencing 已实现（Ledger Commit + AttemptValidator）；Step timeout 已实现最小可用（Runner.StepTimeout，超时按 retryable_failure）；Step heartbeat（可选）、Worker epoch 文档与必要时校验。见 [internal/agent/runtime/executor/runner.go](../internal/agent/runtime/executor/runner.go) StepTimeout 与 runLoop 内 WithTimeout。
 - **两步提交**：Effect Store 接口与内存实现见 [internal/agent/runtime/executor/effect_store.go](../internal/agent/runtime/executor/effect_store.go)；Adapter 先 PutEffect 再 Append，runNode 内 Effect Store catch-up 见 [node_adapter.go](../internal/agent/runtime/executor/node_adapter.go)。
+
+## Lease fencing 强制范围
+
+以下写操作均在「当前 job 租约持有者」下执行，否则被拒绝或由约定保证不写入：
+
+| 写操作 | 强制方式 |
+|--------|----------|
+| **事件 Append** | Event store 层按 attempt_id 校验；非当前 attempt 返回 `ErrStaleAttempt`。 |
+| **Ledger Commit** | InvocationLedger 可选配置 `AttemptValidator`；Commit 前校验 context 中 job 的 attempt 仍为当前持有者（[ledger_store.go](../internal/agent/runtime/executor/ledger_store.go)）。 |
+| **Cursor 更新** | Runner 仅由持有该 job 租约的 Worker 调用（Worker 在 ClaimJob 成功后执行 RunForJob）；失去租约的 Worker 必须停止执行并不再调用 Runner，因此 UpdateCursor 仅在租约有效时发生。JobStore 接口未扩展 attempt_id 参数，依赖 Worker 契约。 |

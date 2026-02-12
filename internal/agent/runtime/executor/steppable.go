@@ -81,6 +81,56 @@ func TopoOrder(g *planner.TaskGraph) ([]string, error) {
 	return order, nil
 }
 
+// LevelGroups returns node IDs grouped by topological level (level 0 = no predecessors).
+// Each group is sorted by node ID for deterministic merge. See design/dag-parallel-execution.md.
+func LevelGroups(g *planner.TaskGraph) ([][]string, error) {
+	order, err := TopoOrder(g)
+	if err != nil {
+		return nil, err
+	}
+	if len(order) == 0 {
+		return nil, nil
+	}
+	nodeSet := make(map[string]struct{})
+	for i := range g.Nodes {
+		nodeSet[g.Nodes[i].ID] = struct{}{}
+	}
+	preds := make(map[string][]string)
+	for _, e := range g.Edges {
+		if _, ok := nodeSet[e.To]; ok {
+			preds[e.To] = append(preds[e.To], e.From)
+		}
+	}
+	levelOf := make(map[string]int)
+	for _, id := range order {
+		if len(preds[id]) == 0 {
+			levelOf[id] = 0
+			continue
+		}
+		maxL := 0
+		for _, p := range preds[id] {
+			if levelOf[p]+1 > maxL {
+				maxL = levelOf[p] + 1
+			}
+		}
+		levelOf[id] = maxL
+	}
+	maxLevel := 0
+	for _, l := range levelOf {
+		if l > maxLevel {
+			maxLevel = l
+		}
+	}
+	groups := make([][]string, maxLevel+1)
+	for id, l := range levelOf {
+		groups[l] = append(groups[l], id)
+	}
+	for i := range groups {
+		sort.Strings(groups[i])
+	}
+	return groups, nil
+}
+
 // CompileSteppable 将 TaskGraph 编译为按拓扑序的 SteppableStep 列表，供逐节点执行与 checkpoint
 func (c *Compiler) CompileSteppable(ctx context.Context, g *planner.TaskGraph, agent *runtime.Agent) ([]SteppableStep, error) {
 	if g == nil || len(g.Nodes) == 0 {

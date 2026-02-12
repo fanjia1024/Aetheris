@@ -14,6 +14,17 @@ This document explains what Aetheris guarantees in normal and failure scenarios.
 | **Signal sent** | At-least-once (write wait_completed → Job scheduled) | WakeupQueue for multi-worker |
 | **Checkpoint saved** | After each step; crash recovery from latest Checkpoint | CheckpointStore configured |
 
+### DAG parallel execution (2.0)
+
+When **max parallel steps** is configured (> 0), steps in the same topological level may run in parallel on a single worker. See [design/dag-parallel-execution.md](../design/dag-parallel-execution.md).
+
+| Aspect | Behavior |
+|--------|----------|
+| **Max concurrency** | Configurable per Runner (`SetMaxParallelSteps(n)`); 0 = sequential (default). |
+| **Failure** | If any step in a level fails, the level is failed; the job is marked failed and no results from that level are committed. Other in-flight steps in the level are effectively canceled (context). |
+| **Replay / determinism** | Results are merged by node ID in sorted order; NodeStarted/NodeFinished are written in deterministic order. Replay and checkpoint semantics remain the same. |
+| **Wait nodes** | Levels that contain a Wait node are run sequentially (one step at a time) so Wait semantics are unchanged. |
+
 ---
 
 ## Failure Scenarios

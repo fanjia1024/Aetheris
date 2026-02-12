@@ -213,6 +213,13 @@ The runtime package provides helpers so steps can use a replay-safe clock and RN
 
 Context keys and injection are in `internal/agent/runtime/contract.go`. The Runner injects the clock (and in replay, the RNG) before calling `step.Run`. Steps that use only these helpers and Tools satisfy the contract for deterministic replay.
 
+**StepValidator (2.0)** — Optional pluggable validation can check that a step does not violate the contract (no direct `time.Now`, `rand.*`, or `net/http` in step code). The interface is defined in `internal/agent/runtime/executor/validator.go`:
+
+- **`StepValidator.ValidateStep(ctx, req)`** — `req` carries jobID, stepID, nodeID, nodeType and an optional `RunInSandbox(ctx) error` closure. Implementations may run the step in a sandbox (e.g. with detectors for forbidden calls) or use static analysis; recommend test-time use first to avoid slowing production.
+- The Runner can register one or more validators via `Runner.SetStepValidators(...)`; if any validator returns an error before a step runs, the step is treated as a contract violation (e.g. permanent failure). When no validators are set, behavior is unchanged.
+
+See § StepValidator (2.0) below for details.
+
 ---
 
 ### ✅ 3. Memory 读取必须纯函数式
@@ -420,6 +427,62 @@ func TestToolAtMostOnce(t *testing.T) {
     require.Equal(t, 1, callCount, "Tool must execute at-most-once")
 }
 ```
+
+---
+
+## StepValidator (2.0)
+
+Optional pre-step or test-time check that a step does not violate the contract (no direct `time.Now`, `rand.*`, or `net/http` in step code).
+
+### Interface
+
+Defined in `internal/agent/runtime/executor/validator.go`:
+
+```go
+type StepValidator interface {
+    ValidateStep(ctx context.Context, req StepValidationRequest) error
+}
+
+type StepValidationRequest struct {
+    JobID, StepID, NodeID, NodeType string
+    RunInSandbox func(ctx context.Context) error  // optional: run step in sandbox to detect forbidden calls
+}
+```
+
+### Semantics
+
+- **Purpose**: Catch contract violations before they cause non-deterministic replay or duplicate side effects.
+- **Run in sandbox**: If the validator has access to the step closure, it can run it in a context where `time.Now`, `rand.Intn`, and `http.DefaultClient` are wrapped; if the step calls them, the validator returns an error. This is recommended for tests first; production may leave validators unset.
+- **Static analysis**: A validator could instead accept source or AST and reject forbidden symbols; not required for 2.0.
+- **Optional**: When no validators are registered, the Runner behaves as today (no validation).
+
+### Default validator implementations
+
+- **NoOpValidator** (`executor.NoOpValidator`): Always returns nil. Use when validation is disabled (e.g. production).
+- **SandboxRunValidator** (`executor.NewSandboxRunValidator()`): When the Runner passes `RunInSandbox`, runs the step inside the validator; useful for test-time validators that run the step with a custom context (e.g. detector Clock/RNG). Detection of direct `time.Now`/`rand.*`/`net/http` from inside step code requires running the step in an environment where those are wrapped (e.g. in tests, replace them in the step’s package or use a test double). See `internal/agent/runtime/executor/validator.go` and `contract_test.go`.
+- **ErrContractViolation**: Sentinal error (`executor.ErrContractViolation`) for contract violations.
+
+### Usage
+
+- Register validators on the Runner via `SetStepValidators(...)`. Before each step run, the Runner calls each validator; if any returns an error, the step is not executed and the job can be marked failed (contract violation).
+- Use `runtime.Clock(ctx)` and `runtime.RandIntn(ctx, n)` and Tools so that steps pass validation and remain deterministic on replay.
+
+---
+
+## Async event handling (2.0)
+
+Steps may emit **async events** (e.g. "request sent", "approval requested") that are recorded and replayed without re-executing the step.
+
+### Contract
+
+- **Recording**: When a step calls `EmitAsyncEvent(ctx, name, payload)`, the runtime appends the event to the trace (if a sink is configured). Events are tied to the current job and step (from context).
+- **Replay**: On replay, the runner does not re-execute the step; it may replay previously recorded async events for trace consistency. Idempotency: handlers that process these events (e.g. webhooks) must use the same idempotency key as the step (job_id + step_id + attempt_id) so duplicate events do not cause duplicate side effects.
+- **Relation to command_committed**: Async events are informational; at-most-once for side effects is still enforced via Tool + Ledger and `command_committed`. Async events do not replace the need for Tools for external calls.
+
+### Helpers
+
+- **Context key**: An async event sink can be attached to context (e.g. `WithAsyncEventSink(ctx, sink)`). Steps call `runtime.EmitAsyncEvent(ctx, name, payload)`; if no sink is set, it no-ops.
+- Implementation: small helper in `pkg/effects` or `internal/agent/runtime`; Runner wires the sink when building the run context if trace/audit is enabled.
 
 ---
 

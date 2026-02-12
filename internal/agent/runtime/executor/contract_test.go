@@ -88,3 +88,28 @@ func TestStepContract_ReplayVsLive(t *testing.T) {
 		t.Errorf("payload results must be JSON-serializable: %v", err)
 	}
 }
+
+// TestStepContract_ValidatorPassesForCompliantStep verifies that a step using only
+// runtime.Clock(ctx) and runtime.RandIntn(ctx, n) passes when validated by NoOpValidator
+// and by a validator that runs RunInSandbox (sandbox runs the same step and returns nil).
+func TestStepContract_ValidatorPassesForCompliantStep(t *testing.T) {
+	ctx := context.Background()
+	ctx = runtime.WithClock(ctx, runtime.ReplayClock("j1", "s1"))
+	ctx = runtime.WithRNG(ctx, runtime.ReplayRNG("j1", "s1"))
+
+	req := StepValidationRequest{
+		JobID: "j1", StepID: "s1", NodeID: "n1", NodeType: "llm",
+		RunInSandbox: func(ctx context.Context) error {
+			p := &AgentDAGPayload{Results: make(map[string]any)}
+			_, err := stepUsingContractHelpers(ctx, p)
+			return err
+		},
+	}
+	if err := NoOpValidator.ValidateStep(ctx, req); err != nil {
+		t.Errorf("NoOpValidator must pass: %v", err)
+	}
+	sandboxV := NewSandboxRunValidator()
+	if err := sandboxV.ValidateStep(ctx, req); err != nil {
+		t.Errorf("SandboxRunValidator with compliant step must pass: %v", err)
+	}
+}
