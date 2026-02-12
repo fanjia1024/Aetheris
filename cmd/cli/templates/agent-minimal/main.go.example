@@ -1,0 +1,45 @@
+// Minimal agent example (rename to main.go and adapt).
+// See docs/getting-started-agents.md for a full refund-approval agent with
+// TaskGraph, tools, wait node, and signal.
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/cloudwego/eino-ext/components/model/openai"
+	"github.com/cloudwego/eino/adk"
+)
+
+func main() {
+	ctx := context.Background()
+	chatModel, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
+		Model:  "gpt-4o",
+		APIKey: os.Getenv("OPENAI_API_KEY"),
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "NewChatModel: %v\n", err)
+		os.Exit(1)
+	}
+	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{Model: chatModel})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "NewChatModelAgent: %v\n", err)
+		os.Exit(1)
+	}
+	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent})
+	iter := runner.Query(ctx, "Hello")
+	for {
+		event, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if event.Err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", event.Err)
+			continue
+		}
+		if event.Output != nil && event.Output.MessageOutput != nil && event.Output.MessageOutput.Message != nil {
+			fmt.Println(event.Output.MessageOutput.Message.Content)
+		}
+	}
+}

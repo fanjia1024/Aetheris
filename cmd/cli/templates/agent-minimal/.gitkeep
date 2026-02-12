@@ -1,0 +1,1 @@
+# Ensures this directory is embedded by go:embed in cmd/cli/main.go so "go build ./..." succeeds.

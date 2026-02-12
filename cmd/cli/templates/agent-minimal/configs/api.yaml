@@ -1,0 +1,32 @@
+# Minimal API config for Aetheris (scaffolded by aetheris init)
+api:
+  port: 8080
+  host: "0.0.0.0"
+
+jobstore:
+  type: "memory"
+  lease_duration: "30s"
+
+agent:
+  job_scheduler:
+    enabled: true
+    max_concurrency: 2
+    retry_max: 2
+    backoff: "1s"
+  adk:
+    checkpoint_store: "memory"
+
+storage:
+  metadata:
+    type: "memory"
+  vector:
+    type: "memory"
+    collection: "default"
+  object:
+    type: "memory"
+  cache:
+    type: "memory"
+
+log:
+  level: "info"
+  format: "json"
