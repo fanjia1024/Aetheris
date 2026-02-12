@@ -119,6 +119,8 @@ type NodeEventSink interface {
 	AppendNodeStarted(ctx context.Context, jobID string, nodeID string, attempt int, workerID string) error
 	// AppendNodeFinished 写入 node_finished；stepID 为空时用 nodeID；inputHash 非空时写入 payload 供 Replay 确定性判定（plan 3.3）
 	AppendNodeFinished(ctx context.Context, jobID string, nodeID string, payloadResults []byte, durationMs int64, state string, attempt int, resultType StepResultType, reason string, stepID string, inputHash string) error
+	// AppendStepCommitted 写入 step_committed，显式 step 提交屏障（2.0 Exactly-Once）；顺序为 command_committed → node_finished → step_committed
+	AppendStepCommitted(ctx context.Context, jobID string, nodeID string, stepID string, commandID string, idempotencyKey string) error
 	AppendStateCheckpointed(ctx context.Context, jobID string, nodeID string, stateBefore, stateAfter []byte, opts *StateCheckpointOpts) error
 	AppendJobWaiting(ctx context.Context, jobID string, nodeID string, waitKind, reason string, expiresAt time.Time, correlationKey string, resumptionContext []byte) error
 	// AppendReasoningSnapshot 写入 reasoning_snapshot 事件，供因果调试（design：Causal Debugging）
@@ -412,6 +414,7 @@ func (r *Runner) runParallelLevel(
 			}
 			if r.nodeEventSink != nil {
 				_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResultsMerged, 0, "ok", 1, rt, "", effectiveStepID, "")
+				_ = r.nodeEventSink.AppendStepCommitted(ctx, j.ID, step.NodeID, effectiveStepID, effectiveStepID, "")
 			}
 			if completedSet != nil {
 				completedSet[effectiveStepID] = struct{}{}
@@ -557,6 +560,7 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 						rt = StepResultSideEffectCommitted
 					}
 					_ = r.nodeEventSink.AppendNodeFinished(ctx, jobID, step.NodeID, payloadResults, 0, "", 0, rt, "", effectiveStepID, "")
+					_ = r.nodeEventSink.AppendStepCommitted(ctx, jobID, step.NodeID, effectiveStepID, commandID, "")
 				}
 				cp := runtime.NewNodeCheckpoint(agent.ID, sessionID, jobID, step.NodeID, graphBytes, payloadResults, nil)
 				cpID, saveErr := r.checkpointStore.Save(ctx, cp)
@@ -592,6 +596,7 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 						rt = StepResultSideEffectCommitted
 					}
 					_ = r.nodeEventSink.AppendNodeFinished(ctx, jobID, step.NodeID, payloadResults, 0, "", 0, rt, "", effectiveStepID, "")
+					_ = r.nodeEventSink.AppendStepCommitted(ctx, jobID, step.NodeID, effectiveStepID, commandID, "")
 				}
 				cp := runtime.NewNodeCheckpoint(agent.ID, sessionID, jobID, step.NodeID, graphBytes, payloadResults, nil)
 				cpID, saveErr := r.checkpointStore.Save(ctx, cp)
@@ -677,6 +682,7 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 			stateStr = string(resultType)
 		}
 		_ = r.nodeEventSink.AppendNodeFinished(ctx, jobID, step.NodeID, payloadResults, durationMs, stateStr, 1, resultType, reason, effectiveStepID, "")
+		_ = r.nodeEventSink.AppendStepCommitted(ctx, jobID, step.NodeID, effectiveStepID, effectiveStepID, "")
 	}
 	if isStepFailure(resultType) {
 		_ = r.jobStore.UpdateStatus(ctx, jobID, statusFailed)
@@ -894,6 +900,7 @@ runLoop:
 							}
 							if r.nodeEventSink != nil {
 								_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, 0, "", 0, rt, "", effectiveStepID, "")
+								_ = r.nodeEventSink.AppendStepCommitted(ctx, j.ID, step.NodeID, effectiveStepID, commandID, "")
 							}
 							completedSet[effectiveStepID] = struct{}{}
 						}
@@ -934,6 +941,7 @@ runLoop:
 							}
 							if r.nodeEventSink != nil {
 								_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, 0, "", 0, rt, "", effectiveStepID, "")
+								_ = r.nodeEventSink.AppendStepCommitted(ctx, j.ID, step.NodeID, effectiveStepID, commandID, "")
 							}
 							completedSet[effectiveStepID] = struct{}{}
 						}
@@ -1105,6 +1113,7 @@ runLoop:
 				stateStr = string(resultType)
 			}
 			_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, payloadResults, durationMs, stateStr, 1, resultType, reason, effectiveStepID, "")
+			_ = r.nodeEventSink.AppendStepCommitted(ctx, j.ID, step.NodeID, effectiveStepID, effectiveStepID, "")
 		}
 		if isStepFailure(resultType) {
 			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)

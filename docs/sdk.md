@@ -28,7 +28,22 @@ answer, err := agent.Run(ctx, "用户问题")
 
 - [examples/sdk_agent](examples/sdk_agent) — 使用 MockRuntime 的极简示例，可直接 `go run ./examples/sdk_agent`。
 
+## Step Programming Model（2.0）
+
+编写 Step 时须遵守强约束，否则 Replay 与 at-most-once 保证失效。
+
+**允许**：纯计算、调用 Tool（经 Runtime 执行）、读 runtime state（通过 `sdk.Now(ctx)`、`sdk.UUID(ctx)`、`sdk.HTTP(ctx, ...)`、`sdk.JobID(ctx)`、`sdk.StepID(ctx)`）。
+
+**禁止**：goroutine、channel、time.Sleep、直接 `time.Now()`/`uuid.New()`/`http.Get`、裸外部 IO。
+
+- **step.go**：`StepFunc` 类型与契约说明。
+- **runtime_context.go**：`Now(ctx)`、`UUID(ctx)`、`HTTP(ctx, effectID, doRequest)`、`JobID(ctx)`、`StepID(ctx)`；Runner 通过 `WithRuntimeContext(ctx, impl)` 注入实现，Replay 时从事件注入。
+- **tool.go**：Tool 须经 Runtime 执行并记录。
+
+详见 [design/step-contract.md](../design/step-contract.md)。
+
 ## 参考
 
 - [usage.md](usage.md) — API 与 Job 流程
 - [pkg/agent](pkg/agent) — 非 SDK 的 Agent 门面（Planner + Executor + Registry）
+- [design/step-contract.md](../design/step-contract.md) — Step 语义契约

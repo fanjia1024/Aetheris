@@ -428,6 +428,9 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	}
 	jobScheduler := job.NewScheduler(jobStore, runJob, schedulerConfig)
 	handler.SetJobStore(jobStore)
+	if pgStore, ok := jobStore.(*job.JobStorePg); ok {
+		handler.SetObservabilityReader(pgStore)
+	}
 	handler.SetJobEventStore(jobEventStore)
 	handler.SetAgentStateStore(agentStateStore)
 	handler.SetToolsRegistry(toolsReg)

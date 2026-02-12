@@ -27,6 +27,17 @@ Replay 的目标是 **execution reconstruction**（从事件流重建执行状�
 
 Replay Sandbox 通过 ReplayPolicy 与 Runner 的「禁止无记录时执行 SideEffect」保证 reconstruction 语义。
 
+## Replay Safety（2.0）
+
+- **Replay 模式下禁止未记录的非确定性操作**：Step 内不得直接使用 `time.Now()`、`rand`、`uuid.New()`、`http.Get` 等；须通过 **Recorded Effects API**（`runtime.Now(ctx)`、`runtime.UUID(ctx)`、`runtime.HTTP(ctx)`）由 Runtime 记录，Replay 时仅从事件注入。参见 [internal/agent/runtime/effects](internal/agent/runtime/effects)。
+- **可选严格模式**：当启用 determinism.ReplayGuard 且 StrictReplay 为 true 时，Replay 路径下若检测到禁止操作可 **panic**（job_id/step_id 便于排查）。实现见 [internal/agent/determinism](internal/agent/determinism)。
+
+## Recorded Effects 契约
+
+- **Clock**：`effects.Now(ctx)` → 仅从 EventRecorder/Runtime 取时间；Replay 时从 `timer_fired` 事件注入。
+- **UUID**：`effects.UUID(ctx)` → 由 Runtime 生成并记录；Replay 时从 `uuid_recorded` 事件注入。
+- **HTTP**：`effects.HTTP(ctx, effectID, doRequest)` → 经 Runtime 记录请求/响应；Replay 时从 `http_recorded` 事件注入。
+
 ## 参考
 
 - [event-replay-recovery.md](event-replay-recovery.md) — 事件流恢复与 command_committed

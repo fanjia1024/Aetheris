@@ -42,6 +42,7 @@ import (
 	"rag-platform/internal/agent/planner"
 	"rag-platform/internal/agent/replay"
 	agentruntime "rag-platform/internal/agent/runtime"
+	"rag-platform/internal/agent/signal"
 	"rag-platform/internal/agent/tools"
 	appcore "rag-platform/internal/app"
 	"rag-platform/internal/model/llm"
@@ -101,6 +102,10 @@ type Handler struct {
 	planAtJobCreation func(ctx context.Context, agentID, goal string) (*planner.TaskGraph, error)
 	// wakeupQueue 可选；非 nil 时 JobSignal/JobMessage 在 UpdateStatus(Pending) 后调用 NotifyReady，供 Worker 事件驱动唤醒（design/wakeup-index）
 	wakeupQueue job.WakeupQueue
+	// signalInbox 可选；非 nil 时 JobSignal 先写 inbox 再 Append wait_completed，保证 at-least-once（design/runtime-contract.md）
+	signalInbox signal.SignalInbox
+	// observabilityReader 可选；非 nil 时提供 GET /api/observability/summary（队列积压、卡住 Job）
+	observabilityReader job.ObservabilityReader
 }
 
 // NewHandler 创建新的 HTTP 处理器
@@ -176,6 +181,16 @@ func (h *Handler) SetPlanAtJobCreation(fn func(ctx context.Context, agentID, goa
 // SetWakeupQueue 设置唤醒队列；非 nil 时 JobSignal/JobMessage 在将 Job 置为 Pending 后调用 NotifyReady，Worker 可据此立即 Claim 而非仅轮询（design/wakeup-index）
 func (h *Handler) SetWakeupQueue(q job.WakeupQueue) {
 	h.wakeupQueue = q
+}
+
+// SetSignalInbox 设置 signal 收件箱；非 nil 时 JobSignal 先写 inbox 再 Append wait_completed，保证 at-least-once 送达
+func (h *Handler) SetSignalInbox(inbox signal.SignalInbox) {
+	h.signalInbox = inbox
+}
+
+// SetObservabilityReader 设置可观测性数据源；非 nil 时提供 GET /api/observability/summary
+func (h *Handler) SetObservabilityReader(r job.ObservabilityReader) {
+	h.observabilityReader = r
 }
 
 // HealthCheck 健康检查
@@ -1322,6 +1337,16 @@ func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
 	}
 	nodeID := waitPayload.NodeID
 	payloadBytes, _ := json.Marshal(req.Payload)
+	// 2.0 at-least-once：先写持久化 inbox，再 Append wait_completed，API 崩溃不丢 signal
+	var signalID string
+	if h.signalInbox != nil {
+		signalID, err = h.signalInbox.Append(ctx, jobID, req.CorrelationKey, payloadBytes)
+		if err != nil {
+			hlog.CtxErrorf(ctx, "SignalInbox.Append: %v", err)
+			c.JSON(consts.StatusInternalServerError, map[string]string{"error": "写入 signal 收件箱失败"})
+			return
+		}
+	}
 	evPayload, _ := json.Marshal(map[string]interface{}{
 		"node_id":         nodeID,
 		"payload":         json.RawMessage(payloadBytes),
@@ -1337,6 +1362,9 @@ func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
 	}
 	if err := h.jobStore.UpdateStatus(ctx, jobID, job.StatusPending); err != nil {
 		hlog.CtxErrorf(ctx, "UpdateStatus Pending: %v", err)
+	}
+	if h.signalInbox != nil && signalID != "" {
+		_ = h.signalInbox.MarkAcked(ctx, jobID, signalID)
 	}
 	if h.wakeupQueue != nil {
 		_ = h.wakeupQueue.NotifyReady(ctx, jobID)
@@ -2000,6 +2028,43 @@ func renderTraceTreeHTML(root *ExecutionNode) string {
 	}
 	b.WriteString("</li>")
 	return b.String()
+}
+
+// GetObservabilitySummary 返回运维可观测性摘要：队列积压、卡住 Job 列表（2.0）；需 SetObservabilityReader
+func (h *Handler) GetObservabilitySummary(ctx context.Context, c *app.RequestContext) {
+	if h.observabilityReader == nil {
+		c.JSON(consts.StatusOK, map[string]interface{}{
+			"queue_backlog":           map[string]int{"default": 0},
+			"stuck_job_ids":           []string{},
+			"stuck_threshold_seconds": 3600,
+		})
+		return
+	}
+	olderThan := 1 * time.Hour
+	if s := c.Query("older_than"); s != "" {
+		if d, err := time.ParseDuration(s); err == nil && d > 0 {
+			olderThan = d
+		}
+	}
+	pending, err := h.observabilityReader.CountPending(ctx, "")
+	if err != nil {
+		hlog.CtxErrorf(ctx, "CountPending: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取积压数失败"})
+		return
+	}
+	stuck, err := h.observabilityReader.ListStuckRunningJobIDs(ctx, olderThan)
+	if err != nil {
+		hlog.CtxErrorf(ctx, "ListStuckRunningJobIDs: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取卡住 Job 失败"})
+		return
+	}
+	metrics.QueueBacklog.WithLabelValues("default").Set(float64(pending))
+	metrics.StuckJobCount.Set(float64(len(stuck)))
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"queue_backlog":           map[string]int{"default": pending},
+		"stuck_job_ids":           stuck,
+		"stuck_threshold_seconds": int(olderThan.Seconds()),
+	})
 }
 
 // ListTools 返回所有工具的 Manifest 列表（GET /api/tools）

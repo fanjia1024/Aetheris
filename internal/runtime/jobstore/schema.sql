@@ -168,3 +168,15 @@ CREATE TABLE IF NOT EXISTS agent_episodic_chunks (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_episodic_chunks_agent ON agent_episodic_chunks (agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_episodic_chunks_session ON agent_episodic_chunks (agent_id, session_id);
+
+-- Signal 收件箱（2.0 at-least-once）：JobSignal 先写此处再 Append wait_completed，API 崩溃不丢 signal
+CREATE TABLE IF NOT EXISTS signal_inbox (
+    id               TEXT PRIMARY KEY,
+    job_id           TEXT NOT NULL,
+    correlation_key  TEXT NOT NULL,
+    payload          JSONB NOT NULL DEFAULT '{}',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    acked_at         TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_signal_inbox_job_id ON signal_inbox (job_id);
+CREATE INDEX IF NOT EXISTS idx_signal_inbox_acked ON signal_inbox (job_id) WHERE acked_at IS NULL;

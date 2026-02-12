@@ -28,6 +28,11 @@ Reclaim 后再次 Claim 的 Job 会走 Replay；**安全前提**是 Effect 边�
 - **送达语义**：Signal / Message 为 **at-least-once**。一旦 `wait_completed` 已写入且 Job 已置为 Pending，该 Job 将被 Scheduler 认领并继续执行；不会丢失「已送达」的 signal。
 - **重复幂等**：同一 `correlation_key` 的 signal（或 message 解除同一等待）若被多次调用，仅第一次会追加 `wait_completed`；后续请求若发现事件流中最后一条已是 `wait_completed` 且 `correlation_key` 一致，则直接返回 200（已送达），不再追加事件，避免重复 unblock。
 
+### Durable External Interaction Model（2.0 at-least-once）
+
+- **Signal 先入持久化 inbox**：当配置 **SignalInbox** 时，JobSignal API 先调用 `SignalInbox.Append(jobID, correlationKey, payload)` 将 signal 持久化，再 Append `wait_completed` 并 UpdateStatus(Pending)。若 API 在「收到请求后、Append wait_completed 前」崩溃，signal 已落盘，可后续重试或由后台补写 wait_completed，保证「人类点击一次 → agent 一定收到」。
+- **Ack 机制**：`wait_completed` 成功写入且 Job 已置为 Pending 后，对对应 inbox 记录调用 `MarkAcked`，避免重复消费。实现见 [internal/agent/signal](../internal/agent/signal)；PG 表 `signal_inbox` 见 [internal/runtime/jobstore/schema.sql](../internal/runtime/jobstore/schema.sql)。
+
 **接口**：JobSignal / JobMessage 在 Append 前通过 `lastEventIsWaitCompletedWithCorrelationKey(events, correlationKey)` 判断并短路返回。
 
 ---

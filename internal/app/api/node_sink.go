@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"rag-platform/internal/agent/replay"
+	runtimeeffects "rag-platform/internal/agent/runtime/effects"
 	agentexec "rag-platform/internal/agent/runtime/executor"
 	"rag-platform/internal/runtime/jobstore"
 )
@@ -331,6 +332,35 @@ func (s *nodeEventSinkImpl) AppendCommandEmitted(ctx context.Context, jobID stri
 	return err
 }
 
+// AppendStepCommitted 实现 NodeEventSink；写入 step_committed 显式屏障（2.0 Exactly-Once），顺序在 node_finished 之后
+func (s *nodeEventSinkImpl) AppendStepCommitted(ctx context.Context, jobID string, nodeID string, stepID string, commandID string, idempotencyKey string) error {
+	if s.store == nil {
+		return nil
+	}
+	_, ver, err := s.store.ListEvents(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	stepIDVal := stepID
+	if stepIDVal == "" {
+		stepIDVal = nodeID
+	}
+	cmdID := commandID
+	if cmdID == "" {
+		cmdID = stepIDVal
+	}
+	pl := map[string]interface{}{"node_id": nodeID, "step_id": stepIDVal, "command_id": cmdID}
+	if idempotencyKey != "" {
+		pl["idempotency_key"] = idempotencyKey
+	}
+	payload, err := json.Marshal(pl)
+	if err != nil {
+		return err
+	}
+	_, err = s.store.Append(ctx, jobID, ver, jobstore.JobEvent{JobID: jobID, Type: jobstore.StepCommitted, Payload: payload})
+	return err
+}
+
 // AppendCommandCommitted 实现 CommandEventSink；命令执行成功后立即写入，Replay 时已提交命令永不重放；inputHash 供确定性 Replay（plan 3.3）
 func (s *nodeEventSinkImpl) AppendCommandCommitted(ctx context.Context, jobID string, nodeID string, commandID string, result []byte, inputHash string) error {
 	if s.store == nil {
@@ -490,4 +520,53 @@ func (s *nodeEventSinkImpl) AppendPlanEvolution(ctx context.Context, jobID strin
 // NewReplayContextBuilder 创建从事件流重建 ReplayContext 的 Builder（供 Runner 无 Checkpoint 时恢复）
 func NewReplayContextBuilder(store jobstore.JobStore) replay.ReplayContextBuilder {
 	return replay.NewReplayContextBuilder(store)
+}
+
+// recordedEffectsRecorderImpl 将 Recorded Effects（time/uuid/http）追加到事件流，实现 runtime/effects.RecordedEffectsRecorder
+type recordedEffectsRecorderImpl struct {
+	store jobstore.JobStore
+}
+
+// NewRecordedEffectsRecorder 创建将时间/UUID/HTTP 效应写入事件流的 Recorder；store 为 nil 时不写入
+func NewRecordedEffectsRecorder(store jobstore.JobStore) runtimeeffects.RecordedEffectsRecorder {
+	return &recordedEffectsRecorderImpl{store: store}
+}
+
+func (r *recordedEffectsRecorderImpl) RecordTime(ctx context.Context, jobID, effectID string, t time.Time) error {
+	if r.store == nil {
+		return nil
+	}
+	_, ver, err := r.store.ListEvents(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]interface{}{"effect_id": effectID, "unix_nano": t.UnixNano()})
+	_, err = r.store.Append(ctx, jobID, ver, jobstore.JobEvent{JobID: jobID, Type: jobstore.TimerFired, Payload: payload})
+	return err
+}
+
+func (r *recordedEffectsRecorderImpl) RecordUUID(ctx context.Context, jobID, effectID, uuid string) error {
+	if r.store == nil {
+		return nil
+	}
+	_, ver, err := r.store.ListEvents(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]interface{}{"effect_id": effectID, "uuid": uuid})
+	_, err = r.store.Append(ctx, jobID, ver, jobstore.JobEvent{JobID: jobID, Type: jobstore.UUIDRecorded, Payload: payload})
+	return err
+}
+
+func (r *recordedEffectsRecorderImpl) RecordHTTP(ctx context.Context, jobID, effectID string, req, resp []byte) error {
+	if r.store == nil {
+		return nil
+	}
+	_, ver, err := r.store.ListEvents(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]interface{}{"effect_id": effectID, "response": json.RawMessage(resp)})
+	_, err = r.store.Append(ctx, jobID, ver, jobstore.JobEvent{JobID: jobID, Type: jobstore.HTTPRecorded, Payload: payload})
+	return err
 }

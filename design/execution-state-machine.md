@@ -18,11 +18,22 @@ Runner 由**事件流驱动状态机推进**，保证重放时**不重跑已提�
 - **PayloadResults**：最后一条 `NodeFinished` 的 `payload_results`（累积的 payload.Results），供恢复时反序列化进 DAG payload。
 - 从 Checkpoint 恢复时，等价地构造 **completedSet**：按拓扑序 steps，从 `steps[0]` 到 `cp.CursorNode`（含）的 node_id 集合。见 [internal/agent/runtime/executor/runner.go](internal/agent/runtime/executor/runner.go) 中 Checkpoint 分支。
 
+### Step 执行状态（2.0 Step Commit Barrier）
+
+单步的显式状态：**Scheduled** → **Started** → **Completed** → **Committed**。
+
+- **Scheduled**：已纳入 Plan，尚未 NodeStarted。
+- **Started**：已写 `node_started`（及可选的 `tool_invocation_started`），执行中。
+- **Completed**：已写 `command_committed`（及可选的 `tool_invocation_finished`）与 `node_finished`。
+- **Committed**：已写 `step_committed`，表示「外部世界已确认」、Exactly-Once 屏障完成。
+
+Replay 仍以 `command_committed` / `CompletedCommandIDs` 为「是否重放」的判定；`step_committed` 为审计与运维的显式表达，便于查询「已提交步」。
+
 ## 事件顺序（副作用安全）
 
 对会产生副作用的节点（Tool/LLM/Workflow），必须满足：
 
-`command_emitted`（可选）→ 执行 → **`command_committed`**（持久化）→ `node_finished` → checkpoint。
+`command_emitted`（可选）→ 执行 → **`command_committed`**（持久化）→ `node_finished` → **`step_committed`**（显式屏障，2.0）→ checkpoint。
 
 Adapter 在 Execute 成功后**立即**写 `command_committed`，再由 Runner 写 `node_finished`。
 

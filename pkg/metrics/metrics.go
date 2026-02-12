@@ -29,6 +29,7 @@ func init() {
 		JobDuration, JobTotal, JobFailTotal,
 		ToolDuration, LLMTokensTotal,
 		WorkerBusy,
+		QueueBacklog, StuckJobCount,
 	)
 }
 
@@ -86,6 +87,23 @@ var WorkerBusy = prometheus.NewGaugeVec(
 		Help: "当前正在执行的 Job 数",
 	},
 	[]string{"worker_id"},
+)
+
+// QueueBacklog 按队列的 Pending Job 积压数（2.0 可观测性）
+var QueueBacklog = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "aetheris_queue_backlog",
+		Help: "Pending Job 积压数（按 queue 或 default）",
+	},
+	[]string{"queue"},
+)
+
+// StuckJobCount 卡住 Job 数：status=Running 且 updated_at 超过阈值的数量（2.0 Stuck Job Detector）
+var StuckJobCount = prometheus.NewGauge(
+	prometheus.GaugeOpts{
+		Name: "aetheris_stuck_job_count",
+		Help: "卡住的 Job 数（Running 且超过阈值未更新）",
+	},
 )
 
 // WritePrometheus 将 Prometheus 文本格式写入 w（供 Hertz 等复用）

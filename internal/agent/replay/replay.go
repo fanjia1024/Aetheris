@@ -51,6 +51,14 @@ type ReplayContext struct {
 	WorkingMemorySnapshot []byte
 	// Phase 由事件流推导的执行阶段（plan 3.4），用于观测与「Agent 即长期进程」表述
 	Phase ExecutionPhase
+	// RecordedTime effect_id -> 记录的时间（UnixNano）；来自 timer_fired 事件，Replay 时仅注入（2.0 确定性）
+	RecordedTime map[string]int64
+	// RecordedRandom effect_id -> 记录的随机值 JSON；来自 random_recorded 事件
+	RecordedRandom map[string][]byte
+	// RecordedUUID effect_id -> 记录的 UUID 字符串；来自 uuid_recorded 事件
+	RecordedUUID map[string]string
+	// RecordedHTTP effect_id -> 记录的 HTTP 响应 body（JSON）；来自 http_recorded 事件
+	RecordedHTTP map[string][]byte
 }
 
 // ExecutionPhase 执行阶段（可选显式状态机，plan 3.4）：由事件流推导
@@ -114,6 +122,10 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 		PendingToolInvocations:   make(map[string]struct{}),
 		StateChangesByStep:       make(map[string][]StateChangeRecord),
 		ApprovedCorrelationKeys:  make(map[string]struct{}),
+		RecordedTime:             make(map[string]int64),
+		RecordedRandom:           make(map[string][]byte),
+		RecordedUUID:             make(map[string]string),
+		RecordedHTTP:             make(map[string][]byte),
 	}
 	var lastType jobstore.EventType
 	for _, e := range events {
@@ -259,6 +271,42 @@ func (b *replayBuilder) BuildFromEvents(ctx context.Context, jobID string) (*Rep
 			} else {
 				out.CommandResults[pl.NodeID] = []byte("{}")
 			}
+		case jobstore.TimerFired:
+			var pl struct {
+				EffectID string `json:"effect_id"`
+				UnixNano int64  `json:"unix_nano"`
+			}
+			if err := json.Unmarshal(e.Payload, &pl); err != nil || pl.EffectID == "" {
+				continue
+			}
+			out.RecordedTime[pl.EffectID] = pl.UnixNano
+		case jobstore.RandomRecorded:
+			var pl struct {
+				EffectID string          `json:"effect_id"`
+				Values   json.RawMessage `json:"values"`
+			}
+			if err := json.Unmarshal(e.Payload, &pl); err != nil || pl.EffectID == "" {
+				continue
+			}
+			out.RecordedRandom[pl.EffectID] = []byte(pl.Values)
+		case jobstore.UUIDRecorded:
+			var pl struct {
+				EffectID string `json:"effect_id"`
+				UUID     string `json:"uuid"`
+			}
+			if err := json.Unmarshal(e.Payload, &pl); err != nil || pl.EffectID == "" {
+				continue
+			}
+			out.RecordedUUID[pl.EffectID] = pl.UUID
+		case jobstore.HTTPRecorded:
+			var pl struct {
+				EffectID string          `json:"effect_id"`
+				Response json.RawMessage `json:"response"`
+			}
+			if err := json.Unmarshal(e.Payload, &pl); err != nil || pl.EffectID == "" {
+				continue
+			}
+			out.RecordedHTTP[pl.EffectID] = []byte(pl.Response)
 		}
 	}
 	// 推导 Phase（plan 3.4）

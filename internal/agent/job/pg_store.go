@@ -415,3 +415,29 @@ func (s *JobStorePg) ReclaimOrphanedJobs(ctx context.Context, olderThan time.Dur
 	}
 	return int(cmd.RowsAffected()), nil
 }
+
+// CountPending 实现 ObservabilityReader；queue 当前未按列过滤，返回全部 Pending 数
+func (s *JobStorePg) CountPending(ctx context.Context, queue string) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE status = $1`, pgStatusPending).Scan(&n)
+	return n, err
+}
+
+// ListStuckRunningJobIDs 实现 ObservabilityReader；返回 Running 且 updated_at 早于 (now - olderThan) 的 job_id
+func (s *JobStorePg) ListStuckRunningJobIDs(ctx context.Context, olderThan time.Duration) ([]string, error) {
+	cutoff := time.Now().Add(-olderThan)
+	rows, err := s.pool.Query(ctx, `SELECT id FROM jobs WHERE status = $1 AND updated_at < $2`, pgStatusRunning, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}

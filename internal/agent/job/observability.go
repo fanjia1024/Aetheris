@@ -12,10 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package sdk
+package job
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
-// ToolFunc 工具函数签名：输入为 map，输出为字符串结果（或错误）。
-// Tool 必须经 Runtime 执行并记录（禁止在 Step 内直接调用外部 HTTP/DB）；Runtime 保证 at-most-once 与 Replay 时注入。
-type ToolFunc func(ctx context.Context, input map[string]any) (output string, err error)
+// ObservabilityReader 供运维可观测性：队列积压、卡住 Job 列表（2.0）。实现可选（如 JobStorePg）。
+type ObservabilityReader interface {
+	// CountPending 返回当前 Pending 状态的 Job 总数；queue 为空表示全部，非空表示该队列
+	CountPending(ctx context.Context, queue string) (int, error)
+	// ListStuckRunningJobIDs 返回 status=Running 且 updated_at 早于 (now - olderThan) 的 job_id 列表
+	ListStuckRunningJobIDs(ctx context.Context, olderThan time.Duration) ([]string, error)
+}

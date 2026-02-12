@@ -12,10 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package sdk
+package scheduler
 
-import "context"
+import (
+	"context"
+)
 
-// ToolFunc 工具函数签名：输入为 map，输出为字符串结果（或错误）。
-// Tool 必须经 Runtime 执行并记录（禁止在 Step 内直接调用外部 HTTP/DB）；Runtime 保证 at-most-once 与 Replay 时注入。
-type ToolFunc func(ctx context.Context, input map[string]any) (output string, err error)
+// Rebalance 根据租约过期情况返回可回收的 job_id 列表；不执行 metadata 更新，由调用方（如 Worker 或独立 Reclaim 循环）对 metadata 置回 Pending。
+// 初期实现仅依赖 LeaseManager.ListJobIDsWithExpiredClaim；后续可扩展为按队列积压或 Worker 负载做主动 rebalance。
+func Rebalance(ctx context.Context, manager LeaseManager) (expiredJobIDs []string, err error) {
+	return manager.ListJobIDsWithExpiredClaim(ctx)
+}

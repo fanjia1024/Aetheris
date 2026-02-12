@@ -33,6 +33,7 @@ const (
 	ToolReturned           EventType = "tool_returned"
 	ToolInvocationStarted  EventType = "tool_invocation_started"
 	ToolInvocationFinished EventType = "tool_invocation_finished"
+	StepCommitted          EventType = "step_committed" // 显式 step 提交屏障；写入顺序：command_committed → node_finished → step_committed（2.0 Exactly-Once）
 	JobCompleted           EventType = "job_completed"
 	JobFailed              EventType = "job_failed"
 	JobCancelled           EventType = "job_cancelled"
@@ -49,6 +50,11 @@ const (
 	// 以上事件中参与 Replay 的 Effect 事件（见 design/effect-system.md）：
 	// PlanGenerated, CommandCommitted, ToolInvocationFinished, NodeFinished 用于重建 ReplayContext；
 	// Replay 时禁止真实调用 LLM/Tool，只读这些事件注入结果。
+	// TimerFired、RandomRecorded、UUIDRecorded：Replay 时仅从事件注入时间/随机/UID，不重新执行（2.0 确定性）
+	TimerFired     EventType = "timer_fired"
+	RandomRecorded EventType = "random_recorded"
+	UUIDRecorded   EventType = "uuid_recorded"
+	HTTPRecorded   EventType = "http_recorded"
 
 	// AgentMessage 信箱消息：外部向 Job 投递的消息，Wait 节点 wait_type=message 时可根据 channel/correlation_key 消费（design/agent-process-model.md Mailbox）
 	AgentMessage EventType = "agent_message"

@@ -67,7 +67,8 @@ Agent execution = **Deterministic State Machine + Recorded Effects**。本文档
 
 1. **先** 写 `tool_invocation_started`（声明），再执行 Tool；执行完成后 **立即** 写 `command_committed`（或 `tool_invocation_finished`）；
 2. 再写 `node_finished`；
-3. 再 checkpoint / UpdateCursor。
+3. 再写 **`step_committed`**（2.0 显式 Step Commit Barrier；payload 含 node_id、step_id、command_id、可选 idempotency_key）；
+4. 再 checkpoint / UpdateCursor。
 
 这样 Replay 以事件流为权威时，已提交命令永不重放；且「已 started 无 finished」时禁止再执行，仅恢复或失败。
 
@@ -108,6 +109,7 @@ Agent execution = **Deterministic State Machine + Recorded Effects**。本文档
 - **要求**：所有 Tool 调用在设计上必须**幂等**；同一逻辑操作多次执行（如重试、Replay 后误执行）应产生相同效果或可安全去重。
 - **Runtime 保证**：同一 ExecutionKey 最多一次真实执行；Replay 时仅注入已记录结果，不再次调用 Tool。
 - **对外 API**：Tool 执行时可通过 `executor.ExecutionKeyFromContext(ctx)` 取得稳定执行键（等价于 job_id + step_id + idempotency_key），供实现方做幂等或传给下游作 idempotency key。Runner 在调用 `Tools.Execute` 前将当前调用的 idempotency_key 注入 context。
+- **ToolInvocationID / RetryPolicy / Compensation**：见 [tool-contract.md](tool-contract.md)。ToolInvocationID 与 invocation_id / idempotency_key 对应，在 Trace 与 API 中统一暴露；RetryPolicy 与 Compensation API 为可选扩展。
 
 ## Step Idempotency for External World（外部副作用唯一）
 

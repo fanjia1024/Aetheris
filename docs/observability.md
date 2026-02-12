@@ -33,6 +33,18 @@ Trace 数据由事件流推导（`ListEvents(job_id)` → `BuildExecutionTree` +
 
 若 API 未配置 `JobEventStore`（或 `jobstore.type` 为空），访问 trace 接口会返回 503 "Trace 未启用"。使用 Postgres 事件存储并正确注入 `SetJobEventStore` 后即可使用。
 
+## 运维可观测性（2.0）
+
+### Queue Backlog 与 Stuck Job
+
+- **GET /api/observability/summary**：返回 `queue_backlog`（按队列的 Pending 数）、`stuck_job_ids`（status=Running 且 `updated_at` 超过阈值的 job_id）、`stuck_threshold_seconds`。查询参数 `older_than` 可指定卡住阈值（如 `1h`），默认 1 小时。
+- **Prometheus**：`aetheris_queue_backlog{queue="default"}`、`aetheris_stuck_job_count`；调用 summary 接口时会同步更新这些指标。
+- **Stuck Job 定义**：Running 且 `updated_at` 早于 (now - threshold)；可能表示 Worker 卡死或未心跳，需结合 Reclaim 与租约过期处理。
+
+### Job Timeline
+
+Trace 页与 `GET /api/jobs/:id/trace` 已提供按 step 的 `timeline_segments`（含 `duration_ms`），即 Job 时间线视图。
+
 ## 参考
 
 - [tracing.md](tracing.md) — HTTP 请求 OTLP 追踪
