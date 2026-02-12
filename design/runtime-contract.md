@@ -32,6 +32,7 @@ Reclaim 后再次 Claim 的 Job 会走 Replay；**安全前提**是 Effect 边�
 
 - **Signal 先入持久化 inbox**：当配置 **SignalInbox** 时，JobSignal API 先调用 `SignalInbox.Append(jobID, correlationKey, payload)` 将 signal 持久化，再 Append `wait_completed` 并 UpdateStatus(Pending)。若 API 在「收到请求后、Append wait_completed 前」崩溃，signal 已落盘，可后续重试或由后台补写 wait_completed，保证「人类点击一次 → agent 一定收到」。
 - **Ack 机制**：`wait_completed` 成功写入且 Job 已置为 Pending 后，对对应 inbox 记录调用 `MarkAcked`，避免重复消费。实现见 [internal/agent/signal](../internal/agent/signal)；PG 表 `signal_inbox` 见 [internal/runtime/jobstore/schema.sql](../internal/runtime/jobstore/schema.sql)。
+- **At-least-once 已满足**：当前实现（先写 inbox、再 Append、再 MarkAcked）已满足 at-least-once delivery；Worker 或 runtime 重启后 signal 不丢。若需「重投递」语义（按 offset 重试消费、未 ack 的 signal 再次投递），可在 signal inbox 表/接口上扩展 offset 与重试策略，属可选增强。
 
 **接口**：JobSignal / JobMessage 在 Append 前通过 `lastEventIsWaitCompletedWithCorrelationKey(events, correlationKey)` 判断并短路返回。
 

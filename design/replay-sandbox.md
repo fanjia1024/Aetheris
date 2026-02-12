@@ -29,7 +29,7 @@ Replay Sandbox 通过 ReplayPolicy 与 Runner 的「禁止无记录时执行 Sid
 
 ## Replay Safety（2.0）
 
-- **Replay 模式下禁止未记录的非确定性操作**：Step 内不得直接使用 `time.Now()`、`rand`、`uuid.New()`、`http.Get` 等；须通过 **Recorded Effects API**（`runtime.Now(ctx)`、`runtime.UUID(ctx)`、`runtime.HTTP(ctx)`）由 Runtime 记录，Replay 时仅从事件注入。参见 [internal/agent/runtime/effects](internal/agent/runtime/effects)。
+- **Replay 时仅允许通过 Runtime API 访问非确定性**：Step 内**仅允许**通过 Runtime API（effects.Now/UUID/HTTP 或 sdk 等价）访问时间、随机数、外部 IO；**禁止**在 step 内直接使用 `time.Now()`、`rand`、`uuid.New()`、裸 HTTP/IO。违反时在启用 StrictReplay 时可 panic。须通过 **Recorded Effects API**（`runtime.Now(ctx)`、`runtime.UUID(ctx)`、`runtime.HTTP(ctx)`）由 Runtime 记录，Replay 时仅从事件注入。参见 [internal/agent/runtime/effects](internal/agent/runtime/effects)。
 - **可选严格模式**：当启用 determinism.ReplayGuard 且 StrictReplay 为 true 时，Replay 路径下若检测到禁止操作可 **panic**（job_id/step_id 便于排查）。实现见 [internal/agent/determinism](internal/agent/determinism)。
 
 ## Recorded Effects 契约

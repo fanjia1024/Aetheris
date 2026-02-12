@@ -37,7 +37,15 @@ Agent execution = **Deterministic State Machine + Recorded Effects**。本文档
 | **LLM** | 调用大模型得到输出 | 禁止调用；只读已记录结果 | `command_committed`（含 result）；Replay 从 CommandResults 注入 |
 | **Tool** | 调用工具（HTTP/DB/外部系统） | 禁止调用；只读已记录结果 | `tool_invocation_finished`、`command_committed`；Replay 从 CompletedToolInvocations/CommandResults 注入 |
 | **External IO** | 其他外部调用（HTTP/DB 等） | 禁止调用；只读已记录结果 | `command_committed` 或 `state_changed`；Replay 从 CommandResults/StateChangesByStep 注入 |
-| **Time / Random** | 依赖当前时间或随机数 | 禁止重算；只读已记录值 | 未来：`TimerFired`、`RandomRecorded`；Replay 时从事件注入 context |
+| **Time / Random** | 依赖当前时间或随机数 | 禁止重算；只读已记录值 | `TimerFired`、`UUIDRecorded`、`HTTPRecorded`（2.0 Recorded Effects）；Replay 时从事件注入 context |
+
+### 已记录效应类型（2.0）
+
+除 command_committed、tool_invocation_started/finished 外，**已记录效应**包含：**TimerFired**（时间）、**UUIDRecorded**、**HTTPRecorded**（2.0 Recorded Effects）。Replay 时上述效应**仅从事件/ReplayContext 注入，不执行**真实 `time.Now()`、`uuid.New()`、HTTP 调用，保证 at-most-once 与确定性。
+
+### Replay 只验证不执行
+
+Replay 路径下：**不调用** LLM、Tool、外部 HTTP；**不执行** `time.Now()`、`uuid.New()`、裸 IO。仅从事件流 / ReplayContext 读取已记录结果并注入到 step 上下文，保证 at-most-once 与 100% 可重现。参见 [replay-sandbox.md](replay-sandbox.md)、[internal/agent/runtime/effects](internal/agent/runtime/effects)。
 
 ## Replay 规则（协议）
 

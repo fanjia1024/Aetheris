@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"rag-platform/internal/agent/determinism"
 	"rag-platform/internal/agent/planner"
 	"rag-platform/internal/agent/replay"
 	replaysandbox "rag-platform/internal/agent/replay/sandbox"
@@ -666,6 +667,8 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 		runCtx, cancel = context.WithTimeout(runCtx, r.stepTimeout)
 		defer cancel()
 	}
+	// 2.0 Deterministic Replay：标记 Replay 模式，step/effects 内可通过 determinism.IsReplay(ctx) 判断；ReplayGuard 可据此 panic
+	runCtx = determinism.WithReplay(runCtx, replayCtx != nil)
 	// 2.0 Step Contract：注入 RecordedEffects 与 sdk.RuntimeContext，step 内仅能通过 Runtime Now/UUID/HTTP
 	if r.recordedEffectsRecorder != nil || replayCtx != nil {
 		runCtx = agenteffects.WithRecordedEffects(runCtx, jobID, effectiveStepID, replayCtx, r.recordedEffectsRecorder)
@@ -1094,6 +1097,8 @@ runLoop:
 			runCtx, cancel = context.WithTimeout(runCtx, r.stepTimeout)
 			defer cancel()
 		}
+		// 2.0 Deterministic Replay：标记 Replay 模式
+		runCtx = determinism.WithReplay(runCtx, replayCtx != nil)
 		// 2.0 Step Contract：注入 RecordedEffects 与 sdk.RuntimeContext
 		if r.recordedEffectsRecorder != nil || replayCtx != nil {
 			runCtx = agenteffects.WithRecordedEffects(runCtx, j.ID, effectiveStepID, replayCtx, r.recordedEffectsRecorder)

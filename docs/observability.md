@@ -38,8 +38,15 @@ Trace 数据由事件流推导（`ListEvents(job_id)` → `BuildExecutionTree` +
 ### Queue Backlog 与 Stuck Job
 
 - **GET /api/observability/summary**：返回 `queue_backlog`（按队列的 Pending 数）、`stuck_job_ids`（status=Running 且 `updated_at` 超过阈值的 job_id）、`stuck_threshold_seconds`。查询参数 `older_than` 可指定卡住阈值（如 `1h`），默认 1 小时。
+- **GET /api/observability/stuck**：仅返回 `stuck_job_ids` 与 `stuck_threshold_seconds`，与 summary 中 stuck 字段一致，便于脚本或前端直接消费。
 - **Prometheus**：`aetheris_queue_backlog{queue="default"}`、`aetheris_stuck_job_count`；调用 summary 接口时会同步更新这些指标。
 - **Stuck Job 定义**：Running 且 `updated_at` 早于 (now - threshold)；可能表示 Worker 卡死或未心跳，需结合 Reclaim 与租约过期处理。
+
+### Stuck Job 排查
+
+1. 调用 **GET /api/observability/summary** 或 **GET /api/observability/stuck**（可选查询参数 `older_than`，如 `?older_than=1h`）。
+2. 从返回的 `stuck_job_ids` 中取需要排查的 job_id。
+3. 打开 **GET /api/jobs/:id/trace/page**（将 `:id` 替换为上述 job_id）查看该 Job 的执行时间线与步骤耗时，定位卡在何步、是否有重试或超时。
 
 ### Job Timeline
 

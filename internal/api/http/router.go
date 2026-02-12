@@ -133,6 +133,7 @@ func (r *Router) Build(addr string, opts ...config.Option) *server.Hertz {
 		system.GET("/workers", authHandler, r.handler.SystemWorkers)
 	}
 	api.GET("/observability/summary", authHandler, r.handler.GetObservabilitySummary)
+	api.GET("/observability/stuck", authHandler, r.handler.GetObservabilityStuck)
 
 	return h
 }

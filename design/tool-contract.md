@@ -31,6 +31,14 @@ Tool 或节点级重试策略，失败时由 Runner/Adapter 按策略重试并�
 
 实现上可为 Phase 2：先文档化契约，后续在 Runner/Adapter 中接入 RetryPolicy 与 Compensation 回调。
 
+## 不可幂等工具与 Compensation 契约
+
+凡会产生**不可逆外部副作用**的 Tool（如支付、发邮件、预订），**必须**在应用层注册 Compensation（通过 `Runner.SetCompensationRegistry` 或等价方式）；在 step 返回 `compensatable_failure` 时由 Runtime 调用对应补偿回调并写入 `step_compensated`。未注册补偿的不可幂等 Tool 在失败时仅能标记为永久失败，无法由 Runtime 自动回滚。
+
+## Retry 与 InvocationID 契约
+
+所有 Tool 重试与执行均绑定**同一** InvocationID / idempotency_key；Trace 与事件中统一暴露 ToolInvocationID（见 `executor.ToolInvocationID(invocationID, idempotencyKey)`），便于审计与下游去重。当前实现已满足：同一 step 内 RetryPolicy 重试使用同一 idempotency_key，仅第一次真实执行，后续重试由 Ledger/Replay 约束。
+
 ## 与 at-most-once 的关系
 
 - **Tool 执行**：同一 idempotency_key 至多一次真实执行；Replay 与 Ledger/Effect Store 保证不重复。

@@ -2067,6 +2067,33 @@ func (h *Handler) GetObservabilitySummary(ctx context.Context, c *app.RequestCon
 	})
 }
 
+// GetObservabilityStuck 返回卡住 Job 列表（2.0 SRE）；与 summary 中 stuck 字段一致，便于前端/脚本直接消费
+func (h *Handler) GetObservabilityStuck(ctx context.Context, c *app.RequestContext) {
+	if h.observabilityReader == nil {
+		c.JSON(consts.StatusOK, map[string]interface{}{
+			"stuck_job_ids":           []string{},
+			"stuck_threshold_seconds": 3600,
+		})
+		return
+	}
+	olderThan := 1 * time.Hour
+	if s := c.Query("older_than"); s != "" {
+		if d, err := time.ParseDuration(s); err == nil && d > 0 {
+			olderThan = d
+		}
+	}
+	stuck, err := h.observabilityReader.ListStuckRunningJobIDs(ctx, olderThan)
+	if err != nil {
+		hlog.CtxErrorf(ctx, "ListStuckRunningJobIDs: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取卡住 Job 失败"})
+		return
+	}
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"stuck_job_ids":           stuck,
+		"stuck_threshold_seconds": int(olderThan.Seconds()),
+	})
+}
+
 // ListTools 返回所有工具的 Manifest 列表（GET /api/tools）
 func (h *Handler) ListTools(ctx context.Context, c *app.RequestContext) {
 	if h.toolsRegistry == nil {
