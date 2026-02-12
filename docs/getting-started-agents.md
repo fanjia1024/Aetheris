@@ -37,6 +37,8 @@ This guide walks you through building a **real production agent** on Aetheris in
 - Aetheris running (see [get-started.md](get-started.md) for setup)
 - Postgres (for production features; memory mode also works but no crash recovery)
 
+**Scaffold a new project** (optional): From an empty directory run `aetheris init` to create a minimal agent template with `configs/api.yaml` and a sample `main.go.example`. Then follow the steps below from the Aetheris repo or your project.
+
 **Quick setup**:
 ```bash
 # Start Postgres

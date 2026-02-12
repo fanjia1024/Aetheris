@@ -227,6 +227,51 @@ type StepInfo struct {
 	Output     json.RawMessage `json:"output,omitempty"`
 }
 
+// DAGNode is one node for the Execution DAG view (id, label, type).
+type DAGNode struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Type  string `json:"type"`
+}
+
+// DAGEdge is a directed edge (From -> To) for the Execution DAG view.
+type DAGEdge struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// DAGNodesAndEdges walks the execution tree and returns nodes and edges for a DAG visualization.
+func DAGNodesAndEdges(root *ExecutionNode) (nodes []DAGNode, edges []DAGEdge) {
+	if root == nil {
+		return nil, nil
+	}
+	var walk func(*ExecutionNode)
+	walk = func(n *ExecutionNode) {
+		if n.Type == "job" {
+			for _, c := range n.Children {
+				walk(c)
+			}
+			return
+		}
+		label := n.SpanID
+		switch n.Type {
+		case "plan":
+			label = "Plan"
+		case "node":
+			label = "Node " + n.NodeID
+		case "tool":
+			label = "Tool " + n.ToolName
+		}
+		nodes = append(nodes, DAGNode{ID: n.SpanID, Label: label, Type: n.Type})
+		for _, c := range n.Children {
+			edges = append(edges, DAGEdge{From: n.SpanID, To: c.SpanID})
+			walk(c)
+		}
+	}
+	walk(root)
+	return nodes, edges
+}
+
 // FlattenSteps returns steps in DFS order for the step timeline UI.
 func FlattenSteps(root *ExecutionNode) []StepInfo {
 	var out []StepInfo

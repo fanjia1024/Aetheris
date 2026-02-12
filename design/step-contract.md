@@ -204,6 +204,15 @@ func GetCurrentTimeTool(ctx context.Context, ...) (executor.ToolResult, error) {
 - 时间值写入事件流（PlanGenerated 或 tool_invocation_finished）
 - Replay 时从事件读取，不重新调用 `time.Now()`
 
+**Recommended: use runtime-injected clock and RNG**
+
+The runtime package provides helpers so steps can use a replay-safe clock and RNG without reading the event stream explicitly:
+
+- **`runtime.Clock(ctx)`** — Returns the current time. When the Runner is in replay mode, it injects a deterministic clock (derived from jobID + stepID) so that `Clock(ctx)` returns the same value on replay. Use this instead of `time.Now()` inside steps.
+- **`runtime.RandIntn(ctx, n)`** — Returns a random int in `[0, n)`. When the Runner is in replay mode, it injects a deterministic RNG seeded from jobID + stepID. Use this instead of `rand.Intn(n)` inside steps.
+
+Context keys and injection are in `internal/agent/runtime/contract.go`. The Runner injects the clock (and in replay, the RNG) before calling `step.Run`. Steps that use only these helpers and Tools satisfy the contract for deterministic replay.
+
 ---
 
 ### ✅ 3. Memory 读取必须纯函数式

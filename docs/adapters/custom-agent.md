@@ -9,6 +9,8 @@ This guide shows how to migrate your existing agent (non-framework, custom code)
 - Full audit trail (who, when, why)
 - Replay debugging (deterministic)
 
+For a **full end-to-end business scenario** (refund approval with wait and signal, from design to deployment), see [E2E Business Scenario: Refund](../e2e-business-scenario-refund.md).
+
 ---
 
 ## Before: Your Current Agent

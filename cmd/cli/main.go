@@ -16,14 +16,20 @@ package main
 
 import (
 	"bufio"
+	"embed"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"rag-platform/pkg/config"
 )
+
+//go:embed templates/agent-minimal
+var agentMinimalTemplate embed.FS
 
 func main() {
 	if len(os.Args) < 2 {
@@ -98,6 +104,12 @@ func main() {
 			compareReplay = true
 		}
 		runDebug(args[0], compareReplay)
+	case "init":
+		dir := "."
+		if len(args) > 0 {
+			dir = args[0]
+		}
+		runInit(dir)
 	default:
 		printUsage()
 		os.Exit(1)
@@ -119,6 +131,43 @@ func printUsage() {
 	fmt.Println("  replay <job_id> - 输出 Job 事件流（重放用）")
 	fmt.Println("  cancel <job_id> - 请求取消执行中的 Job")
 	fmt.Println("  debug <job_id> [--compare-replay] - Agent 调试器：timeline + evidence + replay verification")
+	fmt.Println("  init [dir]     - Scaffold a minimal agent project (templates + config) into current dir or dir")
+}
+
+func runInit(dir string) {
+	prefix := "templates/agent-minimal"
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "init: mkdir %s: %v\n", dir, err)
+		os.Exit(1)
+	}
+	err := fs.WalkDir(agentMinimalTemplate, prefix, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(prefix, path)
+		if rel == "." {
+			return nil
+		}
+		target := filepath.Join(dir, filepath.FromSlash(rel))
+		if d.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+		data, err := agentMinimalTemplate.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0644)
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "init: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Created minimal agent project in", dir)
+	fmt.Println("Next: edit configs/api.yaml if needed, then run 'make run' or 'aetheris server start' and 'aetheris worker start'.")
+	fmt.Println("See README in that directory and docs/getting-started-agents.md for a full agent example.")
 }
 
 func runConfig() {

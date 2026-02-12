@@ -400,9 +400,16 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 		ctx = WithStateChangesByStep(ctx, m)
 	}
 	runCtx := ctx
+	// Inject Step Contract helpers so steps stay deterministic on replay (design/step-contract.md).
+	if replayCtx != nil {
+		runCtx = runtime.WithClock(runCtx, runtime.ReplayClock(jobID, effectiveStepID))
+		runCtx = runtime.WithRNG(runCtx, runtime.ReplayRNG(jobID, effectiveStepID))
+	} else {
+		runCtx = runtime.WithClock(runCtx, func() time.Time { return time.Now() })
+	}
 	if r.stepTimeout > 0 {
 		var cancel context.CancelFunc
-		runCtx, cancel = context.WithTimeout(ctx, r.stepTimeout)
+		runCtx, cancel = context.WithTimeout(runCtx, r.stepTimeout)
 		defer cancel()
 	}
 	var runErr error
@@ -756,9 +763,16 @@ runLoop:
 			ctx = WithApprovedCorrelationKeys(ctx, replayCtx.ApprovedCorrelationKeys)
 		}
 		runCtx := ctx
+		// Inject Step Contract helpers so steps stay deterministic on replay (design/step-contract.md).
+		if replayCtx != nil {
+			runCtx = runtime.WithClock(runCtx, runtime.ReplayClock(j.ID, effectiveStepID))
+			runCtx = runtime.WithRNG(runCtx, runtime.ReplayRNG(j.ID, effectiveStepID))
+		} else {
+			runCtx = runtime.WithClock(runCtx, func() time.Time { return time.Now() })
+		}
 		if r.stepTimeout > 0 {
 			var cancel context.CancelFunc
-			runCtx, cancel = context.WithTimeout(ctx, r.stepTimeout)
+			runCtx, cancel = context.WithTimeout(runCtx, r.stepTimeout)
 			defer cancel()
 		}
 		var runErr error

@@ -148,7 +148,7 @@ If your agent is becoming a "critical system" (customers depend on it, data loss
 
 ## Quick Start
 
-**Build your first production agent in 15 minutes**: [Getting Started with Agents](docs/getting-started-agents.md)
+**Scaffold a minimal agent project**: From an empty directory, run `aetheris init` (or `aetheris init <dir>`) to copy a minimal template with config and a sample agent. Then see [Getting Started with Agents](docs/getting-started-agents.md) to build your first production agent in 15 minutes.
 
 See a real business scenario (refund approval agent with human-in-the-loop) running on Aetheris, including:
 - Tool definition (at-most-once side effects)
