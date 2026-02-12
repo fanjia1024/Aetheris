@@ -52,6 +52,19 @@ func (f *fakeEventStore) Watch(ctx context.Context, jobID string) (<-chan jobsto
 	panic("not used")
 }
 
+// Snapshot methods (2.0-M1 additions)
+func (f *fakeEventStore) CreateSnapshot(ctx context.Context, jobID string, upToVersion int, snapshot []byte) error {
+	return nil
+}
+
+func (f *fakeEventStore) GetLatestSnapshot(ctx context.Context, jobID string) (*jobstore.JobSnapshot, error) {
+	return nil, nil
+}
+
+func (f *fakeEventStore) DeleteSnapshotsBefore(ctx context.Context, jobID string, beforeVersion int) error {
+	return nil
+}
+
 func (f *fakeEventStore) GetCurrentAttemptID(ctx context.Context, jobID string) (string, error) {
 	return "", nil
 }

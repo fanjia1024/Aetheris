@@ -17,6 +17,7 @@ package replay
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"rag-platform/internal/agent/planner"
 	"rag-platform/internal/runtime/jobstore"
@@ -400,7 +401,7 @@ func (b *replayBuilder) BuildFromSnapshot(ctx context.Context, jobID string) (*R
 // deserializeSnapshot 反序列化快照数据为 ReplayContext
 func deserializeSnapshot(snapshotData []byte) (*ReplayContext, error) {
 	if len(snapshotData) == 0 {
-		return nil, json.Unmarshal(nil, nil)
+		return nil, fmt.Errorf("empty snapshot data")
 	}
 
 	var payload jobstore.SnapshotPayload

@@ -66,6 +66,19 @@ func (f *haFakeEventStore) GetCurrentAttemptID(ctx context.Context, jobID string
 	return "", nil
 }
 
+// Snapshot methods (2.0-M1 additions)
+func (f *haFakeEventStore) CreateSnapshot(ctx context.Context, jobID string, upToVersion int, snapshot []byte) error {
+	return nil // Not used in HA test
+}
+
+func (f *haFakeEventStore) GetLatestSnapshot(ctx context.Context, jobID string) (*jobstore.JobSnapshot, error) {
+	return nil, nil // Not used in HA test
+}
+
+func (f *haFakeEventStore) DeleteSnapshotsBefore(ctx context.Context, jobID string, beforeVersion int) error {
+	return nil // Not used in HA test
+}
+
 // TestHA_ReclaimThenSecondWorkerCanClaim simulates: worker1 had job, "crashed" (expired lease),
 // reclaim runs and sets job to Pending, then worker2 can claim the same job (event stream consistent).
 func TestHA_ReclaimThenSecondWorkerCanClaim(t *testing.T) {
