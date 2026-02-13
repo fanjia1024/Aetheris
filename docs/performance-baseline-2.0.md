@@ -52,6 +52,15 @@
 2. 再跑稳态（30 分钟）
 3. 最后跑重启恢复（手动 kill/restart worker）
 
+可执行脚本（生成基线报告并按阈值判定）:
+
+```bash
+./scripts/release-p0-perf.sh
+```
+
+输出报告:
+- `artifacts/release/perf-baseline-2.0-*.md`
+
 ## 7. 报告模板
 
 发布前输出一份基线报告，建议包含:

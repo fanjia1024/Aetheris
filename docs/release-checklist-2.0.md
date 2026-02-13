@@ -70,3 +70,33 @@ aetheris verify evidence.zip
 - [ ] Performance baseline report attached (`docs/performance-baseline-2.0.md`)
 - [ ] Failure drills executed and recorded (`docs/runbook-failure-drills.md`)
 - [ ] Security baseline checks completed (`docs/security.md`)
+
+### 6.1 Execute P0 performance gate
+
+```bash
+./scripts/release-p0-perf.sh
+```
+
+Artifact:
+- `artifacts/release/perf-baseline-2.0-*.md`
+
+### 6.2 Execute P0 failure drills
+
+```bash
+./scripts/release-p0-drill.sh
+```
+
+Optional DB outage drill:
+
+```bash
+RUN_DB_DRILL=1 ./scripts/release-p0-drill.sh
+```
+
+Artifact:
+- `artifacts/release/failure-drill-2.0-*.md`
+
+### 6.3 Run all gates in one command
+
+```bash
+RUN_P0_PERF=1 RUN_P0_DRILLS=1 ./scripts/release-2.0.sh
+```

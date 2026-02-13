@@ -25,5 +25,15 @@ go build -v ./...
 echo "[release-2.0] cli smoke"
 ./scripts/local-2.0-stack.sh --help >/dev/null || true
 
+if [[ "${RUN_P0_PERF:-0}" == "1" ]]; then
+  echo "[release-2.0] P0 performance gate"
+  ./scripts/release-p0-perf.sh
+fi
+
+if [[ "${RUN_P0_DRILLS:-0}" == "1" ]]; then
+  echo "[release-2.0] P0 failure drill gate"
+  ./scripts/release-p0-drill.sh
+fi
+
 echo "[release-2.0] completed successfully"
 echo "[release-2.0] see docs/release-checklist-2.0.md for manual sign-off items"

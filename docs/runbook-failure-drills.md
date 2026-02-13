@@ -92,7 +92,29 @@
 - 发现问题与修复 owner
 - 复验时间
 
-## 7. 关联文档
+## 7. 自动化演练脚本
+
+执行:
+
+```bash
+./scripts/release-p0-drill.sh
+```
+
+可选启用数据库短时中断演练:
+
+```bash
+RUN_DB_DRILL=1 ./scripts/release-p0-drill.sh
+```
+
+输出报告:
+- `artifacts/release/failure-drill-2.0-*.md`
+
+说明:
+- 脚本默认覆盖 Drill A/B/D/E 与报告生成
+- Drill C（Postgres 短时不可用）默认关闭，需要 `RUN_DB_DRILL=1`
+- Drill D 中 wait/signal 相关场景建议继续做一次人工补充演练
+
+## 8. 关联文档
 
 - `docs/release-checklist-2.0.md`
 - `docs/observability.md`
