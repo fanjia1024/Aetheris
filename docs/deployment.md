@@ -16,8 +16,16 @@ This document summarizes the three deployment options and prerequisites. See eac
   ```bash
   docker compose -f deployments/compose/docker-compose.yml up -d --build
   ```
+  or:
+  ```bash
+  ./scripts/local-2.0-stack.sh start
+  ```
 - **Services**: postgres (5432), api (8080), worker1, worker2.
 - **Check**: Health check, create agent, send message; after restarting API/Worker, jobs remain in Postgres and continue.
+- **Stop**:
+  ```bash
+  ./scripts/local-2.0-stack.sh stop
+  ```
 - **Schema upgrade**: If the DB already exists and is missing `cancel_requested_at`:
   ```sql
   ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cancel_requested_at TIMESTAMPTZ;

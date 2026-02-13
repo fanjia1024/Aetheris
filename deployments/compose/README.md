@@ -10,6 +10,12 @@
 docker compose -f deployments/compose/docker-compose.yml up -d --build
 ```
 
+或使用一键脚本（推荐）：
+
+```bash
+./scripts/local-2.0-stack.sh start
+```
+
 或进入本目录（需能访问上级的 `internal/` 与 `configs/`）：
 
 ```bash
@@ -31,6 +37,15 @@ cd deployments/compose && docker compose up -d --build
 2. 创建 Agent：`curl -X POST http://localhost:8080/api/agents/ -H "Content-Type: application/json" -d '{"name":"test"}'`
 3. 发消息（创建 Job）：`curl -X POST http://localhost:8080/api/agents/<agent_id>/message -H "Content-Type: application/json" -d '{"message":"hello"}'`
 4. 重启 API 或 Worker 后，Job 由 Postgres 持久化，可继续执行或由新 Worker 接管。
+
+## 管理命令（脚本）
+
+```bash
+./scripts/local-2.0-stack.sh status   # 查看服务状态
+./scripts/local-2.0-stack.sh logs     # 查看实时日志
+./scripts/local-2.0-stack.sh health   # 健康检查
+./scripts/local-2.0-stack.sh stop     # 停止并清理栈
+```
 
 ## 升级已有库
 

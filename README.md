@@ -220,6 +220,8 @@ The project provides a Makefile for one-command build and startup of all service
 
 **One-command run**: From the repo root, run `make run` to build and then start the API (default :8080) and Worker in the background; PIDs and logs are under `bin/`. Use `make stop` to stop. If using Postgres as jobstore, start Postgres first (see [docs/deployment.md](docs/deployment.md)). For a full walkthrough of core features (quick trial vs full runtime), see [docs/get-started.md](docs/get-started.md).
 
+**Local 2.0 stack (Compose)**: run `./scripts/local-2.0-stack.sh start` to launch `postgres + api + worker1 + worker2`, and `./scripts/local-2.0-stack.sh stop` to shut it down.
+
 ---
 
 ## Why This Matters
