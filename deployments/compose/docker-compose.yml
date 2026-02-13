@@ -30,8 +30,13 @@ services:
     environment:
       JOBSTORE_TYPE: postgres
       JOBSTORE_DSN: "postgres://corag:corag@postgres:5432/corag?sslmode=disable"
+      JOBSTORE_LEASE_DURATION: "180s"
       API_MIDDLEWARE_AUTH: "true"
       API_MIDDLEWARE_JWT_KEY: "local-dev-jwt-key"
+      MODEL_DEFAULTS_LLM: "openai.gpt_35_turbo"
+      MODEL_LLM_PROVIDERS_OPENAI_BASE_URL: "http://host.docker.internal:11434/v1"
+      MODEL_LLM_PROVIDERS_OPENAI_API_KEY: "ollama"
+      MODEL_LLM_PROVIDERS_OPENAI_MODELS_GPT_35_TURBO_NAME: "${OLLAMA_MODEL:-llama3:latest}"
     ports:
       - "8080:8080"
     depends_on:
@@ -48,8 +53,13 @@ services:
       WORKER_ID: worker-1
       JOBSTORE_TYPE: postgres
       JOBSTORE_DSN: "postgres://corag:corag@postgres:5432/corag?sslmode=disable"
+      JOBSTORE_LEASE_DURATION: "180s"
       STORAGE_METADATA_TYPE: memory
       STORAGE_VECTOR_TYPE: memory
+      MODEL_DEFAULTS_LLM: "openai.gpt_35_turbo"
+      MODEL_LLM_PROVIDERS_OPENAI_BASE_URL: "http://host.docker.internal:11434/v1"
+      MODEL_LLM_PROVIDERS_OPENAI_API_KEY: "ollama"
+      MODEL_LLM_PROVIDERS_OPENAI_MODELS_GPT_35_TURBO_NAME: "${OLLAMA_MODEL:-llama3:latest}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -64,8 +74,13 @@ services:
       WORKER_ID: worker-2
       JOBSTORE_TYPE: postgres
       JOBSTORE_DSN: "postgres://corag:corag@postgres:5432/corag?sslmode=disable"
+      JOBSTORE_LEASE_DURATION: "180s"
       STORAGE_METADATA_TYPE: memory
       STORAGE_VECTOR_TYPE: memory
+      MODEL_DEFAULTS_LLM: "openai.gpt_35_turbo"
+      MODEL_LLM_PROVIDERS_OPENAI_BASE_URL: "http://host.docker.internal:11434/v1"
+      MODEL_LLM_PROVIDERS_OPENAI_API_KEY: "ollama"
+      MODEL_LLM_PROVIDERS_OPENAI_MODELS_GPT_35_TURBO_NAME: "${OLLAMA_MODEL:-llama3:latest}"
     depends_on:
       postgres:
         condition: service_healthy

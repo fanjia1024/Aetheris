@@ -3,6 +3,9 @@ set -euo pipefail
 
 API_URL="${CORAG_API_URL:-http://localhost:8080}"
 AUTH_HEADER="${CORAG_AUTH_HEADER:-}"
+AUTO_LOGIN="${CORAG_AUTO_LOGIN:-1}"
+LOGIN_USERNAME="${CORAG_LOGIN_USERNAME:-admin}"
+LOGIN_PASSWORD="${CORAG_LOGIN_PASSWORD:-admin}"
 DRILL_POLL_MAX="${DRILL_POLL_MAX:-90}"
 DRILL_POLL_INTERVAL="${DRILL_POLL_INTERVAL:-2}"
 DRILL_DB_OUTAGE_SECONDS="${DRILL_DB_OUTAGE_SECONDS:-5}"
@@ -46,6 +49,32 @@ json_get() {
     return
   fi
   echo "$input" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1
+}
+
+ensure_auth_header() {
+  if [[ -n "$AUTH_HEADER" || "$AUTO_LOGIN" != "1" ]]; then
+    return
+  fi
+  local body_file
+  body_file="$(mktemp)"
+  local code
+  code="$(curl --connect-timeout 5 -sS -m 10 -L -X POST "$API_URL/api/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"username\":\"$LOGIN_USERNAME\",\"password\":\"$LOGIN_PASSWORD\"}" \
+    -o "$body_file" -w "%{http_code}" || true)"
+  if [[ "$code" != "200" ]]; then
+    rm -f "$body_file"
+    return
+  fi
+  local token
+  token="$(json_get "token" "$(cat "$body_file")")"
+  rm -f "$body_file"
+  if [[ -z "$token" ]]; then
+    return
+  fi
+  AUTH_HEADER="Authorization: Bearer $token"
+  CURL_BASE+=(-H "$AUTH_HEADER")
+  echo "[drill] auto login success: user=$LOGIN_USERNAME"
 }
 
 http_request() {
@@ -137,6 +166,7 @@ record_result() {
 main() {
   require_cmd curl
   require_cmd docker
+  ensure_auth_header
 
   mkdir -p "$ARTIFACT_DIR"
   local ts
