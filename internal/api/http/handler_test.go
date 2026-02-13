@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -25,6 +26,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/ut"
 
 	"rag-platform/internal/agent/job"
+	"rag-platform/internal/agent/signal"
 	"rag-platform/internal/runtime/jobstore"
 )
 
@@ -106,3 +108,132 @@ func TestJobSignal_WrongCorrelationKey(t *testing.T) {
 		t.Errorf("JobSignal wrong correlation_key: body %s", resp.Body())
 	}
 }
+
+type fakeSignalInbox struct {
+	mu          sync.Mutex
+	appendCalls int
+	ackCalls    int
+	lastAppend  struct {
+		jobID          string
+		correlationKey string
+		payload        []byte
+	}
+	lastAck struct {
+		jobID string
+		id    string
+	}
+}
+
+func (f *fakeSignalInbox) Append(ctx context.Context, jobID, correlationKey string, payload []byte) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.appendCalls++
+	f.lastAppend.jobID = jobID
+	f.lastAppend.correlationKey = correlationKey
+	f.lastAppend.payload = append([]byte(nil), payload...)
+	return "sig-1", nil
+}
+
+func (f *fakeSignalInbox) MarkAcked(ctx context.Context, jobID, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ackCalls++
+	f.lastAck.jobID = jobID
+	f.lastAck.id = id
+	return nil
+}
+
+func (f *fakeSignalInbox) snapshot() (appendCalls, ackCalls int, appendJobID, appendCorrelation, ackJobID, ackID string, payload []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.appendCalls, f.ackCalls, f.lastAppend.jobID, f.lastAppend.correlationKey, f.lastAck.jobID, f.lastAck.id, append([]byte(nil), f.lastAppend.payload...)
+}
+
+// TestJobSignal_SuccessAndIdempotentUnblock 验证 signal 首次送达写 wait_completed 并置 Pending，重复送达（状态仍 Waiting 场景）按 correlation_key 幂等处理且不重复写事件。
+func TestJobSignal_SuccessAndIdempotentUnblock(t *testing.T) {
+	ctx := context.Background()
+	handler, jobID := setupJobSignalHandler(t)
+	inbox := &fakeSignalInbox{}
+	handler.SetSignalInbox(inbox)
+	h := server.Default(server.WithHostPorts(":0"))
+	h.POST("/api/jobs/:id/signal", func(ctx context.Context, c *app.RequestContext) {
+		handler.JobSignal(ctx, c)
+	})
+
+	body := []byte(`{"correlation_key":"expected-key","payload":{"approved":true}}`)
+	w1 := ut.PerformRequest(h.Engine, "POST", "/api/jobs/"+jobID+"/signal", &ut.Body{Body: bytes.NewReader(body), Len: len(body)})
+	resp1 := w1.Result()
+	if resp1.StatusCode() != 200 {
+		t.Fatalf("first JobSignal status got %d, want 200", resp1.StatusCode())
+	}
+	if !bytes.Contains(resp1.Body(), []byte("重新入队执行")) {
+		t.Fatalf("first JobSignal body: %s", resp1.Body())
+	}
+
+	j, err := handler.jobStore.Get(ctx, jobID)
+	if err != nil {
+		t.Fatalf("jobStore.Get: %v", err)
+	}
+	if j == nil || j.Status != job.StatusPending {
+		t.Fatalf("job status = %v, want Pending", j)
+	}
+	events1, _, err := handler.jobEventStore.ListEvents(ctx, jobID)
+	if err != nil {
+		t.Fatalf("ListEvents after first signal: %v", err)
+	}
+	waitCompletedCount1 := 0
+	for _, e := range events1 {
+		if e.Type == jobstore.WaitCompleted {
+			waitCompletedCount1++
+		}
+	}
+	if waitCompletedCount1 != 1 {
+		t.Fatalf("wait_completed count after first signal = %d, want 1", waitCompletedCount1)
+	}
+
+	// 模拟重复请求命中“状态仍 Waiting（最终一致性）”场景，验证幂等逻辑只返回已送达，不重复追加事件。
+	if err := handler.jobStore.UpdateStatus(ctx, jobID, job.StatusWaiting); err != nil {
+		t.Fatalf("reset status to waiting: %v", err)
+	}
+	w2 := ut.PerformRequest(h.Engine, "POST", "/api/jobs/"+jobID+"/signal", &ut.Body{Body: bytes.NewReader(body), Len: len(body)})
+	resp2 := w2.Result()
+	if resp2.StatusCode() != 200 {
+		t.Fatalf("second JobSignal status got %d, want 200", resp2.StatusCode())
+	}
+	if !bytes.Contains(resp2.Body(), []byte("幂等")) {
+		t.Fatalf("second JobSignal should be idempotent, body: %s", resp2.Body())
+	}
+
+	events2, _, err := handler.jobEventStore.ListEvents(ctx, jobID)
+	if err != nil {
+		t.Fatalf("ListEvents after second signal: %v", err)
+	}
+	waitCompletedCount2 := 0
+	for _, e := range events2 {
+		if e.Type == jobstore.WaitCompleted {
+			waitCompletedCount2++
+		}
+	}
+	if waitCompletedCount2 != 1 {
+		t.Fatalf("wait_completed count after idempotent signal = %d, want 1", waitCompletedCount2)
+	}
+
+	appendCalls, ackCalls, appendJobID, appendCorrelation, ackJobID, ackID, payload := inbox.snapshot()
+	if appendCalls != 1 || ackCalls != 1 {
+		t.Fatalf("inbox calls append=%d ack=%d, want append=1 ack=1", appendCalls, ackCalls)
+	}
+	if appendJobID != jobID || ackJobID != jobID {
+		t.Fatalf("inbox job_id append=%q ack=%q, want %q", appendJobID, ackJobID, jobID)
+	}
+	if appendCorrelation != "expected-key" {
+		t.Fatalf("inbox correlation_key=%q, want expected-key", appendCorrelation)
+	}
+	if ackID != "sig-1" {
+		t.Fatalf("inbox ack id=%q, want sig-1", ackID)
+	}
+	if !bytes.Contains(payload, []byte(`"approved":true`)) {
+		t.Fatalf("inbox payload got %s, want approved=true", payload)
+	}
+}
+
+var _ signal.SignalInbox = (*fakeSignalInbox)(nil)

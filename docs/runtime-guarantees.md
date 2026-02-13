@@ -568,12 +568,14 @@ Expected:
 
 ```bash
 go test ./internal/agent/job -run 'TestHA_ReclaimThenSecondWorkerCanClaim|TestScanAndReclaimExpired_WithAndWithoutBlocking' -v
+go test ./internal/api/http -run 'TestJobSignal_SuccessAndIdempotentUnblock|TestJobSignal_WrongCorrelationKey|TestJobSignal_MissingCorrelationKey' -v
 ```
 
 Expected:
 - Expired running jobs are reclaimed to Pending.
 - Another worker can claim and continue after reclaim.
 - Blocked jobs are not reclaimed until unblocked.
+- Signal delivery writes `wait_completed` and duplicate delivery with same `correlation_key` is idempotent (no duplicate unblock event).
 
 ### 3) Step timeout + retry policy semantics
 
