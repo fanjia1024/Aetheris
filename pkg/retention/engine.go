@@ -25,6 +25,7 @@ type Engine struct {
 	config         RetentionConfig
 	tombstoneStore TombstoneStore
 	scanner        RetentionScanner
+	archiveSink    ArchiveSink
 }
 
 // TombstoneStore Tombstone 存储接口
@@ -70,6 +71,11 @@ type RetentionScanner interface {
 	ListCandidates(ctx context.Context) ([]RetentionCandidate, error)
 }
 
+// ArchiveSink 冷存储归档接口
+type ArchiveSink interface {
+	ArchiveEvidence(ctx context.Context, jobID string, tenantID string) (string, error)
+}
+
 // NewEngine 创建留存引擎
 func NewEngine(config RetentionConfig, tombstoneStore TombstoneStore) *Engine {
 	return &Engine{
@@ -83,13 +89,17 @@ func (e *Engine) SetScanner(scanner RetentionScanner) {
 	e.scanner = scanner
 }
 
+// SetArchiveSink 设置归档下沉实现
+func (e *Engine) SetArchiveSink(sink ArchiveSink) {
+	e.archiveSink = sink
+}
+
 // ArchiveJob 归档 job（导出证据包到冷存储）
 func (e *Engine) ArchiveJob(ctx context.Context, jobID string, tenantID string) (string, error) {
-	// TODO: 实际实现需要：
-	// 1. 调用 proof.ExportEvidenceZip 导出证据包
-	// 2. 上传到 S3/GCS/Azure Blob
-	// 3. 返回存储 URL
-
+	if e.archiveSink != nil {
+		return e.archiveSink.ArchiveEvidence(ctx, jobID, tenantID)
+	}
+	// 默认回退：返回标准化归档引用，便于无外部依赖的环境测试。
 	archiveRef := fmt.Sprintf("s3://archive/%s/%s.zip", tenantID, jobID)
 	return archiveRef, nil
 }

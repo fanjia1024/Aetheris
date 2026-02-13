@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -69,11 +70,8 @@ func ExportEvidenceZip(
 		return nil, fmt.Errorf("failed to serialize ledger: %w", err)
 	}
 
-	metadataJSON, err := json.MarshalIndent(JobMetadata{
-		JobID:   jobID,
-		AgentID: "(from events)", // TODO: extract from events
-		Status:  "(from events)",
-	}, "", "  ")
+	metadata := extractJobMetadata(jobID, events)
+	metadataJSON, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("failed to serialize metadata: %w", err)
 	}
@@ -181,4 +179,40 @@ func ledgerToNDJSON(ledger []ToolInvocation) ([]byte, error) {
 		buf.WriteByte('\n')
 	}
 	return buf.Bytes(), nil
+}
+
+func extractJobMetadata(jobID string, events []Event) JobMetadata {
+	metadata := JobMetadata{
+		JobID:     jobID,
+		Status:    "unknown",
+		CreatedAt: events[0].CreatedAt,
+		UpdatedAt: events[len(events)-1].CreatedAt,
+	}
+	for _, e := range events {
+		switch e.Type {
+		case "job_completed":
+			metadata.Status = "completed"
+		case "job_failed":
+			metadata.Status = "failed"
+		case "job_cancelled":
+			metadata.Status = "cancelled"
+		case "job_running":
+			if metadata.Status == "unknown" {
+				metadata.Status = "running"
+			}
+		case "job_created":
+			var payload map[string]interface{}
+			if err := json.Unmarshal([]byte(e.Payload), &payload); err == nil {
+				if agentID, ok := payload["agent_id"].(string); ok && strings.TrimSpace(agentID) != "" {
+					metadata.AgentID = agentID
+				}
+				if goal, ok := payload["goal"].(string); ok && strings.TrimSpace(goal) != "" {
+					metadata.Goal = goal
+				}
+			}
+		case "job_requeued":
+			metadata.RetryCount++
+		}
+	}
+	return metadata
 }
