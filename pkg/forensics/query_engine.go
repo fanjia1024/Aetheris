@@ -17,42 +17,171 @@ package forensics
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
 	"time"
+
+	"rag-platform/pkg/proof"
 )
 
+// JobSource 提供可查询的 Job 元数据。
+type JobSource interface {
+	ListJobs(ctx context.Context, req QueryRequest) ([]JobSummary, error)
+}
+
+// EventSource 提供 Job 的事件流。
+type EventSource interface {
+	ListEvents(ctx context.Context, jobID string) ([]Event, error)
+}
+
+// EvidenceExporter 提供证据包导出能力。
+type EvidenceExporter interface {
+	ExportEvidenceZip(ctx context.Context, jobID string) ([]byte, error)
+}
+
 // QueryEngine 取证查询引擎（2.0-M3）
-type QueryEngine struct{}
+type QueryEngine struct {
+	jobSource   JobSource
+	eventSource EventSource
+	exporter    EvidenceExporter
+}
 
 // NewQueryEngine 创建查询引擎
 func NewQueryEngine() *QueryEngine {
 	return &QueryEngine{}
 }
 
+// WithJobSource 设置 Job 数据源。
+func (e *QueryEngine) WithJobSource(source JobSource) *QueryEngine {
+	e.jobSource = source
+	return e
+}
+
+// WithEventSource 设置事件数据源。
+func (e *QueryEngine) WithEventSource(source EventSource) *QueryEngine {
+	e.eventSource = source
+	return e
+}
+
+// WithExporter 设置证据导出器。
+func (e *QueryEngine) WithExporter(exporter EvidenceExporter) *QueryEngine {
+	e.exporter = exporter
+	return e
+}
+
 // Query 执行取证查询
 func (e *QueryEngine) Query(ctx context.Context, req QueryRequest) (*QueryResponse, error) {
-	// TODO: 实际实现需要：
-	// 1. 从 jobMetaStore 按时间范围和 tenant 查询 jobs
-	// 2. 对每个 job 加载事件流
-	// 3. 提取 tool_calls 和 key_events
-	// 4. 应用 tool_filter 和 event_filter
-	// 5. 分页返回
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	offset := req.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	if e.jobSource == nil {
+		return &QueryResponse{Jobs: []JobSummary{}, TotalCount: 0, Page: offset / limit}, nil
+	}
+
+	jobs, err := e.jobSource.ListJobs(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	statusFilter := make(map[string]struct{}, len(req.StatusFilter))
+	for _, s := range req.StatusFilter {
+		statusFilter[strings.ToLower(strings.TrimSpace(s))] = struct{}{}
+	}
+
+	filtered := make([]JobSummary, 0, len(jobs))
+	for _, j := range jobs {
+		if !req.TimeRange.Start.IsZero() && j.CreatedAt.Before(req.TimeRange.Start) {
+			continue
+		}
+		if !req.TimeRange.End.IsZero() && j.CreatedAt.After(req.TimeRange.End) {
+			continue
+		}
+		if len(statusFilter) > 0 {
+			if _, ok := statusFilter[strings.ToLower(j.Status)]; !ok {
+				continue
+			}
+		}
+
+		toolCalls := append([]string(nil), j.ToolCalls...)
+		keyEvents := append([]string(nil), j.KeyEvents...)
+		eventCount := j.EventCount
+		if e.eventSource != nil && (len(req.ToolFilter) > 0 || len(req.EventFilter) > 0 || eventCount == 0) {
+			events, err := e.eventSource.ListEvents(ctx, j.JobID)
+			if err != nil {
+				return nil, err
+			}
+			eventCount = len(events)
+			if len(req.ToolFilter) > 0 || len(toolCalls) == 0 {
+				toolCalls = extractToolCalls(events)
+			}
+			if len(req.EventFilter) > 0 || len(keyEvents) == 0 {
+				keyEvents = extractKeyEvents(events)
+			}
+		}
+
+		if len(req.ToolFilter) > 0 && !matchAnyToolFilter(toolCalls, req.ToolFilter) {
+			continue
+		}
+		if len(req.EventFilter) > 0 && !matchAnyEventFilter(keyEvents, req.EventFilter) {
+			continue
+		}
+
+		j.ToolCalls = toolCalls
+		j.KeyEvents = keyEvents
+		j.EventCount = eventCount
+		filtered = append(filtered, j)
+	}
+
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
+	})
+
+	total := len(filtered)
+	if offset > total {
+		offset = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
 
 	return &QueryResponse{
-		Jobs:       []JobSummary{},
-		TotalCount: 0,
-		Page:       req.Offset / req.Limit,
+		Jobs:       filtered[offset:end],
+		TotalCount: total,
+		Page:       offset / limit,
 	}, nil
 }
 
 // BatchExport 批量导出证据包
 func (e *QueryEngine) BatchExport(ctx context.Context, jobIDs []string) (map[string][]byte, error) {
 	result := make(map[string][]byte)
+	if e.exporter == nil {
+		return result, nil
+	}
 
-	// TODO: 实际实现需要：
-	// 1. 对每个 job_id 调用 proof.ExportEvidenceZip
-	// 2. 收集所有 ZIP 文件
-	// 3. 打包为大 ZIP（包含多个 job）
+	seen := make(map[string]struct{}, len(jobIDs))
+	for _, raw := range jobIDs {
+		jobID := strings.TrimSpace(raw)
+		if jobID == "" {
+			continue
+		}
+		if _, ok := seen[jobID]; ok {
+			continue
+		}
+		seen[jobID] = struct{}{}
+
+		zipBytes, err := e.exporter.ExportEvidenceZip(ctx, jobID)
+		if err != nil {
+			return nil, err
+		}
+		result[jobID] = zipBytes
+	}
 
 	return result, nil
 }
@@ -67,12 +196,53 @@ func (e *QueryEngine) ConsistencyCheck(ctx context.Context, jobID string) (*Cons
 		Issues:           []string{},
 	}
 
-	// TODO: 实际实现需要：
-	// 1. 验证 hash chain（调用 proof.ValidateChain）
-	// 2. 验证 ledger 一致性（调用 proof.ValidateLedgerConsistency）
-	// 3. 验证 evidence 完整性（所有引用的证据都存在）
+	if e.exporter == nil || strings.TrimSpace(jobID) == "" {
+		return report, nil
+	}
 
+	zipBytes, err := e.exporter.ExportEvidenceZip(ctx, jobID)
+	if err != nil {
+		report.HashChainValid = false
+		report.LedgerConsistent = false
+		report.EvidenceComplete = false
+		report.Issues = []string{err.Error()}
+		return report, nil
+	}
+
+	verify := proof.VerifyEvidenceZip(zipBytes)
+	report.HashChainValid = verify.HashChainValid
+	report.LedgerConsistent = verify.LedgerValid
+	report.EvidenceComplete = verify.ManifestValid && verify.EventsValid
+	if verify.OK {
+		report.Issues = []string{}
+	} else {
+		report.Issues = append([]string(nil), verify.Errors...)
+	}
 	return report, nil
+}
+
+func matchAnyToolFilter(toolNames []string, filters []string) bool {
+	if len(filters) == 0 {
+		return true
+	}
+	for _, toolName := range toolNames {
+		if matchToolFilter(toolName, filters) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchAnyEventFilter(eventTypes []string, filters []string) bool {
+	if len(filters) == 0 {
+		return true
+	}
+	for _, eventType := range eventTypes {
+		if matchEventFilter(eventType, filters) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchToolFilter 检查 tool 名称是否匹配过滤器
@@ -151,12 +321,12 @@ func extractKeyEvents(events []Event) []string {
 		}
 	}
 
-	events_list := []string{}
+	eventsList := []string{}
 	for eventType := range eventSet {
-		events_list = append(events_list, eventType)
+		eventsList = append(eventsList, eventType)
 	}
 
-	return events_list
+	return eventsList
 }
 
 // Event 事件（简化结构）

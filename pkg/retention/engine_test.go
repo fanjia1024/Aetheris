@@ -54,6 +54,14 @@ func (m *memTombstoneStore) ListTombstones(ctx context.Context, tenantID string,
 	return result, nil
 }
 
+type memScanner struct {
+	candidates []RetentionCandidate
+}
+
+func (m *memScanner) ListCandidates(ctx context.Context) ([]RetentionCandidate, error) {
+	return append([]RetentionCandidate(nil), m.candidates...), nil
+}
+
 // TestRetention_ShouldDelete 测试过期检测
 func TestRetention_ShouldDelete(t *testing.T) {
 	config := RetentionConfig{
@@ -144,5 +152,88 @@ func TestRetention_ArchiveJob(t *testing.T) {
 	// 验证归档引用格式
 	if !strings.Contains(archiveRef, "job_456") {
 		t.Errorf("archive ref should contain job_id, got: %s", archiveRef)
+	}
+}
+
+func TestRetention_RunRetentionScan_AutoDelete(t *testing.T) {
+	config := DefaultRetentionConfig()
+	config.Enable = true
+	config.AutoDelete = true
+	config.DefaultRetentionDays = 30
+	config.ArchiveAfterDays = 0
+
+	store := newMemTombstoneStore()
+	engine := NewEngine(config, store)
+	engine.SetScanner(&memScanner{
+		candidates: []RetentionCandidate{
+			{
+				JobID:      "job_old_1",
+				TenantID:   "tenant_1",
+				AgentID:    "agent_1",
+				CreatedAt:  time.Now().UTC().AddDate(0, 0, -45),
+				EventCount: 12,
+			},
+			{
+				JobID:      "job_new_1",
+				TenantID:   "tenant_1",
+				AgentID:    "agent_1",
+				CreatedAt:  time.Now().UTC().AddDate(0, 0, -5),
+				EventCount: 2,
+			},
+		},
+	})
+
+	n, err := engine.RunRetentionScan(context.Background())
+	if err != nil {
+		t.Fatalf("run retention scan failed: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("processed = %d, want 1", n)
+	}
+	tombstone, err := store.GetTombstone(context.Background(), "job_old_1")
+	if err != nil {
+		t.Fatalf("get tombstone failed: %v", err)
+	}
+	if tombstone == nil {
+		t.Fatal("expected tombstone for expired job")
+	}
+}
+
+func TestRetention_RunRetentionScan_ArchiveOnly(t *testing.T) {
+	config := DefaultRetentionConfig()
+	config.Enable = true
+	config.AutoDelete = false
+	config.DefaultRetentionDays = 90
+	config.ArchiveAfterDays = 7
+
+	store := newMemTombstoneStore()
+	engine := NewEngine(config, store)
+	engine.SetScanner(&memScanner{
+		candidates: []RetentionCandidate{
+			{
+				JobID:      "job_archive_1",
+				TenantID:   "tenant_1",
+				AgentID:    "agent_1",
+				CreatedAt:  time.Now().UTC().AddDate(0, 0, -20),
+				EventCount: 4,
+			},
+		},
+	})
+
+	n, err := engine.RunRetentionScan(context.Background())
+	if err != nil {
+		t.Fatalf("run retention scan failed: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("processed = %d, want 1", n)
+	}
+
+	// 仅归档不会写 tombstone
+	tombstone, err := store.GetTombstone(context.Background(), "job_archive_1")
+	if err != nil {
+		t.Fatalf("get tombstone failed: %v", err)
+	}
+	if tombstone != nil {
+		t.Fatal("archive-only should not create tombstone")
 	}
 }

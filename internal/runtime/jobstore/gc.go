@@ -5,6 +5,7 @@ package jobstore
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -15,6 +16,21 @@ type GCConfig struct {
 	ArchiveEnabled bool          `yaml:"archive_enabled"`
 	RunInterval    time.Duration `yaml:"run_interval"`
 	BatchSize      int           `yaml:"batch_size"`
+}
+
+// ToolInvocationRef 需要归档/删除的调用记录引用
+type ToolInvocationRef struct {
+	ID string
+}
+
+// EffectLifecycleStore 可选扩展接口：支持按 TTL 管理 tool_invocations 生命周期
+type EffectLifecycleStore interface {
+	// ListExpiredToolInvocations 列出早于 cutoff 的调用记录
+	ListExpiredToolInvocations(ctx context.Context, cutoff time.Time, limit int) ([]ToolInvocationRef, error)
+	// ArchiveToolInvocations 归档调用记录（可选）
+	ArchiveToolInvocations(ctx context.Context, refs []ToolInvocationRef) error
+	// DeleteToolInvocations 删除调用记录
+	DeleteToolInvocations(ctx context.Context, refs []ToolInvocationRef) error
 }
 
 // DefaultGCConfig 默认 GC 配置
@@ -30,9 +46,50 @@ func DefaultGCConfig() GCConfig {
 
 // GC 执行 tool_invocations 表的垃圾回收
 func GC(ctx context.Context, store JobStore, config GCConfig) error {
-	// TODO: Implement GC logic
-	// 1. Find tool_invocations older than TTL
-	// 2. If archive enabled, move to archive table
-	// 3. Otherwise, delete directly
-	return nil
+	if !config.Enable {
+		return nil
+	}
+
+	lifecycleStore, ok := store.(EffectLifecycleStore)
+	if !ok {
+		// 兼容不支持 effect lifecycle 的 JobStore（memory/legacy）
+		return nil
+	}
+
+	ttlDays := config.TTLDays
+	if ttlDays <= 0 {
+		ttlDays = 90
+	}
+	batchSize := config.BatchSize
+	if batchSize <= 0 {
+		batchSize = 1000
+	}
+
+	cutoff := time.Now().UTC().AddDate(0, 0, -ttlDays)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		refs, err := lifecycleStore.ListExpiredToolInvocations(ctx, cutoff, batchSize)
+		if err != nil {
+			return fmt.Errorf("list expired tool invocations: %w", err)
+		}
+		if len(refs) == 0 {
+			return nil
+		}
+
+		if config.ArchiveEnabled {
+			if err := lifecycleStore.ArchiveToolInvocations(ctx, refs); err != nil {
+				return fmt.Errorf("archive expired tool invocations: %w", err)
+			}
+		}
+		if err := lifecycleStore.DeleteToolInvocations(ctx, refs); err != nil {
+			return fmt.Errorf("delete expired tool invocations: %w", err)
+		}
+
+		if len(refs) < batchSize {
+			return nil
+		}
+	}
 }

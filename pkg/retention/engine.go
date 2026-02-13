@@ -24,6 +24,7 @@ import (
 type Engine struct {
 	config         RetentionConfig
 	tombstoneStore TombstoneStore
+	scanner        RetentionScanner
 }
 
 // TombstoneStore Tombstone 存储接口
@@ -52,12 +53,34 @@ type Tombstone struct {
 	MetadataJSON  []byte
 }
 
+// RetentionCandidate 留存扫描候选
+type RetentionCandidate struct {
+	JobID      string
+	TenantID   string
+	AgentID    string
+	JobType    string
+	CreatedAt  time.Time
+	EventCount int
+	Archived   bool
+}
+
+// RetentionScanner 过期扫描接口
+type RetentionScanner interface {
+	// ListCandidates 返回留存扫描候选列表
+	ListCandidates(ctx context.Context) ([]RetentionCandidate, error)
+}
+
 // NewEngine 创建留存引擎
 func NewEngine(config RetentionConfig, tombstoneStore TombstoneStore) *Engine {
 	return &Engine{
 		config:         config,
 		tombstoneStore: tombstoneStore,
 	}
+}
+
+// SetScanner 设置留存扫描数据源
+func (e *Engine) SetScanner(scanner RetentionScanner) {
+	e.scanner = scanner
 }
 
 // ArchiveJob 归档 job（导出证据包到冷存储）
@@ -105,15 +128,35 @@ func (e *Engine) RunRetentionScan(ctx context.Context) (int, error) {
 	if !e.config.Enable {
 		return 0, nil
 	}
+	if e.scanner == nil {
+		return 0, nil
+	}
 
-	// TODO: 实际实现需要：
-	// 1. 查询过期的 jobs（created_at + retention_days < now）
-	// 2. 对每个过期 job：
-	//    - 如果 AutoDelete=true，调用 DeleteJob
-	//    - 否则只归档（ArchiveJob）
-	// 3. 返回处理数量
+	candidates, err := e.scanner.ListCandidates(ctx)
+	if err != nil {
+		return 0, err
+	}
 
-	return 0, nil
+	processed := 0
+	for _, c := range candidates {
+		policy := e.config.GetPolicyForJob(c.TenantID, c.JobType)
+		if e.ShouldDelete(c.CreatedAt, policy) && policy.AutoDelete {
+			if err := e.DeleteJob(ctx, c.JobID, c.TenantID, c.AgentID, "retention-engine", "retention_policy_expired", c.EventCount); err != nil {
+				return processed, err
+			}
+			processed++
+			continue
+		}
+
+		if !c.Archived && e.ShouldArchive(c.CreatedAt, policy) {
+			if _, err := e.ArchiveJob(ctx, c.JobID, c.TenantID); err != nil {
+				return processed, err
+			}
+			processed++
+		}
+	}
+
+	return processed, nil
 }
 
 // ShouldDelete 判断 job 是否应该删除
