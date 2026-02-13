@@ -230,12 +230,16 @@ func (a *ToolNodeAdapter) runConfirmation(ctx context.Context, jobID, taskID str
 	if a.ResourceVerifier == nil || len(stepChanges) == 0 {
 		return nil
 	}
+	tenant := TenantIDFromContext(ctx)
+	toolLabel := taskID
 	for _, c := range stepChanges {
 		ok, err := a.ResourceVerifier.Verify(ctx, jobID, taskID, c.ResourceType, c.ResourceID, c.Operation, c.ExternalRef)
 		if err != nil {
+			metrics.ConfirmationReplayFailTotal.WithLabelValues(tenant, toolLabel).Inc()
 			return &StepFailure{Type: StepResultPermanentFailure, Inner: err, NodeID: taskID}
 		}
 		if !ok {
+			metrics.ConfirmationReplayFailTotal.WithLabelValues(tenant, toolLabel).Inc()
 			return &StepFailure{Type: StepResultPermanentFailure, Inner: fmt.Errorf("confirmation failed: resource %s %s %s", c.ResourceType, c.ResourceID, c.Operation), NodeID: taskID}
 		}
 	}
@@ -299,6 +303,8 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 				}
 			}
 			if len(resultBytes) > 0 {
+				metrics.ToolInvocationTotal.WithLabelValues("restored").Inc()
+				metrics.ToolInvocationsTotal.WithLabelValues(TenantIDFromContext(ctx), toolName, "restore").Inc()
 				if err := a.runConfirmation(ctx, jobID, taskID, stepChanges); err != nil {
 					return nil, err
 				}
@@ -338,6 +344,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 		switch decision {
 		case InvocationDecisionReturnRecordedResult:
 			metrics.ToolInvocationTotal.WithLabelValues("restored").Inc()
+			metrics.ToolInvocationsTotal.WithLabelValues(TenantIDFromContext(ctx), toolName, "restore").Inc()
 			if err := a.runConfirmation(ctx, jobID, taskID, stepChanges); err != nil {
 				return nil, err
 			}
@@ -371,6 +378,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 		rec, _ := a.InvocationStore.GetByJobAndIdempotencyKey(ctx, jobID, idempotencyKey)
 		if rec != nil && rec.Committed && (rec.Status == ToolInvocationStatusSuccess || rec.Status == ToolInvocationStatusConfirmed) && len(rec.Result) > 0 {
 			metrics.ToolInvocationTotal.WithLabelValues("restored").Inc()
+			metrics.ToolInvocationsTotal.WithLabelValues(TenantIDFromContext(ctx), toolName, "restore").Inc()
 			if err := a.runConfirmation(ctx, jobID, taskID, stepChanges); err != nil {
 				return nil, err
 			}
@@ -391,6 +399,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 	if completed := CompletedToolInvocationsFromContext(ctx); completed != nil {
 		if resultJSON, ok := completed[idempotencyKey]; ok {
 			metrics.ToolInvocationTotal.WithLabelValues("restored").Inc()
+			metrics.ToolInvocationsTotal.WithLabelValues(TenantIDFromContext(ctx), toolName, "restore").Inc()
 			if err := a.runConfirmation(ctx, jobID, taskID, stepChanges); err != nil {
 				return nil, err
 			}
@@ -414,6 +423,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 		eff, err := a.EffectStore.GetEffectByJobAndIdempotencyKey(ctx, jobID, idempotencyKey)
 		if err == nil && eff != nil && len(eff.Output) > 0 {
 			metrics.ToolInvocationTotal.WithLabelValues("restored").Inc()
+			metrics.ToolInvocationsTotal.WithLabelValues(TenantIDFromContext(ctx), toolName, "restore").Inc()
 			if err := a.runConfirmation(ctx, jobID, taskID, stepChanges); err != nil {
 				return nil, err
 			}
@@ -552,6 +562,9 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 	finishedAt := time.Now().UTC()
 	if err != nil {
 		metrics.ToolInvocationTotal.WithLabelValues("err").Inc()
+		tenant := TenantIDFromContext(ctx)
+		metrics.ToolInvocationsTotal.WithLabelValues(tenant, toolName, "execute").Inc()
+		metrics.ToolErrorsTotal.WithLabelValues(tenant, toolName).Inc()
 		if a.InvocationLedger == nil && a.InvocationStore != nil && jobID != "" {
 			errResult, _ := json.Marshal(map[string]any{"error": err.Error()})
 			_ = a.InvocationStore.SetFinished(ctx, idempotencyKey, ToolInvocationStatusFailure, errResult, false, "")
@@ -627,6 +640,7 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 		p.Results = make(map[string]any)
 	}
 	metrics.ToolInvocationTotal.WithLabelValues("ok").Inc()
+	metrics.ToolInvocationsTotal.WithLabelValues(TenantIDFromContext(ctx), toolName, "execute").Inc()
 	attachToolEvidence(nodeResult, idempotencyKey)
 	p.Results[taskID] = nodeResult
 	if a.ToolEventSink != nil && jobID != "" {

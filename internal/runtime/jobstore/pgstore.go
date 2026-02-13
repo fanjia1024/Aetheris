@@ -107,7 +107,7 @@ func (s *pgStore) Append(ctx context.Context, jobID string, expectedVersion int,
 		var claimAttemptID string
 		err := s.pool.QueryRow(ctx, `SELECT attempt_id FROM job_claims WHERE job_id = $1 AND expires_at > now()`, jobID).Scan(&claimAttemptID)
 		if err != nil || claimAttemptID != attemptID {
-			metrics.LeaseConflictTotal.Inc()
+			metrics.LeaseConflictTotal.WithLabelValues("unknown").Inc()
 			return 0, ErrStaleAttempt
 		}
 	}

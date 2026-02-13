@@ -50,6 +50,9 @@ type executionStepIDContextKey struct{}
 // toolExecutionKeyContextKey 用于在 context 中传递当前工具执行的稳定身份，供 Tool 实现方做幂等（传给下游 idempotency key）；见 design/effect-system.md Idempotency contract
 type toolExecutionKeyContextKey struct{}
 
+// tenantIDContextKey 用于在 context 中传递 tenant ID，供 metrics 等使用
+type tenantIDContextKey struct{}
+
 var theAgentContextKey = agentContextKey{}
 var theJobIDContextKey = jobIDContextKey{}
 var theReplayContextKey = replayContextKey{}
@@ -58,6 +61,7 @@ var thePendingToolInvocationsContextKey = pendingToolInvocationsContextKey{}
 var theApprovedCorrelationKeysContextKey = approvedCorrelationKeysContextKey{}
 var theExecutionStepIDContextKey = executionStepIDContextKey{}
 var theToolExecutionKeyContextKey = toolExecutionKeyContextKey{}
+var theTenantIDContextKey = tenantIDContextKey{}
 
 // WithAgent 将 agent 放入 ctx，供 Runner.Invoke 时传入节点
 func WithAgent(ctx context.Context, agent *runtime.Agent) context.Context {
@@ -184,6 +188,24 @@ func ExecutionKeyFromContext(ctx context.Context) string {
 		return ""
 	}
 	s, _ := v.(string)
+	return s
+}
+
+// WithTenantID 将 tenant ID 放入 ctx，供 metrics 等使用
+func WithTenantID(ctx context.Context, tenantID string) context.Context {
+	return context.WithValue(ctx, theTenantIDContextKey, tenantID)
+}
+
+// TenantIDFromContext 从 context 取出 tenant ID；空则返回 "default"
+func TenantIDFromContext(ctx context.Context) string {
+	v := ctx.Value(theTenantIDContextKey)
+	if v == nil {
+		return "default"
+	}
+	s, _ := v.(string)
+	if s == "" {
+		return "default"
+	}
 	return s
 }
 

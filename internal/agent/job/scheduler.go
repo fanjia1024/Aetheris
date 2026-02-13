@@ -21,6 +21,7 @@ import (
 	"time"
 
 	agentexec "rag-platform/internal/agent/runtime/executor"
+	"rag-platform/pkg/metrics"
 )
 
 // RunJobFunc 执行单条 Job 的回调（由应用层注入，如 Runner.RunForJob）
@@ -83,6 +84,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case s.limiter <- struct{}{}:
+				tickStart := time.Now()
 				// 占一个槽位后拉取；若配置了 Queues 则按队列优先级依次尝试；Capabilities 非空时按能力派发
 				var j *Job
 				if len(s.config.Queues) > 0 {
@@ -103,11 +105,18 @@ func (s *Scheduler) Start(ctx context.Context) {
 						j, _ = s.store.ClaimNextPending(ctx)
 					}
 				}
+				metrics.SchedulerTickDurationSeconds.Observe(time.Since(tickStart).Seconds())
 				if j == nil {
+					metrics.LeaseAcquireTotal.WithLabelValues("default", "false").Inc()
 					<-s.limiter
 					time.Sleep(200 * time.Millisecond)
 					continue
 				}
+				tenant := j.TenantID
+				if tenant == "" {
+					tenant = "default"
+				}
+				metrics.LeaseAcquireTotal.WithLabelValues(tenant, "true").Inc()
 				go func(job *Job) {
 					defer func() { <-s.limiter }()
 					runCtx := context.Background()

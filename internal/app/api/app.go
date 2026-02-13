@@ -382,8 +382,12 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		if agent == nil {
 			return fmt.Errorf("agent not found: %s", j.AgentID)
 		}
+		tenantID := j.TenantID
+		if tenantID == "" {
+			tenantID = "default"
+		}
 		err := dagRunner.RunForJob(ctx, agent, &agentexec.JobForRunner{
-			ID: j.ID, AgentID: j.AgentID, Goal: j.Goal, Cursor: j.Cursor,
+			ID: j.ID, AgentID: j.AgentID, Goal: j.Goal, Cursor: j.Cursor, TenantID: tenantID,
 		})
 		if agentStateStore != nil && agent.Session != nil {
 			_ = agentStateStore.SaveAgentState(ctx, j.AgentID, agent.Session.ID, runtime.SessionToAgentState(agent.Session))

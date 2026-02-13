@@ -308,6 +308,11 @@ func (r *Runner) runParallelLevel(
 		err     error
 	}
 	runCtx := WithJobID(ctx, j.ID)
+	tenant := "default"
+	if j != nil && j.TenantID != "" {
+		tenant = j.TenantID
+	}
+	runCtx = WithTenantID(runCtx, tenant)
 	runCtx = WithAgent(runCtx, agent)
 	if replayCtx != nil && len(replayCtx.CompletedToolInvocations) > 0 {
 		runCtx = WithCompletedToolInvocations(runCtx, replayCtx.CompletedToolInvocations)
@@ -390,6 +395,20 @@ func (r *Runner) runParallelLevel(
 		if errors.Is(firstErr, context.DeadlineExceeded) {
 			resultType = StepResultRetryableFailure
 			reason = "step timeout"
+		}
+		tenant := "default"
+		if j != nil && j.TenantID != "" {
+			tenant = j.TenantID
+		}
+		nodeType := step.NodeType
+		if nodeType == "" {
+			nodeType = "unknown"
+		}
+		if reason == "step timeout" {
+			metrics.StepTimeoutTotal.WithLabelValues(tenant).Inc()
+		}
+		if resultType == StepResultRetryableFailure {
+			metrics.StepRetriesTotal.WithLabelValues(tenant, nodeType, reason).Inc()
 		}
 		if r.nodeEventSink != nil {
 			_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, []byte("{}"), 0, string(resultType), 1, resultType, reason, effectiveStepID, "")
@@ -509,10 +528,11 @@ func (r *Runner) Run(ctx context.Context, agent *runtime.Agent, goal string) err
 
 // Job 供 RunForJob 使用的最小 Job 信息（避免 executor 依赖 job 包）
 type JobForRunner struct {
-	ID      string
-	AgentID string
-	Goal    string
-	Cursor  string
+	ID       string
+	AgentID  string
+	Goal     string
+	Cursor   string
+	TenantID string // 多租户；空则 "default"，供 metrics 等使用
 }
 
 // Advance 根据当前 state（仅由事件流或 Checkpoint 推导）执行下一原子步并写事件；若无下一步则标记完成并返回 done=true（plan 3.2 事件驱动循环）
@@ -557,6 +577,11 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 	decisionID := PlanDecisionID(graphBytes)
 	effectiveStepID := DeterministicStepID(jobID, decisionID, startIndex, step.NodeType)
 	ctx = WithJobID(ctx, jobID)
+	if j != nil && j.TenantID != "" {
+		ctx = WithTenantID(ctx, j.TenantID)
+	} else {
+		ctx = WithTenantID(ctx, "default")
+	}
 	ctx = WithExecutionStepID(ctx, effectiveStepID)
 
 	// 命令级跳过与注入（同 runLoop）
@@ -689,11 +714,26 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 	if nodeType == "" {
 		nodeType = "unknown"
 	}
-	metrics.StepDurationSeconds.WithLabelValues(nodeType).Observe(float64(durationMs) / 1000)
 	resultType, reason := ClassifyError(runErr)
 	if runErr != nil && errors.Is(runErr, context.DeadlineExceeded) {
 		resultType = StepResultRetryableFailure
 		reason = "step timeout"
+	}
+	tenant := "default"
+	if j != nil && j.TenantID != "" {
+		tenant = j.TenantID
+	}
+	ok := !isStepFailure(resultType)
+	okStr := "false"
+	if ok {
+		okStr = "true"
+	}
+	metrics.StepDurationSeconds.WithLabelValues(tenant, nodeType, okStr).Observe(float64(durationMs) / 1000)
+	if reason == "step timeout" {
+		metrics.StepTimeoutTotal.WithLabelValues(tenant).Inc()
+	}
+	if resultType == StepResultRetryableFailure {
+		metrics.StepRetriesTotal.WithLabelValues(tenant, nodeType, reason).Inc()
 	}
 	if resultType == StepResultSuccess {
 		if step.NodeType == "tool" {
@@ -888,6 +928,11 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 runLoop:
 
 	ctx = WithJobID(ctx, j.ID)
+	tenantCtx := "default"
+	if j.TenantID != "" {
+		tenantCtx = j.TenantID
+	}
+	ctx = WithTenantID(ctx, tenantCtx)
 	const statusCompleted = 2 // 对应 job.StatusCompleted
 	const statusWaiting = 5   // 对应 job.StatusWaiting（design/job-state-machine.md）
 	graphBytes, _ := taskGraph.Marshal()
@@ -1139,6 +1184,26 @@ runLoop:
 		if runErr != nil && errors.Is(runErr, context.DeadlineExceeded) {
 			resultType = StepResultRetryableFailure
 			reason = "step timeout"
+		}
+		tenant := "default"
+		if j != nil && j.TenantID != "" {
+			tenant = j.TenantID
+		}
+		nodeType := step.NodeType
+		if nodeType == "" {
+			nodeType = "unknown"
+		}
+		ok := !isStepFailure(resultType)
+		okStr := "false"
+		if ok {
+			okStr = "true"
+		}
+		metrics.StepDurationSeconds.WithLabelValues(tenant, nodeType, okStr).Observe(float64(durationMs) / 1000)
+		if reason == "step timeout" {
+			metrics.StepTimeoutTotal.WithLabelValues(tenant).Inc()
+		}
+		if resultType == StepResultRetryableFailure {
+			metrics.StepRetriesTotal.WithLabelValues(tenant, nodeType, reason).Inc()
 		}
 		// 世界语义：tool 成功 = 已提交副作用；非 tool 成功 = 纯计算（Pure），replay 可重放
 		if resultType == StepResultSuccess {

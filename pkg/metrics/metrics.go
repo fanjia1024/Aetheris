@@ -38,6 +38,11 @@ func init() {
 		DecisionQualityScore, AnomalyDetectedTotal, SignatureVerificationTotal,
 		// P0 SLO metrics
 		JobStateGauge, StepDurationSeconds, LeaseConflictTotal, ToolInvocationTotal,
+		// Metrics MVP: tenant-aware + SLO
+		JobsTotal, JobLatencySeconds,
+		StepRetriesTotal, StepTimeoutTotal,
+		LeaseAcquireTotal, SchedulerTickDurationSeconds,
+		ToolInvocationsTotal, ToolErrorsTotal, ConfirmationReplayFailTotal,
 	)
 }
 
@@ -198,22 +203,23 @@ var JobStateGauge = prometheus.NewGaugeVec(
 	[]string{"state"}, // pending | running | waiting | parked | completed | failed | cancelled
 )
 
-// StepDurationSeconds 单步执行耗时（秒）（P0 SLO）
+// StepDurationSeconds 单步执行耗时（秒）（P0 SLO）；tenant/step_type/ok 供 SLO
 var StepDurationSeconds = prometheus.NewHistogramVec(
 	prometheus.HistogramOpts{
 		Name:    "aetheris_step_duration_seconds",
 		Help:    "单步执行耗时（秒）",
 		Buckets: prometheus.DefBuckets,
 	},
-	[]string{"node_type"}, // llm | tool | ...
+	[]string{"tenant", "step_type", "ok"}, // ok: true|false
 )
 
-// LeaseConflictTotal 租约冲突次数（ErrStaleAttempt）（P0 SLO）
-var LeaseConflictTotal = prometheus.NewCounter(
+// LeaseConflictTotal 租约冲突次数（ErrStaleAttempt）（P0 SLO）；tenant 未知时用 "unknown"
+var LeaseConflictTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "aetheris_lease_conflict_total",
 		Help: "Append 时 attempt_id 不匹配导致的拒绝次数",
 	},
+	[]string{"tenant"},
 )
 
 // ToolInvocationTotal 工具调用次数（按结果分类）（P0 SLO）
@@ -223,6 +229,90 @@ var ToolInvocationTotal = prometheus.NewCounterVec(
 		Help: "工具调用次数（ok=真实执行成功, err=执行失败, restored=Replay/恢复注入）",
 	},
 	[]string{"result"}, // ok | err | restored
+)
+
+// --- Metrics MVP (SLO + tenant) ---
+
+// JobsTotal 创建/终态 Job 总数（tenant, status）；创建时 status=pending，完成时 completed/failed/cancelled
+var JobsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "aetheris_jobs_total",
+		Help: "Job 总数（按租户与状态）",
+	},
+	[]string{"tenant", "status"},
+)
+
+// JobLatencySeconds 从 created 到 done 的耗时直方图（tenant, status）
+var JobLatencySeconds = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "aetheris_job_latency_seconds",
+		Help:    "Job 从创建到完成的耗时（秒）",
+		Buckets: prometheus.DefBuckets,
+	},
+	[]string{"tenant", "status"},
+)
+
+// StepRetriesTotal 单步重试次数（tenant, step_type, reason）
+var StepRetriesTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "aetheris_step_retries_total",
+		Help: "单步重试次数",
+	},
+	[]string{"tenant", "step_type", "reason"},
+)
+
+// StepTimeoutTotal 单步超时次数（tenant）
+var StepTimeoutTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "aetheris_step_timeout_total",
+		Help: "单步超时次数",
+	},
+	[]string{"tenant"},
+)
+
+// LeaseAcquireTotal 抢 lease 成功/失败（tenant, ok）
+var LeaseAcquireTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "aetheris_lease_acquire_total",
+		Help: "Scheduler 认领 Pending Job 次数（ok=成功）",
+	},
+	[]string{"tenant", "ok"},
+)
+
+// SchedulerTickDurationSeconds Scheduler 单次 tick 耗时（从 limiter 到 claim 结束）
+var SchedulerTickDurationSeconds = prometheus.NewHistogram(
+	prometheus.HistogramOpts{
+		Name:    "aetheris_scheduler_tick_duration_seconds",
+		Help:    "Scheduler 单次 tick 耗时（秒）",
+		Buckets: prometheus.DefBuckets,
+	},
+)
+
+// ToolInvocationsTotal 工具调用次数（tenant, tool, mode=execute|restore）
+var ToolInvocationsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "aetheris_tool_invocations_total",
+		Help: "工具调用次数（mode=execute 真实执行, mode=restore 恢复/注入）",
+	},
+	[]string{"tenant", "tool", "mode"},
+)
+
+// ToolErrorsTotal 工具执行失败次数（tenant, tool）
+var ToolErrorsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "aetheris_tool_errors_total",
+		Help: "工具执行失败次数",
+	},
+	[]string{"tenant", "tool"},
+)
+
+// ConfirmationReplayFailTotal confirmation replay 校验失败次数（tenant, tool）
+var ConfirmationReplayFailTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "aetheris_confirmation_replay_fail_total",
+		Help: "World-consistent replay 校验失败次数",
+	},
+	[]string{"tenant", "tool"},
 )
 
 // WritePrometheus 将 Prometheus 文本格式写入 w（供 Hertz 等复用）

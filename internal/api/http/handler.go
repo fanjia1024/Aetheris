@@ -975,6 +975,7 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 			})
 			return
 		}
+		metrics.JobsTotal.WithLabelValues(tenantID, "pending").Inc()
 		if h.jobEventStore != nil {
 			payload, _ := json.Marshal(map[string]string{"agent_id": id, "goal": req.Message})
 			ver, errAppend := h.jobEventStore.Append(ctx, jobIDOut, 0, jobstore.JobEvent{

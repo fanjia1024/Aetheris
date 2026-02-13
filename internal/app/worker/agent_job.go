@@ -233,6 +233,10 @@ func (r *AgentJobRunner) executeJob(ctx context.Context, jobID string, attemptID
 	metrics.WorkerBusy.WithLabelValues(r.workerID).Inc()
 	defer metrics.WorkerBusy.WithLabelValues(r.workerID).Dec()
 	start := time.Now()
+	tenant := j.TenantID
+	if tenant == "" {
+		tenant = "default"
+	}
 	defer func() {
 		dur := time.Since(start).Seconds()
 		metrics.JobDuration.WithLabelValues(j.AgentID).Observe(dur)
@@ -285,8 +289,11 @@ func (r *AgentJobRunner) executeJob(ctx context.Context, jobID string, attemptID
 	<-heartbeatDone
 	if runCtx.Err() == context.Canceled {
 		r.logger.Info("Job 已取消", "job_id", jobID)
+		dur := time.Since(start).Seconds()
 		metrics.JobTotal.WithLabelValues("cancelled").Inc()
 		metrics.JobFailTotal.WithLabelValues("cancelled").Inc()
+		metrics.JobsTotal.WithLabelValues(tenant, "cancelled").Inc()
+		metrics.JobLatencySeconds.WithLabelValues(tenant, "cancelled").Observe(dur)
 		_, ver, _ := r.jobEventStore.ListEvents(ctx, jobID)
 		payload, _ := json.Marshal(map[string]interface{}{"goal": j.Goal})
 		_, _ = r.jobEventStore.Append(runCtx, jobID, ver, jobstore.JobEvent{JobID: jobID, Type: jobstore.JobCancelled, Payload: payload})
@@ -295,8 +302,11 @@ func (r *AgentJobRunner) executeJob(ctx context.Context, jobID string, attemptID
 	}
 	if err != nil {
 		r.logger.Info("Job 执行失败", "job_id", jobID, "error", err)
+		dur := time.Since(start).Seconds()
 		metrics.JobTotal.WithLabelValues("failed").Inc()
 		metrics.JobFailTotal.WithLabelValues("failed").Inc()
+		metrics.JobsTotal.WithLabelValues(tenant, "failed").Inc()
+		metrics.JobLatencySeconds.WithLabelValues(tenant, "failed").Observe(dur)
 		// Append job_failed so event stream has terminal event; include result_type when available
 		if r.jobEventStore != nil {
 			_, ver, _ := r.jobEventStore.ListEvents(ctx, jobID)
@@ -312,7 +322,10 @@ func (r *AgentJobRunner) executeJob(ctx context.Context, jobID string, attemptID
 		}
 		return
 	}
+	dur := time.Since(start).Seconds()
 	metrics.JobTotal.WithLabelValues("completed").Inc()
+	metrics.JobsTotal.WithLabelValues(tenant, "completed").Inc()
+	metrics.JobLatencySeconds.WithLabelValues(tenant, "completed").Observe(dur)
 	// 事件与状态已在 runJob 内写回（由注入的 runJob 负责 Append job_completed/job_failed 与 UpdateStatus）
 }
 

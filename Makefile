@@ -10,7 +10,7 @@ WORKER_PID := $(BIN_DIR)/worker.pid
 API_LOG   := $(BIN_DIR)/api.log
 WORKER_LOG := $(BIN_DIR)/worker.log
 
-.PHONY: build run stop clean test vet fmt tidy help
+.PHONY: build run stop clean test vet fmt fmt-check tidy help
 
 # 默认目标：帮助
 help:
@@ -21,7 +21,8 @@ help:
 	@echo "  make clean   - 删除 $(BIN_DIR)/"
 	@echo "  make test    - 运行测试"
 	@echo "  make vet     - go vet"
-	@echo "  make fmt     - gofmt -w"
+	@echo "  make fmt       - gofmt -w"
+	@echo "  make fmt-check - 检查格式（未通过则 exit 1，与 CI 一致）"
 	@echo "  make tidy    - go mod tidy"
 
 # 构建所有二进制
@@ -61,6 +62,13 @@ vet:
 
 fmt:
 	gofmt -w .
+
+fmt-check:
+	@if [ -n "$$(gofmt -l .)" ]; then \
+		echo "The following files are not formatted with gofmt:"; \
+		gofmt -l .; \
+		exit 1; \
+	fi
 
 tidy:
 	go mod tidy

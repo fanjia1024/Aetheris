@@ -74,6 +74,9 @@ func (r *Router) Build(addr string, opts ...config.Option) *server.Hertz {
 	h.Use(r.middleware.AccessLog())
 	h.Use(r.middleware.CORS())
 
+	// Prometheus 抓取用；无认证，与 CI/运维约定一致
+	h.GET("/metrics", r.handler.SystemMetrics)
+
 	api := h.Group("/api")
 	api.GET("/health", r.handler.HealthCheck)
 	if r.jwtAuth != nil {

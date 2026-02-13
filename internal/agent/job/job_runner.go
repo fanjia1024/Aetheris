@@ -65,8 +65,12 @@ func (r *JobRunner) Start(ctx context.Context) {
 				_ = r.store.UpdateStatus(runCtx, j.ID, StatusFailed)
 				continue
 			}
+			tenantID := j.TenantID
+			if tenantID == "" {
+				tenantID = "default"
+			}
 			err := r.runner.RunForJob(runCtx, agent, &agentexec.JobForRunner{
-				ID: j.ID, AgentID: j.AgentID, Goal: j.Goal, Cursor: j.Cursor,
+				ID: j.ID, AgentID: j.AgentID, Goal: j.Goal, Cursor: j.Cursor, TenantID: tenantID,
 			})
 			if err != nil {
 				_ = r.store.UpdateStatus(runCtx, j.ID, StatusFailed)

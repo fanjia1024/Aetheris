@@ -82,7 +82,7 @@ func (s *memoryStore) Append(ctx context.Context, jobID string, expectedVersion 
 		claim, ok := s.claims[jobID]
 		s.mu.RUnlock()
 		if !ok || claim.ExpiresAt.Before(time.Now()) || claim.AttemptID != attemptID {
-			metrics.LeaseConflictTotal.Inc()
+			metrics.LeaseConflictTotal.WithLabelValues("unknown").Inc()
 			return 0, ErrStaleAttempt
 		}
 	}
