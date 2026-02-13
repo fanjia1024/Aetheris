@@ -550,6 +550,54 @@ Before deploying Aetheris to production:
 
 ---
 
+## Distributed Consistency Test Runbook
+
+Use these tests to validate multi-worker and replay consistency guarantees in CI or pre-release checks.
+
+### 1) Ledger + Tool at-most-once stress (single package)
+
+```bash
+go test ./internal/agent/runtime/executor -run 'TestStress_MultiWorkerRace|TestStress_ManyJobs|TestStress_CrashAfterToolBeforeCommit|TestLedger_3_DoubleWorker_OnlyOneCommit' -v
+```
+
+Expected:
+- No duplicate committed tool result for the same idempotency key.
+- Recovery path returns recorded result instead of re-executing tool side effects.
+
+### 2) Reclaim and second-worker resume
+
+```bash
+go test ./internal/agent/job -run 'TestHA_ReclaimThenSecondWorkerCanClaim|TestScanAndReclaimExpired_WithAndWithoutBlocking' -v
+```
+
+Expected:
+- Expired running jobs are reclaimed to Pending.
+- Another worker can claim and continue after reclaim.
+- Blocked jobs are not reclaimed until unblocked.
+
+### 3) Step timeout + retry policy semantics
+
+```bash
+go test ./internal/agent/runtime/executor -run 'TestRunnerParallelLevel_TimeoutClassifiedAsRetryableFailure|TestToolNodeAdapter_RetryPolicyBackoff|TestToolNodeAdapter_RetryPolicyStopsOnNonRetryable' -v
+```
+
+Expected:
+- `context.DeadlineExceeded` is mapped to `retryable_failure` with reason `step timeout`.
+- Tool retries honor `RetryPolicy.MaxRetries` and `RetryPolicy.Backoff`.
+- Non-retryable errors stop immediately.
+
+### 4) Full regression (recommended before release)
+
+```bash
+go test ./...
+go test -race ./...
+```
+
+Expected:
+- All runtime, reclaim, replay, and tool-contract tests pass under normal and race mode.
+
+---
+
 ## References
 
 - [design/execution-guarantees.md](../design/execution-guarantees.md) — Formal guarantees table
