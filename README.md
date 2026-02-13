@@ -207,9 +207,13 @@ The project provides a Makefile for one-command build and startup of all service
 | `make` / `make help` | Show help |
 | `make build` | Build api, worker, and cli into `bin/` |
 | `make run` | **Build and start API + Worker in background** (one-command startup) |
+| `make run-api` | Build and start only API in background |
+| `make run-worker` | Build and start only Worker in background |
+| `make run-all` | Alias of `make run` |
 | `make stop` | Stop API and Worker started by `make run` |
 | `make clean` | Remove `bin/` |
 | `make test` | Run tests |
+| `make test-integration` | Run key integration suites (runtime + http) |
 | `make vet` | go vet |
 | `make fmt` | gofmt -w |
 | `make tidy` | go mod tidy |

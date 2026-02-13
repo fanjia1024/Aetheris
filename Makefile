@@ -10,16 +10,20 @@ WORKER_PID := $(BIN_DIR)/worker.pid
 API_LOG   := $(BIN_DIR)/api.log
 WORKER_LOG := $(BIN_DIR)/worker.log
 
-.PHONY: build run stop clean test vet fmt fmt-check tidy help
+.PHONY: build run run-all run-api run-worker stop clean test test-integration vet fmt fmt-check tidy help
 
 # 默认目标：帮助
 help:
 	@echo "用法:"
 	@echo "  make build   - 构建 api、worker、cli 到 $(BIN_DIR)/"
 	@echo "  make run     - 构建并后台启动 API + Worker（一键启动所有服务）"
+	@echo "  make run-api - 仅后台启动 API（会先 build）"
+	@echo "  make run-worker - 仅后台启动 Worker（会先 build）"
+	@echo "  make run-all - 等价 make run"
 	@echo "  make stop    - 停止由 make run 启动的 API 与 Worker"
 	@echo "  make clean   - 删除 $(BIN_DIR)/"
 	@echo "  make test    - 运行测试"
+	@echo "  make test-integration - 运行关键集成测试（runtime + http）"
 	@echo "  make vet     - go vet"
 	@echo "  make fmt       - gofmt -w"
 	@echo "  make fmt-check - 检查格式（未通过则 exit 1，与 CI 一致）"
@@ -35,15 +39,24 @@ build:
 
 # 构建并启动 API + Worker（后台），并写入 PID 与日志
 run: build
-	@mkdir -p $(BIN_DIR)
-	@if [ -f $(API_PID) ]; then kill -0 $$(cat $(API_PID)) 2>/dev/null && { echo "API 已在运行 (PID $$(cat $(API_PID))), 先执行 make stop"; exit 1; }; fi
-	@if [ -f $(WORKER_PID) ]; then kill -0 $$(cat $(WORKER_PID)) 2>/dev/null && { echo "Worker 已在运行 (PID $$(cat $(WORKER_PID))), 先执行 make stop"; exit 1; }; fi
-	$(API_BIN) > $(API_LOG) 2>&1 & echo $$! > $(API_PID)
-	$(WORKER_BIN) > $(WORKER_LOG) 2>&1 & echo $$! > $(WORKER_PID)
-	@echo "API 已启动 (PID $$(cat $(API_PID))), 日志: $(API_LOG)"
-	@echo "Worker 已启动 (PID $$(cat $(WORKER_PID))), 日志: $(WORKER_LOG)"
+	@$(MAKE) run-api
+	@$(MAKE) run-worker
 	@echo "停止服务: make stop"
 	@echo "健康检查: curl http://localhost:8080/api/health"
+
+run-all: run
+
+run-api: build
+	@mkdir -p $(BIN_DIR)
+	@if [ -f $(API_PID) ]; then kill -0 $$(cat $(API_PID)) 2>/dev/null && { echo "API 已在运行 (PID $$(cat $(API_PID))), 先执行 make stop"; exit 1; }; fi
+	$(API_BIN) > $(API_LOG) 2>&1 & echo $$! > $(API_PID)
+	@echo "API 已启动 (PID $$(cat $(API_PID))), 日志: $(API_LOG)"
+
+run-worker: build
+	@mkdir -p $(BIN_DIR)
+	@if [ -f $(WORKER_PID) ]; then kill -0 $$(cat $(WORKER_PID)) 2>/dev/null && { echo "Worker 已在运行 (PID $$(cat $(WORKER_PID))), 先执行 make stop"; exit 1; }; fi
+	$(WORKER_BIN) > $(WORKER_LOG) 2>&1 & echo $$! > $(WORKER_PID)
+	@echo "Worker 已启动 (PID $$(cat $(WORKER_PID))), 日志: $(WORKER_LOG)"
 
 # 停止由 make run 启动的进程
 stop:
@@ -56,6 +69,9 @@ clean:
 
 test:
 	go test -v -race -count=1 ./...
+
+test-integration:
+	go test -v ./internal/agent/runtime/executor ./internal/api/http
 
 vet:
 	go vet ./...
