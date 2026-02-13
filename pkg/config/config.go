@@ -72,7 +72,13 @@ type APIConfig struct {
 	Timeout    string           `mapstructure:"timeout"`
 	CORS       CORSConfig       `mapstructure:"cors"`
 	Middleware MiddlewareConfig `mapstructure:"middleware"`
+	Forensics  ForensicsConfig  `mapstructure:"forensics"`
 	Grpc       GrpcConfig       `mapstructure:"grpc"`
+}
+
+// ForensicsConfig 取证查询类接口配置
+type ForensicsConfig struct {
+	Experimental bool `mapstructure:"experimental"`
 }
 
 // GrpcConfig gRPC 服务配置

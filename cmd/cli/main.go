@@ -18,6 +18,7 @@ import (
 	"bufio"
 	"embed"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -26,6 +27,7 @@ import (
 	"time"
 
 	"rag-platform/pkg/config"
+	"rag-platform/pkg/proof"
 )
 
 //go:embed templates/agent-minimal
@@ -118,7 +120,7 @@ func main() {
 		runDebug(args[0], compareReplay)
 	case "verify":
 		if len(args) < 1 {
-			fmt.Fprintf(os.Stderr, "Usage: aetheris verify <job_id>\n")
+			fmt.Fprintf(os.Stderr, "Usage: aetheris verify <job_id> | aetheris verify <evidence.zip>\n")
 			os.Exit(1)
 		}
 		if strings.HasSuffix(args[0], ".zip") {
@@ -160,7 +162,7 @@ func printUsage() {
 	fmt.Println("  cancel <job_id> - 请求取消执行中的 Job")
 	fmt.Println("  debug <job_id> [--compare-replay] - Agent 调试器：timeline + evidence + replay verification")
 	fmt.Println("  verify <job_id> - 执行验证：输出 execution_hash、event_chain_root、ledger proof、replay proof")
-	fmt.Println("  verify <evidence.zip> - 当前未实现（保留命令入口）")
+	fmt.Println("  verify <evidence.zip> - 离线验证证据包完整性")
 	fmt.Println("  export <job_id> [--output evidence.zip] - 导出 Job 证据包（2.0-M1）")
 	fmt.Println("  init [dir]      - Scaffold a minimal agent project (templates + config) into current dir or dir")
 }
@@ -587,11 +589,39 @@ func runExport(args []string) {
 
 // runVerifyEvidenceZip 验证证据包（2.0-M1）
 func runVerifyEvidenceZip(zipPath string) {
-	_, err := os.ReadFile(zipPath)
+	code := verifyEvidenceZip(zipPath, os.Stdout, os.Stderr)
+	os.Exit(code)
+}
+
+func verifyEvidenceZip(zipPath string, stdout, stderr io.Writer) int {
+	zipBytes, err := os.ReadFile(zipPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "Error reading file: %v\n", err)
+		return 1
 	}
-	fmt.Fprintln(os.Stderr, "verify <evidence.zip> is not implemented yet")
-	os.Exit(1)
+
+	result := proof.VerifyEvidenceZip(zipBytes)
+	fmt.Fprintf(stdout, "Verifying evidence package: %s\n\n", zipPath)
+	fmt.Fprintln(stdout, "=== Verification Results ===")
+
+	if result.OK {
+		fmt.Fprintln(stdout, "✓ Verification PASSED")
+		fmt.Fprintf(stdout, "  - Events: %d valid\n", len(result.Events))
+		if result.HashChainValid {
+			fmt.Fprintln(stdout, "  - Hash chain: OK")
+		}
+		if result.LedgerValid {
+			fmt.Fprintln(stdout, "  - Ledger consistency: OK")
+		}
+		if result.ManifestValid {
+			fmt.Fprintln(stdout, "  - Manifest: OK")
+		}
+		return 0
+	}
+
+	fmt.Fprintln(stdout, "✗ Verification FAILED")
+	for _, e := range result.Errors {
+		fmt.Fprintf(stdout, "  - %s\n", e)
+	}
+	return 1
 }

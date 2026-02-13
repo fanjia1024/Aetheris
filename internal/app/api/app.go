@@ -447,6 +447,9 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 
 	mw := middleware.NewMiddleware()
 	router := http.NewRouter(handler, mw)
+	if bootstrap.Config != nil {
+		router.SetForensicsExperimental(bootstrap.Config.API.Forensics.Experimental)
+	}
 
 	if bootstrap.Config != nil && bootstrap.Config.API.Middleware.Auth && bootstrap.Config.API.Middleware.JWTKey != "" {
 		timeout := parseDuration(bootstrap.Config.API.Middleware.JWTTimeout, time.Hour)

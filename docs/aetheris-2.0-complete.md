@@ -1,6 +1,6 @@
 # Aetheris 2.0 Complete - 生产级可审计 Agent Runtime
 
-> 当前状态（main）：部分 2.0 CLI/API 仍在开发中。`aetheris verify <evidence.zip>` 与 Forensics API 查询类接口尚未实现完成。
+> 当前状态（main）：部分 2.0 API 仍在开发中（主要是 Forensics 查询类接口）。
 
 ## 总览
 
@@ -23,7 +23,7 @@ Aetheris 2.0 通过 3 个里程碑（M1、M2、M3）实现了**审计合规 / �
 **CLI**:
 ```bash
 aetheris export job_123        # 导出证据包
-# aetheris verify evidence.zip # 计划能力，当前 main 未实现
+aetheris verify evidence.zip   # 离线验证
 ```
 
 ### M2: RBAC + 脱敏 + 留存 ✅
@@ -354,7 +354,7 @@ forensics:
 
 ```bash
 aetheris export <job_id>         # 导出证据包
-# aetheris verify <evidence.zip> # 计划能力，当前 main 未实现
+aetheris verify <evidence.zip>   # 验证证据包
 ```
 
 ### M2 命令
@@ -549,7 +549,7 @@ aetheris chat demo-agent
 aetheris export <job_id>
 
 # 4. 验证证据包
-# aetheris verify evidence-<job_id>.zip  # 计划能力，当前 main 未实现
+aetheris verify evidence-<job_id>.zip
 
 # 5. 查看 UI
 open http://localhost:8080/api/jobs/<job_id>/trace/page

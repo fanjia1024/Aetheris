@@ -110,9 +110,9 @@ redaction:
 # 导出时应用脱敏（需要配置 redaction.enable=true）
 aetheris export job_123 --output evidence-redacted.zip
 
-# 当前 main：证据包 verify CLI 入口未实现
+# 验证脱敏后的证据包（hash 链仍然有效）
 aetheris verify evidence-redacted.zip
-# 输出: verify <evidence.zip> is not implemented yet
+# 输出: ✓ Verification PASSED
 ```
 
 ### API 使用
@@ -137,7 +137,11 @@ curl -X POST -H "Authorization: Bearer <token>" \
 
 ```bash
 $ aetheris verify evidence-redacted.zip
-verify <evidence.zip> is not implemented yet
+✓ Verification PASSED
+  - Events: 100 valid
+  - Hash chain: OK
+  - Ledger consistency: OK
+  - Manifest: OK
 ```
 
 ### Ledger 一致性

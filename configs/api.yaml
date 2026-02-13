@@ -14,6 +14,9 @@ api:
     jwt_key: ""
     jwt_timeout: "1h"
     jwt_max_refresh: "1h"
+  # 取证查询类接口开关（默认关闭，避免暴露实验能力）
+  forensics:
+    experimental: false
   grpc:
     enable: false
     port: 9090

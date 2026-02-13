@@ -38,8 +38,7 @@ The CLI uses the **AETHERIS_API_URL** environment variable for the API base URL;
 | cancel \<job_id\> | Request cancel of a running job |
 | debug \<job_id\> [--compare-replay] | Agent debugger: timeline + evidence + replay verification |
 | verify \<job_id\> | Execution verification: execution_hash, event_chain_root_hash, ledger proof, replay proof |
-
-`verify <evidence.zip>` command entry exists but is not implemented on current `main`.
+| verify \<evidence.zip\> | Offline evidence package verification |
 
 ## Mapping to REST API
 

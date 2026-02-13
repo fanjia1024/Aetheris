@@ -24,17 +24,19 @@ import (
 
 // Router HTTP 路由器（Hertz）
 type Router struct {
-	handler    *Handler
-	middleware *middleware.Middleware
-	jwtAuth    *middleware.JWTAuth
-	authz      *middleware.AuthZMiddleware
+	handler               *Handler
+	middleware            *middleware.Middleware
+	jwtAuth               *middleware.JWTAuth
+	authz                 *middleware.AuthZMiddleware
+	forensicsExperimental bool
 }
 
 // NewRouter 创建新的 HTTP 路由器
 func NewRouter(handler *Handler, mw *middleware.Middleware) *Router {
 	return &Router{
-		handler:    handler,
-		middleware: mw,
+		handler:               handler,
+		middleware:            mw,
+		forensicsExperimental: false,
 	}
 }
 
@@ -46,6 +48,11 @@ func (r *Router) SetJWT(jwtAuth *middleware.JWTAuth) {
 // SetAuthZ 设置 RBAC 授权中间件（可选；启用后需在 Build 前调用）
 func (r *Router) SetAuthZ(authz *middleware.AuthZMiddleware) {
 	r.authz = authz
+}
+
+// SetForensicsExperimental 设置 Forensics 查询类接口是否暴露（默认 false）
+func (r *Router) SetForensicsExperimental(enabled bool) {
+	r.forensicsExperimental = enabled
 }
 
 // authChain 返回认证链：authHandler + InjectAuthContext；若启用 RBAC 则追加 RequirePermission
@@ -144,17 +151,21 @@ func (r *Router) Build(addr string, opts ...config.Option) *server.Hertz {
 		jobs.GET("/:id/nodes/:node_id", r.authChainWith(auth.PermissionTraceView, r.handler.GetJobNode)...)
 		jobs.GET("/:id/trace/page", r.authChainWith(auth.PermissionTraceView, r.handler.GetJobTracePage)...)
 		jobs.POST("/:id/export", r.authChainWith(auth.PermissionJobExport, r.handler.ExportJobForensics)...)
-		jobs.GET("/:id/evidence-graph", r.authChainWith(auth.PermissionAuditView, r.handler.GetJobEvidenceGraph)...)
-		jobs.GET("/:id/audit-log", r.authChainWith(auth.PermissionAuditView, r.handler.GetJobAuditLog)...)
+		if r.forensicsExperimental {
+			jobs.GET("/:id/evidence-graph", r.authChainWith(auth.PermissionAuditView, r.handler.GetJobEvidenceGraph)...)
+			jobs.GET("/:id/audit-log", r.authChainWith(auth.PermissionAuditView, r.handler.GetJobAuditLog)...)
+		}
 	}
 
-	// 2.0-M3: Forensics API
-	forensics := api.Group("/forensics")
-	{
-		forensics.POST("/query", r.authChainWith(auth.PermissionJobExport, r.handler.ForensicsQuery)...)
-		forensics.POST("/batch-export", r.authChainWith(auth.PermissionJobExport, r.handler.ForensicsBatchExport)...)
-		forensics.GET("/export-status/:task_id", r.authChainWith(auth.PermissionJobExport, r.handler.ForensicsExportStatus)...)
-		forensics.GET("/consistency/:job_id", r.authChainWith(auth.PermissionJobView, r.handler.ForensicsConsistencyCheck)...)
+	// 2.0-M3: Forensics 查询类接口（实验能力，默认不暴露）
+	if r.forensicsExperimental {
+		forensics := api.Group("/forensics")
+		{
+			forensics.POST("/query", r.authChainWith(auth.PermissionJobExport, r.handler.ForensicsQuery)...)
+			forensics.POST("/batch-export", r.authChainWith(auth.PermissionJobExport, r.handler.ForensicsBatchExport)...)
+			forensics.GET("/export-status/:task_id", r.authChainWith(auth.PermissionJobExport, r.handler.ForensicsExportStatus)...)
+			forensics.GET("/consistency/:job_id", r.authChainWith(auth.PermissionJobView, r.handler.ForensicsConsistencyCheck)...)
+		}
 	}
 
 	toolsGroup := api.Group("/tools")

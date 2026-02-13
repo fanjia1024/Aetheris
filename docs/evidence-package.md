@@ -1,6 +1,6 @@
 # Evidence Package - 可验证证据包系统
 
-> 当前状态（main）：`aetheris export <job_id>` 可用；`aetheris verify <evidence.zip>` 命令入口已保留但尚未实现。
+> 当前状态（main）：`aetheris export <job_id>` 与 `aetheris verify <evidence.zip>` 均可用。
 
 ## 概述
 
@@ -103,15 +103,25 @@ aetheris export job_abc123 --output /path/to/evidence.zip
 $ aetheris export job_abc123
 Exporting evidence package for job job_abc123...
 ✓ Evidence package exported to: evidence-job_abc123.zip
-  Verification command is planned: aetheris verify evidence-job_abc123.zip (not implemented on main)
+  To verify: aetheris verify evidence-job_abc123.zip
 ```
 
-### 验证证据包（计划中）
+### 验证证据包
 
 ```bash
-# 当前 main 分支会返回未实现：
+# 基本用法
 aetheris verify <evidence.zip>
-# stderr: verify <evidence.zip> is not implemented yet
+
+# 示例：验证通过
+$ aetheris verify evidence.zip
+Verifying evidence package: evidence.zip
+
+=== Verification Results ===
+✓ Verification PASSED
+  - Events: 482 valid
+  - Hash chain: OK
+  - Ledger consistency: OK
+  - Manifest: OK
 ```
 
 ---

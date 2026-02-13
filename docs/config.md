@@ -19,6 +19,7 @@ This document describes the config files under `configs/` for deployment and tro
 | middleware.auth | Enable auth |
 | middleware.rate_limit / rate_limit_rps | Rate limit toggle and RPS |
 | middleware.jwt_key / jwt_timeout / jwt_max_refresh | JWT (when auth is true); prefer `${JWT_SECRET}` env for jwt_key |
+| forensics.experimental | Whether to expose experimental forensics query endpoints (`/api/forensics/*`, `/api/jobs/:id/evidence-graph`, `/api/jobs/:id/audit-log`) |
 | grpc.enable / port | gRPC toggle and port, default 9090 |
 
 ### jobstore

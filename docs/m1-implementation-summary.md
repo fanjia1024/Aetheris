@@ -1,6 +1,6 @@
 # 2.0-M1 Implementation Summary
 
-> 历史阶段性总结文档。以当前 `main` 实际行为为准：`aetheris verify <evidence.zip>` 仍未实现。
+> 历史阶段性总结文档。以当前 `main` 实际行为为准；后续能力状态请参考 `README.md` 与 `docs/cli.md`。
 
 ## 完成状态
 

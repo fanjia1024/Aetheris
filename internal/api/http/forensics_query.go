@@ -23,6 +23,13 @@ import (
 	"rag-platform/pkg/forensics"
 )
 
+func respondNotImplemented(ctx *app.RequestContext, message string) {
+	ctx.JSON(consts.StatusNotImplemented, map[string]string{
+		"code":    "not_implemented",
+		"message": message,
+	})
+}
+
 // ForensicsQuery 取证查询（2.0-M3）
 // POST /api/forensics/query
 func (h *Handler) ForensicsQuery(c context.Context, ctx *app.RequestContext) {
@@ -34,9 +41,7 @@ func (h *Handler) ForensicsQuery(c context.Context, ctx *app.RequestContext) {
 		return
 	}
 
-	ctx.JSON(consts.StatusNotImplemented, map[string]string{
-		"error": "forensics query is not implemented yet",
-	})
+	respondNotImplemented(ctx, "forensics query is not implemented yet")
 }
 
 // ForensicsBatchExport 批量导出证据包（2.0-M3）
@@ -60,39 +65,29 @@ func (h *Handler) ForensicsBatchExport(c context.Context, ctx *app.RequestContex
 		return
 	}
 
-	ctx.JSON(consts.StatusNotImplemented, map[string]string{
-		"error": "forensics batch export is not implemented yet",
-	})
+	respondNotImplemented(ctx, "forensics batch export is not implemented yet")
 }
 
 // ForensicsExportStatus 查询批量导出状态（2.0-M3）
 // GET /api/forensics/export-status/:task_id
 func (h *Handler) ForensicsExportStatus(c context.Context, ctx *app.RequestContext) {
-	ctx.JSON(consts.StatusNotImplemented, map[string]string{
-		"error": "forensics export status is not implemented yet",
-	})
+	respondNotImplemented(ctx, "forensics export status is not implemented yet")
 }
 
 // ForensicsConsistencyCheck 证据链一致性检查（2.0-M3）
 // GET /api/forensics/consistency/:job_id
 func (h *Handler) ForensicsConsistencyCheck(c context.Context, ctx *app.RequestContext) {
-	ctx.JSON(consts.StatusNotImplemented, map[string]string{
-		"error": "forensics consistency check is not implemented yet",
-	})
+	respondNotImplemented(ctx, "forensics consistency check is not implemented yet")
 }
 
 // GetJobEvidenceGraph 获取 Evidence Graph（2.0-M3）
 // GET /api/jobs/:id/evidence-graph
 func (h *Handler) GetJobEvidenceGraph(c context.Context, ctx *app.RequestContext) {
-	ctx.JSON(consts.StatusNotImplemented, map[string]string{
-		"error": "job evidence graph is not implemented yet",
-	})
+	respondNotImplemented(ctx, "job evidence graph is not implemented yet")
 }
 
 // GetJobAuditLog 获取 Job 的访问审计日志（2.0-M3）
 // GET /api/jobs/:id/audit-log
 func (h *Handler) GetJobAuditLog(c context.Context, ctx *app.RequestContext) {
-	ctx.JSON(consts.StatusNotImplemented, map[string]string{
-		"error": "job audit log is not implemented yet",
-	})
+	respondNotImplemented(ctx, "job audit log is not implemented yet")
 }
