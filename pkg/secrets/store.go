@@ -5,6 +5,7 @@ package secrets
 
 import (
 	"context"
+	"fmt"
 )
 
 // Store Secret 存储接口
@@ -35,8 +36,11 @@ func NewStore(config Config) (Store, error) {
 		return NewMemoryStore(), nil
 	case "env":
 		return NewEnvStore(), nil
-	// TODO: Implement Vault and K8s Secrets
+	case "vault":
+		return nil, fmt.Errorf("secret provider %q is not implemented", config.Provider)
+	case "k8s":
+		return nil, fmt.Errorf("secret provider %q is not implemented", config.Provider)
 	default:
-		return NewMemoryStore(), nil
+		return nil, fmt.Errorf("unsupported secret provider: %q", config.Provider)
 	}
 }

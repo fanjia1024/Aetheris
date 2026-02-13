@@ -57,7 +57,7 @@ func TestRouter_ForensicsRoutesEnabled(t *testing.T) {
 	}
 }
 
-func TestForensicsNotImplementedResponseShape(t *testing.T) {
+func TestForensicsConsistencyValidationErrorShape(t *testing.T) {
 	h := NewHandler(nil, nil)
 	s := server.Default(server.WithHostPorts(":0"))
 	s.GET("/test/not-implemented", func(ctx context.Context, c *app.RequestContext) {
@@ -65,15 +65,12 @@ func TestForensicsNotImplementedResponseShape(t *testing.T) {
 	})
 
 	w := ut.PerformRequest(s.Engine, "GET", "/test/not-implemented", &ut.Body{Body: bytes.NewReader(nil), Len: 0})
-	if got := w.Result().StatusCode(); got != 501 {
-		t.Fatalf("status = %d, want 501", got)
+	if got := w.Result().StatusCode(); got != 400 {
+		t.Fatalf("status = %d, want 400", got)
 	}
 
 	respBody := w.Result().Body()
-	if !bytes.Contains(respBody, []byte(`"code":"not_implemented"`)) {
-		t.Fatalf("response body missing code field: %s", respBody)
-	}
-	if !bytes.Contains(respBody, []byte(`"message":"forensics consistency check is not implemented yet"`)) {
-		t.Fatalf("response body missing message field: %s", respBody)
+	if !bytes.Contains(respBody, []byte(`"error":"job_id is required"`)) {
+		t.Fatalf("response body missing validation error field: %s", respBody)
 	}
 }

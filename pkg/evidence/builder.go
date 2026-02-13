@@ -38,7 +38,8 @@ func (b *Builder) BuildFromEvents(events []Event) (*DependencyGraph, error) {
 
 	// 解析 reasoning_snapshot 事件，构建节点
 	for _, event := range events {
-		if event.Type == "reasoning_snapshot_recorded" {
+		// 兼容历史命名，当前 runtime 使用 reasoning_snapshot
+		if event.Type == "reasoning_snapshot" || event.Type == "reasoning_snapshot_recorded" {
 			node, err := b.parseReasoningSnapshot(event)
 			if err != nil {
 				continue
