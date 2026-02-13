@@ -10,7 +10,7 @@ WORKER_PID := $(BIN_DIR)/worker.pid
 API_LOG   := $(BIN_DIR)/api.log
 WORKER_LOG := $(BIN_DIR)/worker.log
 
-.PHONY: build run run-all run-api run-worker stop clean test test-integration vet fmt fmt-check tidy help
+.PHONY: build run run-all run-api run-worker stop clean test test-integration vet fmt fmt-check tidy docker-build docker-run docker-stop release-2.0 help
 
 # 默认目标：帮助
 help:
@@ -24,6 +24,10 @@ help:
 	@echo "  make clean   - 删除 $(BIN_DIR)/"
 	@echo "  make test    - 运行测试"
 	@echo "  make test-integration - 运行关键集成测试（runtime + http）"
+	@echo "  make docker-build - 构建 API/Worker 容器镜像（deployments/compose/Dockerfile）"
+	@echo "  make docker-run   - 使用 compose 启动本地 2.0 栈"
+	@echo "  make docker-stop  - 使用 compose 停止本地 2.0 栈"
+	@echo "  make release-2.0  - 执行 2.0 发布前检查脚本"
 	@echo "  make vet     - go vet"
 	@echo "  make fmt       - gofmt -w"
 	@echo "  make fmt-check - 检查格式（未通过则 exit 1，与 CI 一致）"
@@ -72,6 +76,18 @@ test:
 
 test-integration:
 	go test -v ./internal/agent/runtime/executor ./internal/api/http
+
+docker-build:
+	docker build -f deployments/compose/Dockerfile -t aetheris/runtime:local .
+
+docker-run:
+	./scripts/local-2.0-stack.sh start
+
+docker-stop:
+	./scripts/local-2.0-stack.sh stop
+
+release-2.0:
+	./scripts/release-2.0.sh
 
 vet:
 	go vet ./...

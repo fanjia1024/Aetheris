@@ -214,6 +214,10 @@ The project provides a Makefile for one-command build and startup of all service
 | `make clean` | Remove `bin/` |
 | `make test` | Run tests |
 | `make test-integration` | Run key integration suites (runtime + http) |
+| `make docker-build` | Build runtime container image (`aetheris/runtime:local`) |
+| `make docker-run` | Start local 2.0 stack via Compose script |
+| `make docker-stop` | Stop local 2.0 stack via Compose script |
+| `make release-2.0` | Run 2.0 release preflight checks |
 | `make vet` | go vet |
 | `make fmt` | gofmt -w |
 | `make tidy` | go mod tidy |

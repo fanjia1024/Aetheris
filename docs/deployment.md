@@ -43,6 +43,29 @@ Placeholder; Deployment, Service, etc. manifests can be added here later.
 
 - **Details**: [deployments/k8s/README.md](../deployments/k8s/README.md)
 
+## Multi-Environment Deployment
+
+Use the same runtime contract across `dev`, `staging`, and `prod`, with different scale and safety gates.
+
+| Environment | Suggested topology | Main purpose |
+|-------------|--------------------|--------------|
+| `dev` | Compose (single node) | Feature development, local debugging |
+| `staging` | Compose or K8s with Postgres | Integration validation, release rehearsal |
+| `prod` | K8s + managed Postgres + monitoring | Production traffic and SLOs |
+
+### Recommended promotion flow
+
+1. `dev`: run `./scripts/release-2.0.sh` and local stack smoke checks.
+2. `staging`: deploy candidate image/tag, run end-to-end scenarios (agent run, replay, export/verify).
+3. `prod`: rollout with canary/rolling strategy and monitor error rate, stuck jobs, and queue backlog.
+
+### Operational gates before promotion
+
+- CI green (`.github/workflows/ci.yml`)
+- Postgres integration tests green
+- Runtime forensics checks pass (`export` + `verify`, consistency API)
+- Rollback plan verified (previous image/tag ready)
+
 ---
 
 For config (api.yaml, worker.yaml, model.yaml) and env vars see [config.md](config.md); for API and CLI usage see [usage.md](usage.md) and [cli.md](cli.md).
