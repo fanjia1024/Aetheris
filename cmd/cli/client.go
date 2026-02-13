@@ -155,6 +155,20 @@ func getJobEvents(jobID string) (map[string]interface{}, error) {
 	return out, nil
 }
 
+func getJobVerify(jobID string) (map[string]interface{}, error) {
+	var out map[string]interface{}
+	resp, err := newClient().R().
+		SetResult(&out).
+		Get("/api/jobs/" + jobID + "/verify")
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("GET verify: %s", resp.String())
+	}
+	return out, nil
+}
+
 func listWorkers() ([]string, error) {
 	var out struct {
 		Workers []string `json:"workers"`

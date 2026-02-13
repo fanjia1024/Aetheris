@@ -44,6 +44,7 @@ import (
 	agentruntime "rag-platform/internal/agent/runtime"
 	"rag-platform/internal/agent/signal"
 	"rag-platform/internal/agent/tools"
+	"rag-platform/internal/agent/verify"
 	appcore "rag-platform/internal/app"
 	"rag-platform/internal/model/llm"
 	"rag-platform/internal/pipeline/common"
@@ -1582,6 +1583,40 @@ func (h *Handler) GetJobEvents(ctx context.Context, c *app.RequestContext) {
 		"job_id": jobID,
 		"events": out,
 	})
+}
+
+// GetJobVerify 返回 Job 执行验证证明（design/verification-mode.md）：execution_hash、event_chain_root_hash、ledger proof、replay proof
+func (h *Handler) GetJobVerify(ctx context.Context, c *app.RequestContext) {
+	if h.jobEventStore == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "事件存储未启用"})
+		return
+	}
+	jobID := c.Param("id")
+	if h.jobStore != nil {
+		j, err := h.jobStore.Get(ctx, jobID)
+		if err != nil || j == nil {
+			c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+			return
+		}
+		_ = j
+	}
+	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
+	if err != nil {
+		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件失败"})
+		return
+	}
+	var replayBuilder replay.ReplayContextBuilder
+	if h.jobEventStore != nil {
+		replayBuilder = replay.NewReplayContextBuilder(h.jobEventStore)
+	}
+	result, err := verify.Compute(ctx, events, jobID, replayBuilder)
+	if err != nil {
+		hlog.CtxErrorf(ctx, "Verify Compute: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "验证计算失败"})
+		return
+	}
+	c.JSON(consts.StatusOK, result)
 }
 
 // GetJobTrace 返回执行时间线（由事件流派生）

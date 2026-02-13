@@ -56,6 +56,10 @@ Job 的当前状态由**事件流**推导或由「事件流 + metadata 投影」
 
 **方案 B**：完全由事件流推导。每次 GET job 时 `ListEvents`，用 `DeriveStatusFromEvents(events)` 得到 status。适合小规模或强一致性场景。
 
+## 形式化定义
+
+形式化状态集合、输入事件集合、**(state × event) → next_state** 迁移表与不变式见 [formal-state-machine.md](formal-state-machine.md)。该文档与 `DeriveStatusFromEvents` 对齐，用于合规与 Verification 的语义基准。
+
 ## 实现
 
 - **DeriveStatusFromEvents**：[internal/agent/job/state.go](internal/agent/job/state.go) — 顺序扫描事件，最后一条状态相关事件决定当前 status。

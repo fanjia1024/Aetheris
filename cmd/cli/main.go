@@ -104,6 +104,12 @@ func main() {
 			compareReplay = true
 		}
 		runDebug(args[0], compareReplay)
+	case "verify":
+		if len(args) < 1 {
+			fmt.Fprintf(os.Stderr, "Usage: aetheris verify <job_id>\n")
+			os.Exit(1)
+		}
+		runVerify(args[0])
 	case "init":
 		dir := "."
 		if len(args) > 0 {
@@ -131,6 +137,7 @@ func printUsage() {
 	fmt.Println("  replay <job_id> - 输出 Job 事件流（重放用）")
 	fmt.Println("  cancel <job_id> - 请求取消执行中的 Job")
 	fmt.Println("  debug <job_id> [--compare-replay] - Agent 调试器：timeline + evidence + replay verification")
+	fmt.Println("  verify <job_id> - 执行验证：输出 execution_hash、event_chain_root、ledger proof、replay proof")
 	fmt.Println("  init [dir]     - Scaffold a minimal agent project (templates + config) into current dir or dir")
 }
 
@@ -477,4 +484,35 @@ func runDebug(jobID string, compareReplay bool) {
 		baseURL = "http://localhost:8080"
 	}
 	fmt.Printf("Detailed trace: %s/api/jobs/%s/trace\n", baseURL, jobID)
+}
+
+func runVerify(jobID string) {
+	v, err := getJobVerify(jobID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "获取验证结果失败: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("=== Verification: %s ===\n\n", jobID)
+	if h, ok := v["execution_hash"].(string); ok {
+		fmt.Printf("Execution hash:          %s\n", h)
+	}
+	if h, ok := v["event_chain_root_hash"].(string); ok {
+		fmt.Printf("Event chain root hash:   %s\n", h)
+	}
+	if ledger, ok := v["tool_invocation_ledger_proof"].(map[string]interface{}); ok {
+		okVal, _ := ledger["ok"].(bool)
+		fmt.Printf("Ledger proof (at-most-once): %v\n", okVal)
+		if keys, ok := ledger["pending_idempotency_keys"].([]interface{}); ok && len(keys) > 0 {
+			fmt.Printf("  Pending keys: %v\n", keys)
+		}
+	}
+	if replayP, ok := v["replay_proof_result"].(map[string]interface{}); ok {
+		okVal, _ := replayP["ok"].(bool)
+		fmt.Printf("Replay proof (consistent):   %v\n", okVal)
+		if errStr, ok := replayP["error"].(string); ok && errStr != "" {
+			fmt.Printf("  Error: %s\n", errStr)
+		}
+	}
+	fmt.Println()
+	fmt.Println(prettyJSON(v))
 }

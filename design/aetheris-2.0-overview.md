@@ -147,6 +147,60 @@ graph TD
 
 ---
 
+## 4. 2.0 可证明性栈与架构升级图
+
+在 1.0 Runtime 核心（Runner–Ledger–JobStore）之上，2.0 强化**可证明性**：先落地 Verification 层，再延伸事件链密封与安全/多租户边界。
+
+```mermaid
+graph TB
+    subgraph runtimeCore [Runtime Core 1.0]
+        Runner[Runner]
+        Ledger[InvocationLedger]
+        JobStore[JobStore / EventStore]
+        Runner --> Ledger
+        Runner --> JobStore
+    end
+
+    subgraph verification [Verification Layer]
+        VerifyAPI[GET /api/jobs/:id/verify]
+        VerifyCLI[aetheris verify]
+        EventChainRoot[Event Chain Root Hash]
+        ReplayProof[Replay Proof]
+        ExecHash[Execution Hash]
+        LedgerProof[Ledger Proof]
+        VerifyAPI --> EventChainRoot
+        VerifyAPI --> ReplayProof
+        VerifyAPI --> ExecHash
+        VerifyAPI --> LedgerProof
+        VerifyCLI --> VerifyAPI
+    end
+
+    subgraph sealing [Optional Sealing 2.0]
+        SignRoot[Sign Event Chain Root]
+        VerifySig[Verify Signature]
+    end
+
+    subgraph boundary [Security and Multi-Tenant]
+        RBAC[RBAC / Access Control]
+        Namespace[Namespace / Tenant ID]
+        Quota[Resource Quota]
+    end
+
+    JobStore --> VerifyAPI
+    runtimeCore --> verification
+    verification --> sealing
+    sealing --> boundary
+```
+
+- **Runtime Core**：Runner、Ledger、JobStore 构成 1.0 执行与 at-most-once 保证。
+- **Verification Layer**：只读校验与摘要；Verify API/CLI 输出 execution_hash、event_chain_root_hash、ledger proof、replay proof（见 [verification-mode.md](verification-mode.md)）。
+- **Optional Sealing**：事件链根 hash 可选私钥签名、公钥校验（2.0 延伸，见 [event-chain-sealing.md](event-chain-sealing.md)）。
+- **Security and Multi-Tenant**：Phase 4 能力边界（RBAC、Namespace、Quota）。
+
+---
+
 - **功能模块详图**：见上文 §1。
 - **1.0 执行流与 StepOutcome**：[runtime-core-diagrams.md](runtime-core-diagrams.md)
 - **1.0 运行时语义与 Ledger 状态机**：[1.0-runtime-semantics.md](1.0-runtime-semantics.md)
+- **Verification Mode**：[verification-mode.md](verification-mode.md)
+- **2.0 能力矩阵**：[docs/2.0-capability-matrix.md](../docs/2.0-capability-matrix.md)

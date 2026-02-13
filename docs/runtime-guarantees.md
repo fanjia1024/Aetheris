@@ -291,6 +291,10 @@ wakeup_queue:
 
 ---
 
+## Failure Matrix (Formal)
+
+A single **fault × guarantee × behavior × config** matrix is maintained in [design/failure-matrix.md](../design/failure-matrix.md). Use it for compliance and operations.
+
 ## Guarantee Summary Table
 
 | What Could Go Wrong | What Happens | Guarantee | Required Config |
@@ -392,6 +396,32 @@ GET /api/jobs/job-xxx/trace
 ```
 
 **Expected**: Tool executed once, only one Worker succeeded.
+
+---
+
+## Verification Mode
+
+After a Job completes (or fails), you can run **offline verification** to get an auditable proof summary. This supports compliance and demonstrates "provable execution correctness."
+
+### How to use
+
+- **CLI**: `aetheris verify <job_id>` — prints execution hash, event chain root hash, ledger proof, and replay proof.
+- **API**: `GET /api/jobs/:id/verify` — returns the same four outputs as JSON.
+
+### Output meanings
+
+| Output | Meaning |
+|--------|--------|
+| **Execution hash** | Deterministic digest of the execution path (plan + node_id/result_type sequence). |
+| **Event chain root hash** | Root hash of the event stream in order; any tampering or reorder changes this value. |
+| **Tool invocation ledger proof** | Confirms every tool_invocation_started has a matching tool_invocation_finished (at-most-once). `ok: true` means no dangling started. |
+| **Replay proof result** | Read-only Replay (BuildFromEvents) succeeded; context is consistent with the event stream. |
+
+### Relationship to Execution Proof Chain
+
+The **Execution Proof Chain** (Ledger, Confirmation Replay) is the *runtime* mechanism that enforces at-most-once and deterministic replay. **Verification Mode** is a *post-hoc*, read-only check and summary of the same event stream and derived state. It does not change any state; it only computes and returns hashes and proof results for audit or demo.
+
+See [design/verification-mode.md](../design/verification-mode.md) for the protocol (event chain digest, execution hash formula) and [design/1.0-runtime-semantics.md](../design/1.0-runtime-semantics.md) for the Execution Proof Chain.
 
 ---
 
