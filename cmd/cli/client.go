@@ -199,6 +199,20 @@ func listWorkers() ([]string, error) {
 	return out.Workers, nil
 }
 
+func getObservabilitySummary() (map[string]interface{}, error) {
+	var out map[string]interface{}
+	resp, err := newClient().R().
+		SetResult(&out).
+		Get("/api/observability/summary")
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("GET /api/observability/summary: %s", resp.String())
+	}
+	return out, nil
+}
+
 func cancelJob(jobID string) (map[string]interface{}, error) {
 	var out map[string]interface{}
 	resp, err := newClient().R().

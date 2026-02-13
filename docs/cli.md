@@ -35,6 +35,9 @@ The CLI uses the **AETHERIS_API_URL** environment variable for the API base URL;
 | trace \<job_id\> | Print job execution timeline (trace JSON) and Trace page URL |
 | workers | List active workers (Postgres mode) |
 | replay \<job_id\> | Print job event stream (for replay) and Trace page URL |
+| monitor [--watch] [--interval N] | Print observability summary; optional watch mode |
+| migrate m1-sql | Print M1 incremental migration SQL (job_events hash fields) |
+| migrate backfill-hashes --input events.ndjson --output out.ndjson | Backfill `prev_hash/hash` for NDJSON event exports |
 | cancel \<job_id\> | Request cancel of a running job |
 | debug \<job_id\> [--compare-replay] | Agent debugger: timeline + evidence + replay verification |
 | verify \<job_id\> | Execution verification: execution_hash, event_chain_root_hash, ledger proof, replay proof |
@@ -49,6 +52,7 @@ The CLI uses the **AETHERIS_API_URL** environment variable for the API base URL;
 | jobs \<agent_id\> | GET /api/agents/:id/jobs |
 | trace \<job_id\> | GET /api/jobs/:id/trace |
 | replay \<job_id\> | GET /api/jobs/:id/events |
+| monitor | GET /api/observability/summary + GET /api/system/workers |
 | cancel \<job_id\> | POST /api/jobs/:id/stop |
 
 For more endpoints and flows see [usage.md](usage.md) "API endpoint summary" and "Typical flows".

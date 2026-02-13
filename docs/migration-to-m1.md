@@ -118,12 +118,12 @@ aetheris verify test-evidence.zip
 
 ### 选项 2: 回填 hash（可选）
 
-如果需要对历史数据进行审计，需要自行执行一次性离线回填脚本：
+如果需要对历史数据进行审计，可以使用 CLI 回填导出事件文件中的哈希链：
 
 ```bash
-# 当前版本未内置 `aetheris migrate backfill-hashes` 子命令
-# 建议在全量备份后，使用离线脚本按 created_at 顺序遍历同一 job 的事件，
-# 按 design 与 pkg/proof 的哈希公式计算 prev_hash/hash 后分批 UPDATE。
+aetheris migrate backfill-hashes \
+  --input events.ndjson \
+  --output events.backfilled.ndjson
 ```
 
 **警告**：回填 hash 可能需要数小时（取决于事件数量）。
@@ -240,7 +240,7 @@ ERROR: column "prev_hash" of relation "job_events" already exists
 
 **原因**：证据包包含 M1 之前的事件。
 
-**解决**：运行 `migrate backfill-hashes` 或忽略警告（不影响功能）。
+**解决**：运行 `aetheris migrate backfill-hashes --input events.ndjson --output events.backfilled.ndjson` 或忽略警告（不影响功能）。
 
 ### 问题: 导出超时
 

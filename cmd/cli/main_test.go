@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -111,5 +112,50 @@ func TestVerifyEvidenceZip_Tampered(t *testing.T) {
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte("Verification FAILED")) {
 		t.Fatalf("expected failure output, got: %s", stdout.String())
+	}
+}
+
+func TestBackfillHashesFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	inputPath := filepath.Join(tmpDir, "events.ndjson")
+	outputPath := filepath.Join(tmpDir, "events.out.ndjson")
+	input := `{"id":"1","job_id":"job_1","type":"job_created","payload":{"goal":"g1"},"created_at":"2026-02-13T10:00:00Z"}
+{"id":"2","job_id":"job_1","type":"job_completed","payload":{},"created_at":"2026-02-13T10:00:01Z"}
+`
+	if err := os.WriteFile(inputPath, []byte(input), 0644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	n, err := backfillHashesFile(inputPath, outputPath)
+	if err != nil {
+		t.Fatalf("backfill hashes: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("count = %d, want 2", n)
+	}
+
+	b, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	lines := bytes.Split(bytes.TrimSpace(b), []byte("\n"))
+	if len(lines) != 2 {
+		t.Fatalf("lines = %d, want 2", len(lines))
+	}
+	var first map[string]interface{}
+	var second map[string]interface{}
+	if err := json.Unmarshal(lines[0], &first); err != nil {
+		t.Fatalf("unmarshal first: %v", err)
+	}
+	if err := json.Unmarshal(lines[1], &second); err != nil {
+		t.Fatalf("unmarshal second: %v", err)
+	}
+	firstHash, _ := first["hash"].(string)
+	secondPrev, _ := second["prev_hash"].(string)
+	if firstHash == "" {
+		t.Fatal("first hash should not be empty")
+	}
+	if secondPrev != firstHash {
+		t.Fatalf("second prev_hash = %q, want %q", secondPrev, firstHash)
 	}
 }

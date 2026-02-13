@@ -17,6 +17,7 @@ package main
 import (
 	"bufio"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -102,6 +103,10 @@ func main() {
 			os.Exit(1)
 		}
 		runReplay(args[0])
+	case "monitor":
+		runMonitor(args)
+	case "migrate":
+		runMigrate(args)
 	case "cancel":
 		if len(args) < 1 {
 			fmt.Fprintf(os.Stderr, "Usage: aetheris cancel <job_id>\n")
@@ -159,6 +164,8 @@ func printUsage() {
 	fmt.Println("  trace <job_id>  - 输出 Job 执行时间线，并打印 Trace 页面 URL")
 	fmt.Println("  workers         - 列出当前活跃 Worker（Postgres 模式）")
 	fmt.Println("  replay <job_id> - 输出 Job 事件流（重放用）")
+	fmt.Println("  monitor [--watch] [--interval N] - 输出运行期可观测性摘要")
+	fmt.Println("  migrate <subcommand> - 迁移辅助命令（如 m1-sql、backfill-hashes）")
 	fmt.Println("  cancel <job_id> - 请求取消执行中的 Job")
 	fmt.Println("  debug <job_id> [--compare-replay] - Agent 调试器：timeline + evidence + replay verification")
 	fmt.Println("  verify <job_id> - 执行验证：输出 execution_hash、event_chain_root、ledger proof、replay proof")
@@ -341,6 +348,216 @@ func runReplay(jobID string) {
 	fmt.Println(prettyJSON(ev))
 	fmt.Println()
 	fmt.Println("Trace 页面:", tracePageURL(jobID))
+}
+
+func runMonitor(args []string) {
+	watch := false
+	intervalSeconds := 5
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--watch":
+			watch = true
+		case "--interval":
+			if i+1 >= len(args) {
+				fmt.Fprintf(os.Stderr, "Usage: aetheris monitor [--watch] [--interval N]\n")
+				os.Exit(1)
+			}
+			n, err := parsePositiveInt(args[i+1])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "invalid --interval: %v\n", err)
+				os.Exit(1)
+			}
+			intervalSeconds = n
+			i++
+		default:
+			fmt.Fprintf(os.Stderr, "Usage: aetheris monitor [--watch] [--interval N]\n")
+			os.Exit(1)
+		}
+	}
+
+	printSnapshot := func() {
+		summary, err := getObservabilitySummary()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "获取 observability summary 失败: %v\n", err)
+			os.Exit(1)
+		}
+		workers, err := listWorkers()
+		if err != nil {
+			workers = []string{}
+		}
+		fmt.Printf("[%s] tenant=%s workers=%d\n", time.Now().Format(time.RFC3339), tenantID(), len(workers))
+		fmt.Println(prettyJSON(summary))
+		fmt.Println()
+	}
+
+	printSnapshot()
+	if !watch {
+		return
+	}
+	ticker := time.NewTicker(time.Duration(intervalSeconds) * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		printSnapshot()
+	}
+}
+
+func runMigrate(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintf(os.Stderr, "Usage: aetheris migrate <m1-sql|backfill-hashes> [args]\n")
+		os.Exit(1)
+	}
+	switch args[0] {
+	case "m1-sql":
+		fmt.Println(`-- Aetheris M1 incremental schema migration
+ALTER TABLE job_events ADD COLUMN IF NOT EXISTS prev_hash TEXT DEFAULT '';
+ALTER TABLE job_events ADD COLUMN IF NOT EXISTS hash TEXT DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_job_events_hash ON job_events (hash);`)
+	case "backfill-hashes":
+		runMigrateBackfillHashes(args[1:])
+	default:
+		fmt.Fprintf(os.Stderr, "Usage: aetheris migrate <m1-sql|backfill-hashes> [args]\n")
+		os.Exit(1)
+	}
+}
+
+func runMigrateBackfillHashes(args []string) {
+	input := ""
+	output := ""
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--input":
+			if i+1 >= len(args) {
+				fmt.Fprintf(os.Stderr, "Usage: aetheris migrate backfill-hashes --input events.ndjson --output out.ndjson\n")
+				os.Exit(1)
+			}
+			input = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				fmt.Fprintf(os.Stderr, "Usage: aetheris migrate backfill-hashes --input events.ndjson --output out.ndjson\n")
+				os.Exit(1)
+			}
+			output = args[i+1]
+			i++
+		default:
+			fmt.Fprintf(os.Stderr, "Usage: aetheris migrate backfill-hashes --input events.ndjson --output out.ndjson\n")
+			os.Exit(1)
+		}
+	}
+	if input == "" || output == "" {
+		fmt.Fprintf(os.Stderr, "Usage: aetheris migrate backfill-hashes --input events.ndjson --output out.ndjson\n")
+		os.Exit(1)
+	}
+	count, err := backfillHashesFile(input, output)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "backfill failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("✓ backfill completed: %d events written to %s\n", count, output)
+}
+
+func backfillHashesFile(inputPath, outputPath string) (int, error) {
+	inBytes, err := os.ReadFile(inputPath)
+	if err != nil {
+		return 0, err
+	}
+	lines := strings.Split(string(inBytes), "\n")
+	out := make([]string, 0, len(lines))
+	prevByJob := map[string]string{}
+	count := 0
+
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var m map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			return count, fmt.Errorf("parse line %d: %w", i+1, err)
+		}
+
+		event, err := eventMapToProofEvent(m)
+		if err != nil {
+			return count, fmt.Errorf("line %d: %w", i+1, err)
+		}
+		event.PrevHash = prevByJob[event.JobID]
+		event.Hash = proof.ComputeEventHash(event)
+		prevByJob[event.JobID] = event.Hash
+
+		m["prev_hash"] = event.PrevHash
+		m["hash"] = event.Hash
+		b, err := json.Marshal(m)
+		if err != nil {
+			return count, fmt.Errorf("serialize line %d: %w", i+1, err)
+		}
+		out = append(out, string(b))
+		count++
+	}
+	if err := os.WriteFile(outputPath, []byte(strings.Join(out, "\n")+"\n"), 0644); err != nil {
+		return count, err
+	}
+	return count, nil
+}
+
+func eventMapToProofEvent(m map[string]interface{}) (proof.Event, error) {
+	var e proof.Event
+	if id, ok := m["id"].(string); ok {
+		e.ID = id
+	}
+	jobID, _ := m["job_id"].(string)
+	if jobID == "" {
+		return e, fmt.Errorf("missing job_id")
+	}
+	e.JobID = jobID
+	evType, _ := m["type"].(string)
+	if evType == "" {
+		return e, fmt.Errorf("missing type")
+	}
+	e.Type = evType
+
+	createdAtRaw, _ := m["created_at"].(string)
+	if createdAtRaw == "" {
+		e.CreatedAt = time.Now().UTC()
+	} else {
+		ts, err := parseRFC3339(createdAtRaw)
+		if err != nil {
+			return e, fmt.Errorf("invalid created_at: %w", err)
+		}
+		e.CreatedAt = ts
+	}
+
+	payloadValue, ok := m["payload"]
+	if !ok || payloadValue == nil {
+		e.Payload = "null"
+		return e, nil
+	}
+	switch v := payloadValue.(type) {
+	case string:
+		e.Payload = v
+	default:
+		b, err := json.Marshal(v)
+		if err != nil {
+			return e, fmt.Errorf("marshal payload: %w", err)
+		}
+		e.Payload = string(b)
+	}
+	return e, nil
+}
+
+func parseRFC3339(s string) (time.Time, error) {
+	if ts, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return ts, nil
+	}
+	return time.Parse(time.RFC3339, s)
+}
+
+func parsePositiveInt(s string) (int, error) {
+	var n int
+	_, err := fmt.Sscanf(s, "%d", &n)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("must be a positive integer")
+	}
+	return n, nil
 }
 
 func runCancel(jobID string) {

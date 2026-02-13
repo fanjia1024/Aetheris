@@ -190,6 +190,12 @@ RAG is one capability that agents can use via pipelines or tools; it is **plugga
 
 Detailed documentation (configuration, CLI, deployment) is in [docs/](docs/).
 
+Common CLI operations:
+- `aetheris replay <job_id>` inspect event stream and trace URL
+- `aetheris monitor --watch --interval 5` watch queue/stuck-job observability snapshot
+- `aetheris migrate m1-sql` print incremental M1 schema SQL
+- `aetheris migrate backfill-hashes --input events.ndjson --output events.backfilled.ndjson` backfill hash chain for exported events
+
 ---
 
 ## Makefile — Build and run
