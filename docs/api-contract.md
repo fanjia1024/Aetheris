@@ -1,47 +1,91 @@
 # Aetheris API Contract (v2.0)
 
-## Overview
+## 1. Scope
 
-This document defines the stable public API contract for Aetheris 2.0. APIs marked as **stable** will not introduce breaking changes without a major version bump.
+This document defines the external API compatibility boundary for Aetheris `2.x`.
 
-## Versioning Policy
+- Stable APIs: backward-compatible across `2.x` minors and patches
+- Experimental APIs: may change in minor releases
+- Internal packages (`internal/`) are out of compatibility scope
 
-- **Major version** (x.0.0): Breaking changes
-- **Minor version** (0.x.0): Backward-compatible features
-- **Patch version** (0.0.x): Bug fixes
+## 2. Versioning and Compatibility
 
-## Stable APIs (v2.0+)
+- Major (`x.0.0`): may include breaking changes
+- Minor (`0.x.0`): backward-compatible feature additions
+- Patch (`0.0.x`): bug fixes and non-breaking behavior fixes
 
-### Job Management
+Compatibility window:
+- Stable APIs are guaranteed across all `2.x`
+- Deprecated stable APIs are supported for at least 2 minor versions before removal
 
-- `POST /api/agents/:id/message` - Submit job to agent
-- `GET /api/jobs/:id` - Get job status
-- `POST /api/jobs/:id/stop` - Stop running job
-- `POST /api/jobs/:id/signal` - Send signal to parked job
-- `GET /api/jobs/:id/events` - Get job event stream
-- `GET /api/jobs/:id/trace` - Get job trace
-- `POST /api/jobs/:id/export` - Export forensics package
+## 3. Stable API Surface (2.0)
 
-### Agent Management
+### Job APIs
 
-- `POST /api/agents` - Create agent instance
-- `GET /api/agents` - List agents
-- `GET /api/agents/:id/state` - Get agent state
-- `POST /api/agents/:id/resume` - Resume agent
+- `POST /api/agents/:id/message`
+- `GET /api/jobs/:id`
+- `POST /api/jobs/:id/stop`
+- `POST /api/jobs/:id/signal`
+- `GET /api/jobs/:id/events`
+- `GET /api/jobs/:id/trace`
+- `POST /api/jobs/:id/export`
 
-## Unstable APIs (subject to change)
+### Agent APIs
 
-- Any API not listed above
-- Internal packages under `internal/`
+- `POST /api/agents`
+- `GET /api/agents`
+- `GET /api/agents/:id/state`
+- `POST /api/agents/:id/resume`
 
-## Deprecation Policy
+### Observability Pages
 
-- APIs marked deprecated will be supported for at least 2 minor versions
-- Example: Deprecated in v2.1.0 → Removed in v2.3.0
+- `GET /api/jobs/:id/trace/page`
+- `GET /api/trace/overview/page`
 
-## Breaking Change Notification
+## 4. Experimental Surface
 
-Breaking changes will be announced:
-1. In release notes
-2. In this document (with migration guide)
-3. Via deprecation warnings (when possible)
+Experimental APIs may change without major bump, but should be noted in release notes:
+
+- New endpoints not listed in Section 3
+- Optional response fields marked experimental in docs/release notes
+- Adapter-specific runtime internals
+
+## 5. Request/Response Change Policy
+
+For stable endpoints:
+- Allowed:
+  - Add optional request fields
+  - Add optional response fields
+  - Add new non-default query parameters
+- Not allowed in `2.x`:
+  - Remove required fields
+  - Rename existing fields
+  - Change field types incompatibly
+  - Change endpoint semantics incompatibly
+
+## 6. Deprecation Policy
+
+When deprecating a stable API:
+1. Mark as deprecated in docs
+2. Add migration path in release notes
+3. Keep API available for >= 2 minor versions
+4. Remove only in next major, or after window with explicit notice
+
+Example:
+- Deprecated in `v2.2.0`
+- Earliest removal target: `v2.4.0` (or `v3.0.0`)
+
+## 7. Release Gates for Contract Safety (P0)
+
+A `2.x` release should not be published unless:
+
+- Contract docs are updated (`docs/api-contract.md`)
+- Compatibility checks pass for stable endpoints (smoke + regression tests)
+- Deprecations (if any) include migration guidance
+- Release notes include API delta summary
+
+## 8. References
+
+- `docs/release-checklist-2.0.md`
+- `docs/upgrade-1.x-to-2.0.md`
+- `docs/runtime-guarantees.md`

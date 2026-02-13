@@ -64,3 +64,8 @@ Recommended **Go 1.25.7+**, aligned with go.mod and CI.
 - [release-certification-1.0.md](release-certification-1.0.md) — 1.0 release gate checklist
 - [release-checklist-v1.0.md](release-checklist-v1.0.md) — Post-release checklist (core features, distributed, CLI/API, logging and docs)
 - [2.0-roadmap.md](2.0-roadmap.md) — 2.0 升级指引与路线图（当前状态、流程图、优先级、发布判定清单）
+- [API Contract (api-contract.md)](api-contract.md) — 2.0 稳定/实验 API 边界、兼容与弃用策略
+- [Upgrade 1.x -> 2.0 (upgrade-1.x-to-2.0.md)](upgrade-1.x-to-2.0.md) — 升级与回滚手册
+- [Performance Baseline 2.0 (performance-baseline-2.0.md)](performance-baseline-2.0.md) — 发布性能基线与门禁
+- [Failure Drill Runbook (runbook-failure-drills.md)](runbook-failure-drills.md) — 故障演练与通过标准
+- [Security Baseline (security.md)](security.md) — 2.0 安全基线与发布检查项

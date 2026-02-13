@@ -63,3 +63,10 @@ aetheris verify evidence.zip
 - [ ] Roadmap progress table updated
 - [ ] Release notes updated (if publishing)
 
+## 6. P0 docs and readiness gates
+
+- [ ] Upgrade + rollback runbook completed (`docs/upgrade-1.x-to-2.0.md`)
+- [ ] API contract includes stable/experimental boundary (`docs/api-contract.md`)
+- [ ] Performance baseline report attached (`docs/performance-baseline-2.0.md`)
+- [ ] Failure drills executed and recorded (`docs/runbook-failure-drills.md`)
+- [ ] Security baseline checks completed (`docs/security.md`)
