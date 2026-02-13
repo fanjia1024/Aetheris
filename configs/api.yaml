@@ -18,6 +18,36 @@ api:
     enable: false
     port: 9090
 
+# Rate Limiting & Backpressure (2.0 scalability features)
+rate_limits:
+  # Tool 维度限流：每个 tool 独立配置 QPS 和并发限制
+  tools:
+    github_create_issue:
+      qps: 10
+      max_concurrent: 5
+    stripe_create_payment:
+      qps: 100
+      max_concurrent: 20
+    # 默认配置（未明确配置的 tool 使用此配置）
+    _default:
+      qps: 100
+      max_concurrent: 10
+  
+  # LLM Provider 限流：支持 token budget
+  llm:
+    openai:
+      tokens_per_minute: 90000
+      requests_per_minute: 3500
+      max_concurrent: 50
+    anthropic:
+      tokens_per_minute: 100000
+      requests_per_minute: 4000
+      max_concurrent: 50
+    _default:
+      tokens_per_minute: 90000
+      requests_per_minute: 3500
+      max_concurrent: 50
+
 # 任务事件存储（事件流 + 租约）；未配置或 type 非 postgres 时使用内存后端
 # 当 type=postgres 时，仅由 Worker 进程通过事件 Claim 执行，API 不启动进程内 Scheduler（单一执行权）
 # 本地 Docker 启动 Postgres 并初始化表结构：

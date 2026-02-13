@@ -1,0 +1,226 @@
+# Aetheris 2.0 Alert Rules for Prometheus AlertManager
+
+groups:
+  - name: aetheris_runtime
+    interval: 30s
+    rules:
+      # 重复 Lease 检测：同一 job 被多个 worker 持有 lease
+      - alert: DuplicateLeaseDetected
+        expr: |
+          sum by (job_id) (aetheris_worker_busy{worker_id=~".+"}) > 1
+        for: 1m
+        labels:
+          severity: critical
+          component: scheduler
+        annotations:
+          summary: "Job {{ $labels.job_id }} has duplicate leases"
+          description: "Multiple workers are holding lease for the same job, which violates at-most-once execution guarantee."
+          
+      # Confirmation Replay 失败率高
+      - alert: ConfirmationReplayFailed
+        expr: |
+          rate(aetheris_job_fail_total{status="failed"}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: executor
+        annotations:
+          summary: "High confirmation replay failure rate"
+          description: "External world verification is failing frequently, which may indicate drift or stale data."
+          
+      # Job 长时间 Parked
+      - alert: JobParkedTooLong
+        expr: |
+          aetheris_job_parked_duration_seconds > 7200
+        for: 5m
+        labels:
+          severity: warning
+          component: scheduler
+        annotations:
+          summary: "Job {{ $labels.agent_id }} parked for too long"
+          description: "Job has been in parked state for over 2 hours, may need manual intervention."
+          
+      # Tool 错误率飙升
+      - alert: ToolErrorRateHigh
+        expr: |
+          rate(aetheris_tool_duration_seconds_count{job="worker"}[5m]) > 0 
+          and 
+          rate(aetheris_job_fail_total{status="failed"}[5m]) / rate(aetheris_tool_duration_seconds_count[5m]) > 0.2
+        for: 3m
+        labels:
+          severity: critical
+          component: tool
+        annotations:
+          summary: "Tool {{ $labels.tool }} error rate is high"
+          description: "Tool error rate exceeds 20%, may indicate external service issues."
+          
+      # Replay Verify 失败（attempt_id 不匹配）
+      - alert: ReplayVerifyFailed
+        expr: |
+          increase(aetheris_job_fail_total{status="failed"}[10m]) > 5
+        for: 1m
+        labels:
+          severity: critical
+          component: ledger
+        annotations:
+          summary: "Multiple replay verification failures detected"
+          description: "Ledger commit detected stale attempt_id, indicating lease fencing is working but there may be worker coordination issues."
+
+  - name: aetheris_performance
+    interval: 30s
+    rules:
+      # Job 积压过多
+      - alert: QueueBacklogHigh
+        expr: |
+          aetheris_queue_backlog > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: scheduler
+        annotations:
+          summary: "Queue {{ $labels.queue }} has high backlog"
+          description: "Pending job count exceeds 100, may need to scale workers."
+          
+      # Worker 全部繁忙
+      - alert: WorkersFullyUtilized
+        expr: |
+          sum(aetheris_worker_busy) / count(aetheris_worker_busy) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+          component: scheduler
+        annotations:
+          summary: "Workers are fully utilized"
+          description: "Over 90% of workers are busy, consider scaling horizontally."
+          
+      # Stuck Job 检测
+      - alert: StuckJobsDetected
+        expr: |
+          aetheris_stuck_job_count > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: scheduler
+        annotations:
+          summary: "Stuck jobs detected"
+          description: "{{ $value }} jobs are stuck (Running but not updating), may need manual recovery."
+
+  - name: aetheris_rate_limiting
+    interval: 30s
+    rules:
+      # 限流等待时间过长
+      - alert: RateLimitWaitTooLong
+        expr: |
+          histogram_quantile(0.95, rate(aetheris_rate_limit_wait_seconds_bucket[5m])) > 5
+        for: 3m
+        labels:
+          severity: warning
+          component: rate_limiter
+        annotations:
+          summary: "Rate limit wait time is too long for {{ $labels.type }}/{{ $labels.name }}"
+          description: "95th percentile wait time exceeds 5 seconds, may need to increase limits."
+          
+      # 限流拒绝率高
+      - alert: RateLimitRejectionsHigh
+        expr: |
+          rate(aetheris_rate_limit_rejections_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: critical
+          component: rate_limiter
+        annotations:
+          summary: "High rate limit rejections for {{ $labels.type }}/{{ $labels.name }}"
+          description: "Rate limiter is rejecting requests frequently, may impact job execution."
+
+  - name: aetheris_llm
+    interval: 30s
+    rules:
+      # LLM Token 使用率接近配额
+      - alert: LLMTokenBudgetNearLimit
+        expr: |
+          aetheris_llm_tokens_total > 80000
+        for: 1m
+        labels:
+          severity: warning
+          component: llm
+        annotations:
+          summary: "LLM token usage approaching budget limit"
+          description: "Token usage is near the configured per-minute limit, may cause throttling."
+          
+      # LLM 并发数高
+      - alert: LLMConcurrencyHigh
+        expr: |
+          aetheris_llm_concurrent > 45
+        for: 2m
+        labels:
+          severity: warning
+          component: llm
+        annotations:
+          summary: "LLM {{ $labels.provider }} concurrent requests are high"
+          description: "Concurrent LLM requests exceed 45, may hit provider rate limits."
+
+  - name: aetheris_health
+    interval: 30s
+    rules:
+      # Job 失败率高
+      - alert: JobFailureRateHigh
+        expr: |
+          rate(aetheris_job_fail_total{status="failed"}[10m]) / rate(aetheris_job_total[10m]) > 0.3
+        for: 5m
+        labels:
+          severity: critical
+          component: runtime
+        annotations:
+          summary: "High job failure rate"
+          description: "Over 30% of jobs are failing, investigate root cause immediately."
+          
+      # JobStore 响应慢
+      - alert: JobStoreSlow
+        expr: |
+          histogram_quantile(0.95, rate(aetheris_job_duration_seconds_bucket[5m])) > 300
+        for: 5m
+        labels:
+          severity: warning
+          component: jobstore
+        annotations:
+          summary: "JobStore operations are slow"
+          description: "95th percentile job duration exceeds 5 minutes, may indicate database performance issues."
+
+  - name: aetheris_forensics_3_0
+    interval: 30s
+    rules:
+      # 异常决策率高 (3.0-M4)
+      - alert: AnomalyRateHigh
+        expr: |
+          rate(aetheris_anomaly_detected_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: ai_forensics
+        annotations:
+          summary: "High anomaly detection rate"
+          description: "Anomalies detected at rate > 0.1/sec, investigate decision quality."
+          
+      # 决策质量低 (3.0-M4)
+      - alert: DecisionQualityLow
+        expr: |
+          histogram_quantile(0.5, rate(aetheris_decision_quality_score_bucket[5m])) < 60
+        for: 5m
+        labels:
+          severity: warning
+          component: monitoring
+        annotations:
+          summary: "Decision quality score below 60"
+          description: "Median decision quality is low, review evidence completeness."
+          
+      # 签名验证失败 (3.0-M4)
+      - alert: SignatureVerificationFailed
+        expr: |
+          rate(aetheris_signature_verification_total{result="failed"}[10m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: signature
+        annotations:
+          summary: "Signature verification failures detected"
+          description: "Evidence packages failing signature verification, possible tampering or key mismatch."

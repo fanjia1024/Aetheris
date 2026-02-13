@@ -1,0 +1,70 @@
+# Aetheris Helm Chart Values
+
+replicaCount:
+  api: 2
+  worker: 3
+
+image:
+  repository: aetheris/aetheris
+  pullPolicy: IfNotPresent
+  tag: "2.0.0"
+
+service:
+  type: ClusterIP
+  api:
+    port: 8080
+  metrics:
+    port: 9092
+
+resources:
+  api:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+  worker:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+postgresql:
+  enabled: true
+  auth:
+    username: aetheris
+    password: aetheris
+    database: aetheris
+  primary:
+    persistence:
+      size: 20Gi
+
+prometheus:
+  enabled: true
+  alertmanager:
+    enabled: true
+
+config:
+  rateLimit:
+    tools:
+      github_create_issue:
+        qps: 10
+        maxConcurrent: 5
+    llm:
+      openai:
+        tokensPerMinute: 90000
+        requestsPerMinute: 3500
+  fairnessPolicy:
+    realtimeWeight: 70
+    defaultWeight: 20
+    backgroundWeight: 8
+    heavyWeight: 2

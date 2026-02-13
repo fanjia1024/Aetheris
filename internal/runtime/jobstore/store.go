@@ -71,4 +71,12 @@ type JobStore interface {
 	ListJobIDsWithExpiredClaim(ctx context.Context) ([]string, error)
 	// GetCurrentAttemptID 返回该 job 当前持有租约的 attempt_id；无租约或已过期返回空字符串（供 Lease fencing：Ledger Commit 等写操作校验）
 	GetCurrentAttemptID(ctx context.Context, jobID string) (string, error)
+
+	// Snapshot methods (2.0 performance optimization for long-running jobs)
+	// CreateSnapshot 创建事件流快照，覆盖 job 从版本 0 到 upToVersion 的所有状态
+	CreateSnapshot(ctx context.Context, jobID string, upToVersion int, snapshot []byte) error
+	// GetLatestSnapshot 获取最新的快照；若无快照返回 nil, nil
+	GetLatestSnapshot(ctx context.Context, jobID string) (*JobSnapshot, error)
+	// DeleteSnapshotsBefore 删除指定版本之前的所有快照（用于 compaction）
+	DeleteSnapshotsBefore(ctx context.Context, jobID string, beforeVersion int) error
 }

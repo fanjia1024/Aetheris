@@ -1,0 +1,17 @@
+apiVersion: v2
+name: aetheris
+description: Aetheris Agent Runtime - Deterministic execution for production agents
+type: application
+version: 2.0.0
+appVersion: "2.0.0"
+keywords:
+  - agent
+  - runtime
+  - llm
+  - workflow
+  - observability
+maintainers:
+  - name: Aetheris Team
+    email: team@aetheris.dev
+sources:
+  - https://github.com/yourusername/aetheris

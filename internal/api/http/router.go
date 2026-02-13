@@ -119,6 +119,20 @@ func (r *Router) Build(addr string, opts ...config.Option) *server.Hertz {
 		jobs.GET("/:id/trace/cognition", authHandler, r.handler.GetJobCognitionTrace)
 		jobs.GET("/:id/nodes/:node_id", authHandler, r.handler.GetJobNode)
 		jobs.GET("/:id/trace/page", authHandler, r.handler.GetJobTracePage)
+		// 2.0-M1: 导出完整证据包（ZIP）
+		jobs.POST("/:id/export", authHandler, r.handler.ExportJobForensics)
+		// 2.0-M3: Evidence Graph & Audit Log
+		jobs.GET("/:id/evidence-graph", authHandler, r.handler.GetJobEvidenceGraph)
+		jobs.GET("/:id/audit-log", authHandler, r.handler.GetJobAuditLog)
+	}
+
+	// 2.0-M3: Forensics API
+	forensics := api.Group("/forensics")
+	{
+		forensics.POST("/query", authHandler, r.handler.ForensicsQuery)
+		forensics.POST("/batch-export", authHandler, r.handler.ForensicsBatchExport)
+		forensics.GET("/export-status/:task_id", authHandler, r.handler.ForensicsExportStatus)
+		forensics.GET("/consistency/:job_id", authHandler, r.handler.ForensicsConsistencyCheck)
 	}
 
 	toolsGroup := api.Group("/tools")

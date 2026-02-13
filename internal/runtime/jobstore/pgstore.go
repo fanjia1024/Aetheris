@@ -16,6 +16,8 @@ package jobstore
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strconv"
 	"time"
@@ -62,7 +64,7 @@ func (s *pgStore) Close() {
 
 func (s *pgStore) ListEvents(ctx context.Context, jobID string) ([]JobEvent, int, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, job_id, version, type, payload, created_at FROM job_events WHERE job_id = $1 ORDER BY version`,
+		`SELECT id, job_id, version, type, payload, created_at, prev_hash, hash FROM job_events WHERE job_id = $1 ORDER BY version`,
 		jobID)
 	if err != nil {
 		return nil, 0, err
@@ -75,7 +77,7 @@ func (s *pgStore) ListEvents(ctx context.Context, jobID string) ([]JobEvent, int
 		var version int
 		var typeStr string
 		var payload []byte
-		if err := rows.Scan(&id, &e.JobID, &version, &typeStr, &payload, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&id, &e.JobID, &version, &typeStr, &payload, &e.CreatedAt, &e.PrevHash, &e.Hash); err != nil {
 			return nil, 0, err
 		}
 		e.ID = strconv.FormatInt(id, 10)
@@ -130,9 +132,23 @@ func (s *pgStore) Append(ctx context.Context, jobID string, expectedVersion int,
 		return 0, ErrVersionMismatch
 	}
 
+	// 2.0-M1: 查询前一个事件的 hash（用于构建 proof chain）
+	var prevHash string
+	if expectedVersion > 0 {
+		err = s.pool.QueryRow(ctx,
+			`SELECT hash FROM job_events WHERE job_id = $1 AND version = $2`,
+			jobID, expectedVersion).Scan(&prevHash)
+		if err != nil && !errNoRows(err) {
+			return 0, err
+		}
+	}
+
+	// 2.0-M1: 计算当前事件的 hash
+	eventHash := computeEventHash(jobID, event.Type, payload, event.CreatedAt, prevHash)
+
 	_, err = s.pool.Exec(ctx,
-		`INSERT INTO job_events (job_id, version, type, payload, created_at) VALUES ($1, $2, $3, $4, $5)`,
-		jobID, newVersion, string(event.Type), payload, event.CreatedAt)
+		`INSERT INTO job_events (job_id, version, type, payload, created_at, prev_hash, hash) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		jobID, newVersion, string(event.Type), payload, event.CreatedAt, prevHash, eventHash)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return 0, ErrVersionMismatch
@@ -336,4 +352,66 @@ func isUniqueViolation(err error) bool {
 
 func errNoRows(err error) bool {
 	return err != nil && errors.Is(err, pgx.ErrNoRows)
+}
+
+// computeEventHash 计算事件哈希（2.0-M1 proof chain）
+// Hash = SHA256(JobID|Type|Payload|Timestamp|PrevHash)
+func computeEventHash(jobID string, eventType EventType, payload []byte, timestamp time.Time, prevHash string) string {
+	h := sha256.New()
+	h.Write([]byte(jobID))
+	h.Write([]byte("|"))
+	h.Write([]byte(eventType))
+	h.Write([]byte("|"))
+	h.Write(payload)
+	h.Write([]byte("|"))
+	h.Write([]byte(timestamp.Format(time.RFC3339Nano)))
+	h.Write([]byte("|"))
+	h.Write([]byte(prevHash))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// CreateSnapshot 创建事件流快照（2.0 performance optimization）
+func (s *pgStore) CreateSnapshot(ctx context.Context, jobID string, upToVersion int, snapshot []byte) error {
+	if jobID == "" || upToVersion < 0 || len(snapshot) == 0 {
+		return errors.New("invalid snapshot parameters")
+	}
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO job_snapshots (job_id, version, snapshot, created_at)
+		 VALUES ($1, $2, $3, now())
+		 ON CONFLICT (job_id, version) DO UPDATE SET snapshot = EXCLUDED.snapshot, created_at = now()`,
+		jobID, upToVersion, snapshot)
+	return err
+}
+
+// GetLatestSnapshot 获取最新的快照
+func (s *pgStore) GetLatestSnapshot(ctx context.Context, jobID string) (*JobSnapshot, error) {
+	if jobID == "" {
+		return nil, nil
+	}
+	var snap JobSnapshot
+	var snapshotBytes []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT job_id, version, snapshot, created_at FROM job_snapshots
+		 WHERE job_id = $1 ORDER BY version DESC LIMIT 1`,
+		jobID).Scan(&snap.JobID, &snap.Version, &snapshotBytes, &snap.CreatedAt)
+	if errNoRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	snap.Snapshot = make([]byte, len(snapshotBytes))
+	copy(snap.Snapshot, snapshotBytes)
+	return &snap, nil
+}
+
+// DeleteSnapshotsBefore 删除指定版本之前的所有快照
+func (s *pgStore) DeleteSnapshotsBefore(ctx context.Context, jobID string, beforeVersion int) error {
+	if jobID == "" {
+		return nil
+	}
+	_, err := s.pool.Exec(ctx,
+		`DELETE FROM job_snapshots WHERE job_id = $1 AND version < $2`,
+		jobID, beforeVersion)
+	return err
 }
