@@ -465,6 +465,9 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 
 	// RBAC：RoleStore + AuthZ 中间件（与 JWT 配合使用 tenant_id/user_id）
 	roleStore := auth.NewMemoryRoleStore()
+	// 预置开发账号角色，避免启用 JWT+RBAC 后本地环境无法创建 Agent。
+	_ = roleStore.SetUserRole(context.Background(), "default", "admin", auth.RoleAdmin)
+	_ = roleStore.SetUserRole(context.Background(), "default", "test", auth.RoleUser)
 	rbacChecker := auth.NewSimpleRBACChecker(roleStore)
 	router.SetAuthZ(middleware.NewAuthZMiddleware(rbacChecker))
 

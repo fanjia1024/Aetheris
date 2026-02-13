@@ -30,6 +30,8 @@ services:
     environment:
       JOBSTORE_TYPE: postgres
       JOBSTORE_DSN: "postgres://corag:corag@postgres:5432/corag?sslmode=disable"
+      API_MIDDLEWARE_AUTH: "true"
+      API_MIDDLEWARE_JWT_KEY: "local-dev-jwt-key"
     ports:
       - "8080:8080"
     depends_on:
