@@ -102,7 +102,7 @@ func (a *workflowExecAdapter) ExecuteWorkflow(ctx context.Context, name string, 
 // NewDAGCompiler 创建 TaskGraph→eino DAG 的编译器（注册 llm/tool/workflow 适配器）；toolEventSink/commandEventSink 可选；invocationStore 可选；effectStore 可选，非 nil 时启用两步提交与强 Replay catch-up；resourceVerifier 可选；attemptValidator 可选，非 nil 时 Ledger Commit 前校验 attempt（Lease fencing）
 func NewDAGCompiler(llmClient llm.Client, toolsReg *tools.Registry, engine *eino.Engine, toolEventSink agentexec.ToolEventSink, commandEventSink agentexec.CommandEventSink, invocationStore agentexec.ToolInvocationStore, effectStore agentexec.EffectStore, resourceVerifier agentexec.ResourceVerifier, attemptValidator agentexec.AttemptValidator) *agentexec.Compiler {
 	toolAdapter := &agentexec.ToolNodeAdapter{
-		Tools:             &toolExecAdapter{reg: toolsReg},
+		Tools:              &toolExecAdapter{reg: toolsReg},
 		ToolCapabilityFunc: toolsReg.GetCapability,
 	}
 	if toolEventSink != nil {

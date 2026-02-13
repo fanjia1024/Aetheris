@@ -60,7 +60,7 @@ func (s JobStatus) String() string {
 type Job struct {
 	ID        string
 	AgentID   string
-	TenantID  string   // 租户 ID，默认 "default"；API/CLI 全链路传递，查询按租户隔离
+	TenantID  string // 租户 ID，默认 "default"；API/CLI 全链路传递，查询按租户隔离
 	Goal      string
 	Status    JobStatus
 	CreatedAt time.Time

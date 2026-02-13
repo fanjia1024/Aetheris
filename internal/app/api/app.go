@@ -48,7 +48,6 @@ import (
 	"rag-platform/internal/api/http"
 	"rag-platform/internal/api/http/middleware"
 	"rag-platform/internal/app"
-	"rag-platform/pkg/auth"
 	"rag-platform/internal/einoext"
 	"rag-platform/internal/ingestqueue"
 	"rag-platform/internal/model/llm"
@@ -59,6 +58,7 @@ import (
 	"rag-platform/internal/runtime/session"
 	"rag-platform/internal/splitter"
 	"rag-platform/internal/storage/vector"
+	"rag-platform/pkg/auth"
 )
 
 // otelProviderShutdown 用于优雅关闭时关闭 OpenTelemetry provider
