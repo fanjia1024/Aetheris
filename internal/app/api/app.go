@@ -48,6 +48,7 @@ import (
 	"rag-platform/internal/api/http"
 	"rag-platform/internal/api/http/middleware"
 	"rag-platform/internal/app"
+	"rag-platform/pkg/auth"
 	"rag-platform/internal/einoext"
 	"rag-platform/internal/ingestqueue"
 	"rag-platform/internal/model/llm"
@@ -454,6 +455,11 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 			bootstrap.Logger.Info("JWT 认证已启用")
 		}
 	}
+
+	// RBAC：RoleStore + AuthZ 中间件（与 JWT 配合使用 tenant_id/user_id）
+	roleStore := auth.NewMemoryRoleStore()
+	rbacChecker := auth.NewSimpleRBACChecker(roleStore)
+	router.SetAuthZ(middleware.NewAuthZMiddleware(rbacChecker))
 
 	appObj := &App{
 		config:       bootstrap,

@@ -123,7 +123,7 @@ func (r *AgentJobRunner) Start(ctx context.Context) {
 				var jobID string
 				if len(r.capabilities) > 0 {
 					// 按能力派发：先从 metadata store 认领能力匹配的 Job，再在 event store 占租约
-					j, errClaim := r.jobStore.ClaimNextPendingForWorker(ctx, "", r.capabilities)
+					j, errClaim := r.jobStore.ClaimNextPendingForWorker(ctx, "", r.capabilities, "")
 					if errClaim != nil || j == nil {
 						<-r.limiter
 						if r.wakeupQueue != nil {

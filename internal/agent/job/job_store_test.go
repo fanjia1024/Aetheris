@@ -45,7 +45,7 @@ func TestJobStoreMem_ListByAgent(t *testing.T) {
 	_, _ = s.Create(ctx, &Job{AgentID: "agent-1", Goal: "g1"})
 	_, _ = s.Create(ctx, &Job{AgentID: "agent-1", Goal: "g2"})
 	_, _ = s.Create(ctx, &Job{AgentID: "agent-2", Goal: "g3"})
-	list, err := s.ListByAgent(ctx, "agent-1")
+	list, err := s.ListByAgent(ctx, "agent-1", "")
 	if err != nil {
 		t.Fatalf("ListByAgent: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestJobStoreMem_ClaimNextPendingForWorker(t *testing.T) {
 	id3, _ := s.Create(ctx, &Job{AgentID: "a1", Goal: "g3", RequiredCapabilities: []string{"llm", "tool"}})
 
 	// capabilities 为空等价于不按能力过滤，应拿到 id1
-	j, err := s.ClaimNextPendingForWorker(ctx, "", nil)
+	j, err := s.ClaimNextPendingForWorker(ctx, "", nil, "")
 	if err != nil || j == nil {
 		t.Fatalf("ClaimNextPendingForWorker(nil): %v, j=%v", err, j)
 	}
@@ -158,24 +158,24 @@ func TestJobStoreMem_ClaimNextPendingForWorker(t *testing.T) {
 	}
 
 	// 仅有 tool 的 Worker 不应拿到需要 llm 或 llm+tool 的 Job，应拿到无能力要求的下一个（id2 需要 llm 不匹配，id3 需要 llm+tool 不匹配，但 id2 和 id3 都在 pending）
-	j2, _ := s.ClaimNextPendingForWorker(ctx, "", []string{"tool"})
+	j2, _ := s.ClaimNextPendingForWorker(ctx, "", []string{"tool"}, "")
 	if j2 != nil {
 		t.Errorf("worker [tool] should not get job requiring llm or llm+tool, got %s", j2.ID)
 	}
 
 	// 有 llm 的 Worker 可拿 id2
-	j3, _ := s.ClaimNextPendingForWorker(ctx, "", []string{"llm"})
+	j3, _ := s.ClaimNextPendingForWorker(ctx, "", []string{"llm"}, "")
 	if j3 == nil || j3.ID != id2 {
 		t.Errorf("worker [llm] expected id2, got %+v", j3)
 	}
 
 	// 有 llm,tool 的 Worker 可拿 id3
-	j4, _ := s.ClaimNextPendingForWorker(ctx, "", []string{"llm", "tool"})
+	j4, _ := s.ClaimNextPendingForWorker(ctx, "", []string{"llm", "tool"}, "")
 	if j4 == nil || j4.ID != id3 {
 		t.Errorf("worker [llm,tool] expected id3, got %+v", j4)
 	}
 
-	j5, _ := s.ClaimNextPendingForWorker(ctx, "", []string{"llm", "tool", "rag"})
+	j5, _ := s.ClaimNextPendingForWorker(ctx, "", []string{"llm", "tool", "rag"}, "")
 	if j5 != nil {
 		t.Errorf("no more pending, got %+v", j5)
 	}

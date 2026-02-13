@@ -26,6 +26,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"rag-platform/pkg/metrics"
 )
 
 const defaultLeaseDuration = 30 * time.Second
@@ -105,6 +107,7 @@ func (s *pgStore) Append(ctx context.Context, jobID string, expectedVersion int,
 		var claimAttemptID string
 		err := s.pool.QueryRow(ctx, `SELECT attempt_id FROM job_claims WHERE job_id = $1 AND expires_at > now()`, jobID).Scan(&claimAttemptID)
 		if err != nil || claimAttemptID != attemptID {
+			metrics.LeaseConflictTotal.Inc()
 			return 0, ErrStaleAttempt
 		}
 	}

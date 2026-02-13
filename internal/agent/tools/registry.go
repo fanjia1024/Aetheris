@@ -45,6 +45,22 @@ func (r *Registry) Get(name string) (Tool, bool) {
 	return t, ok
 }
 
+// GetCapability 返回工具声明的 capability（实现 ToolWithCapability 时用其返回值，否则用工具名）
+func (r *Registry) GetCapability(name string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	t, ok := r.tools[name]
+	if !ok {
+		return name
+	}
+	if w, ok := t.(ToolWithCapability); ok {
+		if c := w.RequiredCapability(); c != "" {
+			return c
+		}
+	}
+	return name
+}
+
 // List 返回所有已注册工具
 func (r *Registry) List() []Tool {
 	r.mu.RLock()
@@ -71,6 +87,7 @@ type ToolManifest struct {
 	OutputSchema map[string]any `json:"output_schema,omitempty"`
 	Timeout      string         `json:"timeout,omitempty"`
 	Version      string         `json:"version,omitempty"`
+	Capability   string         `json:"capability,omitempty"` // 所需 capability，供 RBAC/策略校验；空则用 name
 }
 
 // SchemasForLLM 返回所有工具的 Schema 列表（JSON，供 Planner 使用）
@@ -94,14 +111,11 @@ func (r *Registry) Manifests() []ToolManifest {
 	defer r.mu.RUnlock()
 	list := make([]ToolManifest, 0, len(r.tools))
 	for _, t := range r.tools {
-		list = append(list, ToolManifest{
-			Name:         t.Name(),
-			Description:  t.Description(),
-			InputSchema:  t.Schema(),
-			OutputSchema: nil,
-			Timeout:      "",
-			Version:      "1.0",
-		})
+		m := ToolManifest{Name: t.Name(), Description: t.Description(), InputSchema: t.Schema(), OutputSchema: nil, Timeout: "", Version: "1.0"}
+		if w, ok := t.(ToolWithCapability); ok && w.RequiredCapability() != "" {
+			m.Capability = w.RequiredCapability()
+		}
+		list = append(list, m)
 	}
 	return list
 }
@@ -112,7 +126,7 @@ func (r *Registry) Manifest(name string) *ToolManifest {
 	if !ok {
 		return nil
 	}
-	return &ToolManifest{
+	m := &ToolManifest{
 		Name:         t.Name(),
 		Description:  t.Description(),
 		InputSchema:  t.Schema(),
@@ -120,4 +134,8 @@ func (r *Registry) Manifest(name string) *ToolManifest {
 		Timeout:      "",
 		Version:      "1.0",
 	}
+	if w, ok := t.(ToolWithCapability); ok && w.RequiredCapability() != "" {
+		m.Capability = w.RequiredCapability()
+	}
+	return m
 }

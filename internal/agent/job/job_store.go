@@ -22,22 +22,23 @@ import (
 	"github.com/google/uuid"
 )
 
-// JobStore 任务存储：创建、查询、更新状态、拉取 Pending、更新恢复游标
+// JobStore 任务存储：创建、查询、更新状态、拉取 Pending、更新恢复游标；多租户时 tenantID 过滤
 type JobStore interface {
 	Create(ctx context.Context, job *Job) (string, error)
 	Get(ctx context.Context, jobID string) (*Job, error)
-	// GetByAgentAndIdempotencyKey 按 Agent 与幂等键查已有 Job，用于 Idempotency-Key 去重；无则返回 nil, nil
+	// GetByAgentAndIdempotencyKey 按 Agent 与幂等键查已有 Job，用于 Idempotency-Key 去重；无则返回 nil, nil；tenantID 为空时不过滤
 	GetByAgentAndIdempotencyKey(ctx context.Context, agentID, idempotencyKey string) (*Job, error)
-	ListByAgent(ctx context.Context, agentID string) ([]*Job, error)
+	// ListByAgent 按 Agent 列出 Job；tenantID 非空时仅返回该租户下的 Job
+	ListByAgent(ctx context.Context, agentID string, tenantID string) ([]*Job, error)
 	UpdateStatus(ctx context.Context, jobID string, status JobStatus) error
 	// UpdateCursor 更新 Job 的恢复游标（Checkpoint ID），用于恢复时从 LastCheckpoint 继续
 	UpdateCursor(ctx context.Context, jobID string, cursor string) error
-	// ClaimNextPending 原子取出一条 Pending 并置为 Running，无则返回 nil, nil
+	// ClaimNextPending 原子取出一条 Pending 并置为 Running，无则返回 nil, nil；tenantID 非空时仅认领该租户的 Job
 	ClaimNextPending(ctx context.Context) (*Job, error)
 	// ClaimNextPendingFromQueue 从指定队列取出一条 Pending（同队列内按 Priority 降序）；queueClass 为空时等价 ClaimNextPending
 	ClaimNextPendingFromQueue(ctx context.Context, queueClass string) (*Job, error)
-	// ClaimNextPendingForWorker 从指定队列取出一条 Pending 且该 Job 的 RequiredCapabilities 被 workerCapabilities 覆盖；capabilities 为空时等价 ClaimNextPendingFromQueue
-	ClaimNextPendingForWorker(ctx context.Context, queueClass string, workerCapabilities []string) (*Job, error)
+	// ClaimNextPendingForWorker 从指定队列取出一条 Pending 且该 Job 的 RequiredCapabilities 被 workerCapabilities 覆盖；tenantID 非空时仅认领该租户
+	ClaimNextPendingForWorker(ctx context.Context, queueClass string, workerCapabilities []string, tenantID string) (*Job, error)
 	// Requeue 将 Job 重新入队为 Pending（用于重试；会递增 RetryCount）
 	Requeue(ctx context.Context, job *Job) error
 	// RequestCancel 请求取消执行中的 Job；Worker 轮询 Get 时发现 CancelRequestedAt 非零则取消 runCtx
@@ -90,6 +91,9 @@ func (s *JobStoreMem) Create(ctx context.Context, job *Job) (string, error) {
 	if job.ID == "" {
 		job.ID = "job-" + uuid.New().String()
 	}
+	if job.TenantID == "" {
+		job.TenantID = "default"
+	}
 	job.Status = StatusPending
 	job.CreatedAt = time.Now()
 	job.UpdatedAt = job.CreatedAt
@@ -126,15 +130,19 @@ func (s *JobStoreMem) GetByAgentAndIdempotencyKey(ctx context.Context, agentID, 
 	return nil, nil
 }
 
-func (s *JobStoreMem) ListByAgent(ctx context.Context, agentID string) ([]*Job, error) {
+func (s *JobStoreMem) ListByAgent(ctx context.Context, agentID string, tenantID string) ([]*Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var list []*Job
 	for _, j := range s.byID {
-		if j.AgentID == agentID {
-			cp := *j
-			list = append(list, &cp)
+		if j.AgentID != agentID {
+			continue
 		}
+		if tenantID != "" && j.TenantID != tenantID {
+			continue
+		}
+		cp := *j
+		list = append(list, &cp)
 	}
 	return list, nil
 }
@@ -168,10 +176,10 @@ func (s *JobStoreMem) ClaimNextPending(ctx context.Context) (*Job, error) {
 }
 
 func (s *JobStoreMem) ClaimNextPendingFromQueue(ctx context.Context, queueClass string) (*Job, error) {
-	return s.ClaimNextPendingForWorker(ctx, queueClass, nil)
+	return s.ClaimNextPendingForWorker(ctx, queueClass, nil, "")
 }
 
-func (s *JobStoreMem) ClaimNextPendingForWorker(ctx context.Context, queueClass string, workerCapabilities []string) (*Job, error) {
+func (s *JobStoreMem) ClaimNextPendingForWorker(ctx context.Context, queueClass string, workerCapabilities []string, tenantID string) (*Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var bestID string
@@ -180,6 +188,9 @@ func (s *JobStoreMem) ClaimNextPendingForWorker(ctx context.Context, queueClass 
 	for idx, id := range s.pending {
 		j, ok := s.byID[id]
 		if !ok || j.Status != StatusPending {
+			continue
+		}
+		if tenantID != "" && j.TenantID != tenantID {
 			continue
 		}
 		if queueClass != "" && j.QueueClass != "" && j.QueueClass != queueClass {

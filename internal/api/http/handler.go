@@ -51,6 +51,7 @@ import (
 	"rag-platform/internal/runtime/eino"
 	"rag-platform/internal/runtime/jobstore"
 	"rag-platform/internal/runtime/session"
+	"rag-platform/pkg/auth"
 	"rag-platform/pkg/metrics"
 )
 
@@ -192,6 +193,28 @@ func (h *Handler) SetSignalInbox(inbox signal.SignalInbox) {
 // SetObservabilityReader 设置可观测性数据源；非 nil 时提供 GET /api/observability/summary
 func (h *Handler) SetObservabilityReader(r job.ObservabilityReader) {
 	h.observabilityReader = r
+}
+
+// getJobAndCheckTenant 按 jobID 取 Job 并校验当前请求租户；不通过时写 404 并返回 (nil, false)
+func (h *Handler) getJobAndCheckTenant(ctx context.Context, c *app.RequestContext, jobID string) (*job.Job, bool) {
+	if h.jobStore == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "Job 未启用"})
+		return nil, false
+	}
+	j, err := h.jobStore.Get(ctx, jobID)
+	if err != nil || j == nil {
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+		return nil, false
+	}
+	tid := auth.GetTenantID(ctx)
+	if tid == "" {
+		tid = "default"
+	}
+	if j.TenantID != tid {
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+		return nil, false
+	}
+	return j, true
 }
 
 // HealthCheck 健康检查
@@ -526,8 +549,23 @@ func (h *Handler) SystemStatus(ctx context.Context, c *app.RequestContext) {
 	c.JSON(consts.StatusOK, status)
 }
 
+// jobStateGaugeStates 与 JobStateGauge 的 state 标签一致，用于 /metrics 时更新瞬时值
+var jobStateGaugeStates = []string{"pending", "running", "waiting", "parked", "completed", "failed", "cancelled", "retrying"}
+
 // SystemMetrics 系统指标（Prometheus 文本格式，供 /metrics 抓取）
 func (h *Handler) SystemMetrics(ctx context.Context, c *app.RequestContext) {
+	if h.observabilityReader != nil {
+		counts, err := h.observabilityReader.CountByStatus(ctx)
+		if err == nil {
+			for _, state := range jobStateGaugeStates {
+				n := int64(0)
+				if c, ok := counts[state]; ok {
+					n = c
+				}
+				metrics.JobStateGauge.WithLabelValues(state).Set(float64(n))
+			}
+		}
+	}
 	var buf bytes.Buffer
 	if err := metrics.WritePrometheus(&buf); err != nil {
 		hlog.CtxErrorf(ctx, "WritePrometheus: %v", err)
@@ -901,11 +939,15 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 			})
 		}
 	}
-	// 幂等：若带 Idempotency-Key 且该 Agent 下已有同 key 的 Job，直接返回已有 job_id（202），不写 Session、不新建 Job
+	tenantID := auth.GetTenantID(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	// 幂等：若带 Idempotency-Key 且该 Agent 下已有同 key 且同租户的 Job，直接返回已有 job_id（202）
 	idempotencyKey := strings.TrimSpace(string(c.GetHeader("Idempotency-Key")))
 	if idempotencyKey != "" && h.jobStore != nil {
 		existing, _ := h.jobStore.GetByAgentAndIdempotencyKey(ctx, id, idempotencyKey)
-		if existing != nil {
+		if existing != nil && existing.TenantID == tenantID {
 			c.JSON(consts.StatusAccepted, map[string]interface{}{
 				"status":   "accepted",
 				"agent_id": id,
@@ -923,8 +965,8 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 		_, _ = h.agentMessagingBus.Send(ctx, "", id, map[string]any{"message": req.Message}, &messaging.SendOptions{Kind: messaging.KindUser})
 	}
 	if h.jobStore != nil {
-		// 先创建 Job 得到稳定 jobID，再双写事件流，避免 Create 失败时留下孤立事件
-		j := &job.Job{AgentID: id, Goal: req.Message, Status: job.StatusPending, SessionID: agent.Session.ID, IdempotencyKey: idempotencyKey}
+		// 先创建 Job 得到稳定 jobID，再双写事件流，避免 Create 失败时留下孤立事件；多租户写入 TenantID
+		j := &job.Job{AgentID: id, TenantID: tenantID, Goal: req.Message, Status: job.StatusPending, SessionID: agent.Session.ID, IdempotencyKey: idempotencyKey}
 		jobIDOut, errCreate := h.jobStore.Create(ctx, j)
 		if errCreate != nil {
 			hlog.CtxErrorf(ctx, "创建 Job 失败: %v", errCreate)
@@ -1087,7 +1129,8 @@ func (h *Handler) ListAgentJobs(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusNotFound, map[string]string{"error": "Agent 不存在"})
 		return
 	}
-	list, err := h.jobStore.ListByAgent(ctx, id)
+	tenantID := auth.GetTenantID(ctx)
+	list, err := h.jobStore.ListByAgent(ctx, id, tenantID)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "列出 Job 失败: %v", err)
 		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "列出任务失败"})
@@ -1150,6 +1193,14 @@ func (h *Handler) GetAgentJob(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
 		return
 	}
+	tid := auth.GetTenantID(ctx)
+	if tid == "" {
+		tid = "default"
+	}
+	if j.TenantID != tid {
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+		return
+	}
 	c.JSON(consts.StatusOK, map[string]interface{}{
 		"id":          j.ID,
 		"agent_id":    j.AgentID,
@@ -1195,14 +1246,13 @@ func (h *Handler) ListAgents(ctx context.Context, c *app.RequestContext) {
 
 // GetJob 按 job_id 返回 Job 元数据（供 Trace 等使用）；若 status 为 waiting 则附带 wait_correlation_key 供 JobSignal 使用（design/runtime-contract.md）
 func (h *Handler) GetJob(ctx context.Context, c *app.RequestContext) {
-	if h.jobStore == nil || h.jobEventStore == nil {
+	if h.jobEventStore == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "Job 未启用"})
 		return
 	}
 	jobID := c.Param("id")
-	j, err := h.jobStore.Get(ctx, jobID)
-	if err != nil || j == nil {
-		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+	j, ok := h.getJobAndCheckTenant(ctx, c, jobID)
+	if !ok {
 		return
 	}
 	resp := map[string]interface{}{
@@ -1233,14 +1283,9 @@ func (h *Handler) GetJob(ctx context.Context, c *app.RequestContext) {
 
 // JobStop 请求取消执行中的 Job（POST /api/jobs/:id/stop）；Worker 轮询到后取消 runCtx，Job 进入 CANCELLED
 func (h *Handler) JobStop(ctx context.Context, c *app.RequestContext) {
-	if h.jobStore == nil {
-		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "Job 未启用"})
-		return
-	}
 	jobID := c.Param("id")
-	j, err := h.jobStore.Get(ctx, jobID)
-	if err != nil || j == nil {
-		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+	j, ok := h.getJobAndCheckTenant(ctx, c, jobID)
+	if !ok {
 		return
 	}
 	if j.Status == job.StatusCompleted || j.Status == job.StatusFailed || j.Status == job.StatusCancelled {
@@ -1284,14 +1329,13 @@ func lastEventIsWaitCompletedWithCorrelationKey(events []jobstore.JobEvent, corr
 
 // JobSignal 向挂起的 Job 发送 signal，写入 wait_completed 事件并将 Job 置回 Pending 供 Worker 认领继续
 func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
-	if h.jobStore == nil || h.jobEventStore == nil {
+	if h.jobEventStore == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "Job 或事件存储未启用"})
 		return
 	}
 	jobID := c.Param("id")
-	j, err := h.jobStore.Get(ctx, jobID)
-	if err != nil || j == nil {
-		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+	j, ok := h.getJobAndCheckTenant(ctx, c, jobID)
+	if !ok {
 		return
 	}
 	if j.Status != job.StatusWaiting && j.Status != job.StatusParked {
@@ -1387,14 +1431,13 @@ type JobMessageRequest struct {
 
 // JobMessage 向指定 Job 写入一条 agent_message 事件；若 Job 处于 Waiting 且当前 job_waiting 的 wait_type=message 且 channel 或 correlation_key 匹配，则追加 wait_completed 并将 Job 置为 Pending
 func (h *Handler) JobMessage(ctx context.Context, c *app.RequestContext) {
-	if h.jobStore == nil || h.jobEventStore == nil {
+	if h.jobEventStore == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "Job 或事件存储未启用"})
 		return
 	}
 	jobID := c.Param("id")
-	j, err := h.jobStore.Get(ctx, jobID)
-	if err != nil || j == nil {
-		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+	j, ok := h.getJobAndCheckTenant(ctx, c, jobID)
+	if !ok {
 		return
 	}
 	var req JobMessageRequest
@@ -1486,6 +1529,9 @@ func (h *Handler) GetJobReplay(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	jobID := c.Param("id")
+	if _, ok := h.getJobAndCheckTenant(ctx, c, jobID); !ok {
+		return
+	}
 	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
@@ -1559,6 +1605,9 @@ func (h *Handler) GetJobEvents(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	jobID := c.Param("id")
+	if _, ok := h.getJobAndCheckTenant(ctx, c, jobID); !ok {
+		return
+	}
 	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
@@ -1592,13 +1641,8 @@ func (h *Handler) GetJobVerify(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	jobID := c.Param("id")
-	if h.jobStore != nil {
-		j, err := h.jobStore.Get(ctx, jobID)
-		if err != nil || j == nil {
-			c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
-			return
-		}
-		_ = j
+	if _, ok := h.getJobAndCheckTenant(ctx, c, jobID); !ok {
+		return
 	}
 	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
 	if err != nil {
@@ -1626,6 +1670,9 @@ func (h *Handler) GetJobTrace(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	jobID := c.Param("id")
+	if _, ok := h.getJobAndCheckTenant(ctx, c, jobID); !ok {
+		return
+	}
 	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
@@ -1697,6 +1744,9 @@ func (h *Handler) GetJobNode(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	jobID := c.Param("id")
+	if _, ok := h.getJobAndCheckTenant(ctx, c, jobID); !ok {
+		return
+	}
 	nodeID := c.Param("node_id")
 	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
 	if err != nil {
@@ -1839,7 +1889,10 @@ func (h *Handler) GetJobTracePage(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	jobID := c.Param("id")
-	j, _ := h.jobStore.Get(ctx, jobID)
+	j, ok := h.getJobAndCheckTenant(ctx, c, jobID)
+	if !ok {
+		return
+	}
 	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
 	if err != nil {
 		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件失败"})

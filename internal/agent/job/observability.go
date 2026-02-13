@@ -25,4 +25,6 @@ type ObservabilityReader interface {
 	CountPending(ctx context.Context, queue string) (int, error)
 	// ListStuckRunningJobIDs 返回 status=Running 且 updated_at 早于 (now - olderThan) 的 job_id 列表
 	ListStuckRunningJobIDs(ctx context.Context, olderThan time.Duration) ([]string, error)
+	// CountByStatus 返回各状态的 Job 数量，用于 job_state gauge（P0 SLO）；key 为 status 字符串（pending/running/waiting/parked/completed/failed/cancelled）
+	CountByStatus(ctx context.Context) (map[string]int64, error)
 }

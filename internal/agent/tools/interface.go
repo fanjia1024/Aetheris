@@ -35,3 +35,10 @@ type Tool interface {
 	Schema() map[string]any
 	Execute(ctx context.Context, sess *session.Session, input map[string]any, state interface{}) (any, error)
 }
+
+// ToolWithCapability 可选接口：声明工具所需 capability，供 RBAC/capability policy 校验；未实现时使用工具名
+type ToolWithCapability interface {
+	Tool
+	// RequiredCapability 返回该工具所需能力标识，空则使用 Name()
+	RequiredCapability() string
+}

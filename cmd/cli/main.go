@@ -31,13 +31,25 @@ import (
 //go:embed templates/agent-minimal
 var agentMinimalTemplate embed.FS
 
+// cliTenantID 由 --tenant 或 AETHERIS_TENANT_ID 设置，API 请求时带 X-Tenant-ID
+var cliTenantID string
+
 func main() {
-	if len(os.Args) < 2 {
+	args := os.Args[1:]
+	// 解析全局 --tenant <id>
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--tenant" && i+1 < len(args) {
+			cliTenantID = args[i+1]
+			args = append(args[:i], args[i+2:]...)
+			break
+		}
+	}
+	if len(args) < 1 {
 		printUsage()
 		os.Exit(0)
 	}
-	cmd := os.Args[1]
-	args := os.Args[2:]
+	cmd := args[0]
+	args = args[1:]
 	switch cmd {
 	case "version":
 		fmt.Println("aetheris cli 1.0.0")

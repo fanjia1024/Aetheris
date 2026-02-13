@@ -88,7 +88,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 				if len(s.config.Queues) > 0 {
 					for _, q := range s.config.Queues {
 						if len(s.config.Capabilities) > 0 {
-							j, _ = s.store.ClaimNextPendingForWorker(ctx, q, s.config.Capabilities)
+							j, _ = s.store.ClaimNextPendingForWorker(ctx, q, s.config.Capabilities, "")
 						} else {
 							j, _ = s.store.ClaimNextPendingFromQueue(ctx, q)
 						}
@@ -98,7 +98,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 					}
 				} else {
 					if len(s.config.Capabilities) > 0 {
-						j, _ = s.store.ClaimNextPendingForWorker(ctx, "", s.config.Capabilities)
+						j, _ = s.store.ClaimNextPendingForWorker(ctx, "", s.config.Capabilities, "")
 					} else {
 						j, _ = s.store.ClaimNextPending(ctx)
 					}

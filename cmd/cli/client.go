@@ -31,11 +31,25 @@ func apiBaseURL() string {
 	return "http://localhost:8080"
 }
 
+func tenantID() string {
+	if cliTenantID != "" {
+		return cliTenantID
+	}
+	if t := os.Getenv("AETHERIS_TENANT_ID"); t != "" {
+		return t
+	}
+	return "default"
+}
+
 func newClient() *resty.Client {
-	return resty.New().
+	c := resty.New().
 		SetBaseURL(apiBaseURL()).
 		SetTimeout(30*time.Second).
 		SetHeader("Content-Type", "application/json")
+	if t := tenantID(); t != "" {
+		c.SetHeader("X-Tenant-ID", t)
+	}
+	return c
 }
 
 func getJob(jobID string) (map[string]interface{}, error) {

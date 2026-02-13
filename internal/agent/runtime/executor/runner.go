@@ -30,6 +30,7 @@ import (
 	"rag-platform/internal/agent/runtime"
 	agenteffects "rag-platform/internal/agent/runtime/effects"
 	"rag-platform/pkg/agent/sdk"
+	"rag-platform/pkg/metrics"
 )
 
 // StepResultType classifies a step completion (Production Semantics Phase A). See design/step-result-failure-model.md.
@@ -684,6 +685,11 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 		payload, runErr = step.Run(runCtx, payload)
 	}
 	durationMs := time.Since(stepStart).Milliseconds()
+	nodeType := step.NodeType
+	if nodeType == "" {
+		nodeType = "unknown"
+	}
+	metrics.StepDurationSeconds.WithLabelValues(nodeType).Observe(float64(durationMs) / 1000)
 	resultType, reason := ClassifyError(runErr)
 	if runErr != nil && errors.Is(runErr, context.DeadlineExceeded) {
 		resultType = StepResultRetryableFailure

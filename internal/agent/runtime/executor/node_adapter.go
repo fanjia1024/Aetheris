@@ -26,6 +26,7 @@ import (
 
 	"rag-platform/internal/agent/planner"
 	"rag-platform/internal/agent/runtime"
+	"rag-platform/pkg/metrics"
 )
 
 // NodeRunner 单节点执行函数（用于 Steppable 执行与 node-level checkpoint）
@@ -217,7 +218,9 @@ type ToolNodeAdapter struct {
 	EffectStore EffectStore
 	// CapabilityPolicyChecker 执行前校验；非 nil 时在 Tools.Execute 前按能力/策略 Check，deny 则失败该步，require_approval 则返回 CapabilityRequiresApproval（design/capability-policy.md）
 	CapabilityPolicyChecker CapabilityPolicyChecker
-	ResourceVerifier        ResourceVerifier // 可选；Confirmation Replay 时校验外部资源仍存在，不通过则失败 job
+	// ToolCapabilityFunc 可选；按工具名解析其声明的 capability，供 Check 使用；未设置时用 toolName
+	ToolCapabilityFunc func(toolName string) string
+	ResourceVerifier   ResourceVerifier // 可选；Confirmation Replay 时校验外部资源仍存在，不通过则失败 job
 	// RetryPolicy 可选；Tool 执行失败时按策略重试（2.0 Tool Contract），同一 idempotency_key 下为同步重试
 	RetryPolicy *RetryPolicy
 }
@@ -334,6 +337,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 		}
 		switch decision {
 		case InvocationDecisionReturnRecordedResult:
+			metrics.ToolInvocationTotal.WithLabelValues("restored").Inc()
 			if err := a.runConfirmation(ctx, jobID, taskID, stepChanges); err != nil {
 				return nil, err
 			}
@@ -366,6 +370,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 	if a.InvocationStore != nil && jobID != "" {
 		rec, _ := a.InvocationStore.GetByJobAndIdempotencyKey(ctx, jobID, idempotencyKey)
 		if rec != nil && rec.Committed && (rec.Status == ToolInvocationStatusSuccess || rec.Status == ToolInvocationStatusConfirmed) && len(rec.Result) > 0 {
+			metrics.ToolInvocationTotal.WithLabelValues("restored").Inc()
 			if err := a.runConfirmation(ctx, jobID, taskID, stepChanges); err != nil {
 				return nil, err
 			}
@@ -385,6 +390,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 	}
 	if completed := CompletedToolInvocationsFromContext(ctx); completed != nil {
 		if resultJSON, ok := completed[idempotencyKey]; ok {
+			metrics.ToolInvocationTotal.WithLabelValues("restored").Inc()
 			if err := a.runConfirmation(ctx, jobID, taskID, stepChanges); err != nil {
 				return nil, err
 			}
@@ -407,6 +413,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 	if a.EffectStore != nil && jobID != "" {
 		eff, err := a.EffectStore.GetEffectByJobAndIdempotencyKey(ctx, jobID, idempotencyKey)
 		if err == nil && eff != nil && len(eff.Output) > 0 {
+			metrics.ToolInvocationTotal.WithLabelValues("restored").Inc()
 			if err := a.runConfirmation(ctx, jobID, taskID, stepChanges); err != nil {
 				return nil, err
 			}
@@ -496,6 +503,9 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 	if a.CapabilityPolicyChecker != nil && jobID != "" {
 		approvedKeys := ApprovedCorrelationKeysFromContext(ctx)
 		capability := toolName
+		if a.ToolCapabilityFunc != nil {
+			capability = a.ToolCapabilityFunc(toolName)
+		}
 		allowed, requiredApproval, checkErr := a.CapabilityPolicyChecker.Check(ctx, jobID, toolName, capability, idempotencyKey, approvedKeys)
 		if checkErr != nil {
 			return nil, &StepFailure{Type: StepResultPermanentFailure, Inner: checkErr, NodeID: taskID}
@@ -504,7 +514,18 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 			return nil, &CapabilityRequiresApproval{CorrelationKey: "cap-approval-" + idempotencyKey}
 		}
 		if !allowed {
-			return nil, &StepFailure{Type: StepResultPermanentFailure, Inner: fmt.Errorf("capability denied: %s", capability), NodeID: taskID}
+			denyMsg := "capability denied: " + capability
+			if a.ToolEventSink != nil && jobID != "" {
+				_ = a.ToolEventSink.AppendToolInvocationFinished(ctx, jobID, nodeIDForEvent, &ToolInvocationFinishedPayload{
+					InvocationID:   invocationID,
+					IdempotencyKey: idempotencyKey,
+					Outcome:        ToolInvocationOutcomeFailure,
+					Error:          denyMsg,
+					FinishedAt:     FormatStartedAt(time.Now().UTC()),
+				})
+				_ = a.ToolEventSink.AppendToolResultSummarized(ctx, jobID, nodeIDForEvent, toolName, denyMsg, denyMsg, false)
+			}
+			return nil, &StepFailure{Type: StepResultPermanentFailure, Inner: fmt.Errorf("%s", denyMsg), NodeID: taskID}
 		}
 	}
 	var result ToolResult
@@ -530,6 +551,7 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 	}
 	finishedAt := time.Now().UTC()
 	if err != nil {
+		metrics.ToolInvocationTotal.WithLabelValues("err").Inc()
 		if a.InvocationLedger == nil && a.InvocationStore != nil && jobID != "" {
 			errResult, _ := json.Marshal(map[string]any{"error": err.Error()})
 			_ = a.InvocationStore.SetFinished(ctx, idempotencyKey, ToolInvocationStatusFailure, errResult, false, "")
@@ -604,6 +626,7 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 	if p.Results == nil {
 		p.Results = make(map[string]any)
 	}
+	metrics.ToolInvocationTotal.WithLabelValues("ok").Inc()
 	attachToolEvidence(nodeResult, idempotencyKey)
 	p.Results[taskID] = nodeResult
 	if a.ToolEventSink != nil && jobID != "" {

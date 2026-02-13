@@ -68,5 +68,18 @@ services:
       postgres:
         condition: service_healthy
 
+  prometheus:
+    image: prometheus/prometheus:v2.47.0
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+
 volumes:
   postgres_data: {}

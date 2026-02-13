@@ -36,6 +36,8 @@ func init() {
 		JobParkedDuration,
 		// 3.0-M4 Advanced metrics
 		DecisionQualityScore, AnomalyDetectedTotal, SignatureVerificationTotal,
+		// P0 SLO metrics
+		JobStateGauge, StepDurationSeconds, LeaseConflictTotal, ToolInvocationTotal,
 	)
 }
 
@@ -185,6 +187,42 @@ var SignatureVerificationTotal = prometheus.NewCounterVec(
 		Help: "签名验证次数",
 	},
 	[]string{"result"}, // success | failed
+)
+
+// JobStateGauge 当前各状态 Job 数量（P0 SLO）
+var JobStateGauge = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "aetheris_job_state",
+		Help: "当前各状态 Job 数量",
+	},
+	[]string{"state"}, // pending | running | waiting | parked | completed | failed | cancelled
+)
+
+// StepDurationSeconds 单步执行耗时（秒）（P0 SLO）
+var StepDurationSeconds = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "aetheris_step_duration_seconds",
+		Help:    "单步执行耗时（秒）",
+		Buckets: prometheus.DefBuckets,
+	},
+	[]string{"node_type"}, // llm | tool | ...
+)
+
+// LeaseConflictTotal 租约冲突次数（ErrStaleAttempt）（P0 SLO）
+var LeaseConflictTotal = prometheus.NewCounter(
+	prometheus.CounterOpts{
+		Name: "aetheris_lease_conflict_total",
+		Help: "Append 时 attempt_id 不匹配导致的拒绝次数",
+	},
+)
+
+// ToolInvocationTotal 工具调用次数（按结果分类）（P0 SLO）
+var ToolInvocationTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "aetheris_tool_invocation_total",
+		Help: "工具调用次数（ok=真实执行成功, err=执行失败, restored=Replay/恢复注入）",
+	},
+	[]string{"result"}, // ok | err | restored
 )
 
 // WritePrometheus 将 Prometheus 文本格式写入 w（供 Hertz 等复用）

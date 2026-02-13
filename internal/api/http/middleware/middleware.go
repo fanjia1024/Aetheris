@@ -23,6 +23,8 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/hertz-contrib/jwt"
+
+	"rag-platform/pkg/auth"
 )
 
 // Middleware 中间件管理器
@@ -85,13 +87,29 @@ func NewJWTAuth(key []byte, timeout, maxRefresh time.Duration) (*JWTAuth, error)
 		IdentityKey: identityKey,
 		PayloadFunc: func(data interface{}) jwt.MapClaims {
 			if u, ok := data.(*AuthUser); ok {
-				return jwt.MapClaims{identityKey: u.Username}
+				claims := jwt.MapClaims{identityKey: u.Username, "tenant_id": u.TenantID, "user_id": u.UserID}
+				if claims["tenant_id"] == "" {
+					claims["tenant_id"] = "default"
+				}
+				if claims["user_id"] == "" {
+					claims["user_id"] = u.Username
+				}
+				return claims
 			}
 			return jwt.MapClaims{}
 		},
 		IdentityHandler: func(ctx context.Context, c *app.RequestContext) interface{} {
 			claims := jwt.ExtractClaims(ctx, c)
-			return &AuthUser{Username: claims[identityKey].(string)}
+			u := &AuthUser{Username: getClaimString(claims, identityKey)}
+			u.TenantID = getClaimString(claims, "tenant_id")
+			u.UserID = getClaimString(claims, "user_id")
+			if u.TenantID == "" {
+				u.TenantID = "default"
+			}
+			if u.UserID == "" {
+				u.UserID = u.Username
+			}
+			return u
 		},
 		Authenticator: func(ctx context.Context, c *app.RequestContext) (interface{}, error) {
 			var loginVals struct {
@@ -103,7 +121,7 @@ func NewJWTAuth(key []byte, timeout, maxRefresh time.Duration) (*JWTAuth, error)
 			}
 			if (loginVals.Username == "admin" && loginVals.Password == "admin") ||
 				(loginVals.Username == "test" && loginVals.Password == "test") {
-				return &AuthUser{Username: loginVals.Username}, nil
+				return &AuthUser{Username: loginVals.Username, TenantID: "default", UserID: loginVals.Username}, nil
 			}
 			return nil, jwt.ErrFailedAuthentication
 		},
@@ -123,9 +141,39 @@ func NewJWTAuth(key []byte, timeout, maxRefresh time.Duration) (*JWTAuth, error)
 	return &JWTAuth{Middleware: authMiddleware}, nil
 }
 
-// AuthUser 登录用户（示例）
+// AuthUser 登录用户（示例）；JWT claims 含 tenant_id、user_id 供 RBAC
 type AuthUser struct {
 	Username string
+	TenantID string
+	UserID   string
+}
+
+// getClaimString 从 JWT claims 安全取字符串
+func getClaimString(claims jwt.MapClaims, key string) string {
+	if v, ok := claims[key]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// InjectAuthContext 将 tenant_id、user_id 注入 context：优先 X-Tenant-ID header，否则 JWT claims；供 RBAC 与多租户隔离使用
+func (m *Middleware) InjectAuthContext() app.HandlerFunc {
+	return func(ctx context.Context, c *app.RequestContext) {
+		if tid := string(c.GetHeader("X-Tenant-ID")); tid != "" {
+			ctx = auth.WithTenantID(ctx, tid)
+		} else if claims := jwt.ExtractClaims(ctx, c); getClaimString(claims, "tenant_id") != "" {
+			ctx = auth.WithTenantID(ctx, getClaimString(claims, "tenant_id"))
+		} else {
+			ctx = auth.WithTenantID(ctx, "default")
+		}
+		claims := jwt.ExtractClaims(ctx, c)
+		if uid := getClaimString(claims, "user_id"); uid != "" {
+			ctx = auth.WithUserID(ctx, uid)
+		}
+		c.Next(ctx)
+	}
 }
 
 // RateLimit 速率限制中间件
