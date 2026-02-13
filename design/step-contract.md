@@ -486,6 +486,54 @@ Steps may emit **async events** (e.g. "request sent", "approval requested") that
 
 ---
 
+## Best Practices
+
+Use this checklist for production steps:
+
+1. **Use Tools for all external side effects** (HTTP, DB write, queue publish, email, payment).
+2. **Use runtime helpers for non-deterministic inputs**: `runtime.Clock(ctx)` and `runtime.RandIntn(ctx, n)`.
+3. **Keep step logic pure and state-local**: read/write only payload state, avoid global mutable state.
+4. **Enable validators in CI/test**: register `StepValidator` to catch forbidden calls early.
+5. **Treat replay as first-class**: for each critical flow, run replay checks before release.
+
+---
+
+## Troubleshooting
+
+### Replay non-deterministic
+
+**Symptoms**:
+- replay output differs from first run
+- hash/proof checks fail intermittently
+
+**Common causes**:
+- direct `time.Now()` or `rand.*` inside step code
+- reading mutable external state outside Tool contract
+- hidden global mutable state
+
+**Fixes**:
+- replace direct time/random calls with `runtime.Clock(ctx)` and `runtime.RandIntn(ctx, n)`
+- move external reads/writes to Tool layer so results are event-recorded
+- eliminate global state dependency from step execution path
+
+### Duplicate side effect
+
+**Symptoms**:
+- downstream system receives duplicate charge/email/write
+- same business action appears more than once after crash/retry
+
+**Common causes**:
+- side effect executed directly in step (not via Tool)
+- idempotency key not propagated to downstream API
+- Effect Store / InvocationLedger disabled in non-dev environment
+
+**Fixes**:
+- route side effects through Tool execution only
+- pass `StepIdempotencyKeyForExternal(...)` to downstream APIs
+- enable and verify Effect Store + InvocationLedger in runtime config
+
+---
+
 ## 参考
 
 - [execution-guarantees.md](execution-guarantees.md) — Runtime 保证与成立条件

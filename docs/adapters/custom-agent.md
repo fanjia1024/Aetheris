@@ -11,6 +11,15 @@ This guide shows how to migrate your existing agent (non-framework, custom code)
 
 For a **full end-to-end business scenario** (refund approval with wait and signal, from design to deployment), see [E2E Business Scenario: Refund](../e2e-business-scenario-refund.md).
 
+## Before / After Summary
+
+| Aspect | Before migration | After migration on Aetheris |
+|--------|------------------|-----------------------------|
+| Side effects | Direct API writes in agent code | Tool-based writes with idempotency key |
+| Human wait | Blocking thread or ad-hoc polling | Wait node + signal resume |
+| Crash recovery | Manual retry and uncertain state | Event-sourced replay + checkpoint resume |
+| Audit | Fragmented logs | Unified trace + evidence chain |
+
 ---
 
 ## Before: Your Current Agent

@@ -144,6 +144,8 @@ Financial transactions, medical prescriptions, government systems — must recor
 
 If your agent is becoming a "critical system" (customers depend on it, data loss is unacceptable, failures cost money), you need Aetheris.
 
+Hands-on walkthroughs for these three scenarios are in [docs/getting-started-agents.md](docs/getting-started-agents.md).
+
 ---
 
 ## Quick Start
@@ -161,8 +163,9 @@ See a real business scenario (refund approval agent with human-in-the-loop) runn
 
 Already have agents? Migrate them to Aetheris:
 
+- [Adapter Index](docs/adapters/README.md) — Choose adapter by migration path and granularity
 - [Custom Agent Adapter](docs/adapters/custom-agent.md) — Wrap your existing agents (imperative → TaskGraph)
-- [LangGraph Adapter](docs/adapters/langgraph.md) — Run LangGraph agents on Aetheris (coming soon)
+- [LangGraph Adapter](docs/adapters/langgraph.md) — Run LangGraph flows on Aetheris runtime
 
 ---
 

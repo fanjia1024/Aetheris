@@ -643,3 +643,42 @@ Audit trail (trace, evidence)
 ```
 
 Aetheris guarantees: at-most-once execution, crash recovery, audit proof, no "lost in wait" jobs.
+
+---
+
+## Scenario Extension 1: API Orchestration (2.0)
+
+Use this pattern when one business action spans multiple external systems (CRM, billing, notification).
+
+**Recommended flow**:
+
+1. `fetch_context` tool (read external state)
+2. `plan_action` llm node (decide action set)
+3. `execute_crm_update` tool
+4. `execute_billing_update` tool
+5. `notify_user` tool
+
+**Why this is 2.0-ready**:
+- each external action gets an idempotency key
+- failures are isolated per step with retry/failure policy
+- replay can restore execution timeline without re-sending side effects
+
+---
+
+## Scenario Extension 2: Auditable Agent (2.0)
+
+Use this pattern for finance/health/legal workflows where you must answer “why this decision was made”.
+
+**Minimum checklist**:
+
+1. Enable evidence export (`POST /api/jobs/:id/export`)
+2. Enable consistency checks (`GET /api/forensics/consistency/:job_id`)
+3. Keep trace artifacts (`GET /api/jobs/:id/trace`, `/events`, `/replay`)
+4. Route all side effects via tool layer (no direct external writes in step code)
+
+**Audit output**:
+- decision timeline
+- tool provenance
+- proof package (offline verifiable)
+
+These artifacts provide a complete chain for post-incident or compliance review.

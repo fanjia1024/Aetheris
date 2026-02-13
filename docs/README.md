@@ -54,6 +54,7 @@ Recommended **Go 1.25.7+**, aligned with go.mod and CI.
 
 - [Examples guide (examples.md)](examples.md) — basic_agent, simple_chat_agent, streaming, tool, workflow purpose and run instructions
 - [examples/](../examples/) — Example code
+- [Adapters index (adapters/README.md)](adapters/README.md) — Custom vs LangGraph migration paths
 - [Deployment (deployment.md)](deployment.md) — Compose / Docker / K8s overview and prerequisites
 - [deployments/](../deployments/) — Docker, Compose, K8s directories
 

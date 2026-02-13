@@ -1,42 +1,92 @@
-# LangGraph Adapter (Migration Path)
+# LangGraph Adapter (Migration Guide)
 
-This document outlines how to run a **LangGraph-based agent** on Aetheris for durability, crash recovery, and audit. A full adapter implementation is planned; below is the migration path and a minimal integration pattern.
+This document explains how to run a **LangGraph-based agent** on Aetheris and keep Aetheris runtime guarantees (durability, replay determinism, at-most-once side effects).
 
----
+## What is supported today
 
-## Why run LangGraph on Aetheris?
+You can migrate LangGraph in two practical patterns:
 
-- **Durability**: LangGraph graphs are typically in-memory; Aetheris provides event-sourced execution and checkpointing so long-running or human-in-the-loop flows survive restarts.
-- **At-most-once side effects**: Tools called from LangGraph can be wrapped so that Aetheris Ledger guarantees no duplicate execution on replay or retry.
-- **Audit and replay**: Every step and tool call is recorded; you can trace and replay jobs for debugging and compliance.
+1. **Black-box bridge (recommended first)**  
+   Run a LangGraph flow inside one Aetheris node, then let Aetheris handle job lifecycle, wait/signal, replay, and audit.
+2. **Node-by-node bridge (advanced)**  
+   Map important LangGraph nodes to Aetheris steps for finer-grained trace and checkpointing.
 
----
+No dedicated `pkg/adapters/langgraph` package is required to start. You can implement the bridge in your app layer and runtime node adapters.
 
-## Migration path (high level)
+## Runtime integration points (code pointers)
 
-1. **Treat the LangGraph run as one or more “nodes” in an Aetheris TaskGraph**  
-   - Option A: A single “LangGraph” node that receives the goal, runs your LangGraph (e.g. in process or via a subprocess), and returns the result. Aetheris handles job lifecycle, wait/signal, and checkpointing; the LangGraph sub-run is the node’s implementation.  
-   - Option B: Map LangGraph nodes to Aetheris nodes (e.g. each LangGraph node → one Aetheris step); more work but finer-grained checkpointing and trace.
+- Job creation and planning:
+  - `internal/api/http/handler.go`
+  - `internal/app/api/agent_v1.go`
+- Node execution:
+  - `internal/agent/runtime/executor/node_adapter.go`
+  - `internal/agent/runtime/executor/runner.go`
+- Side-effect and replay guarantees:
+  - `design/effect-system.md`
+  - `design/step-contract.md`
 
-2. **Side effects**  
-   - Any tool or API call that must be at-most-once should be exposed as an Aetheris Tool and called from the Aetheris Runner (or from a LangGraph node that delegates to an Aetheris Tool). Do not rely on LangGraph alone for idempotency under crash/retry.
+## Step-by-step migration
 
-3. **Human-in-the-loop**  
-   - If your LangGraph has a “human review” step, model it as an Aetheris Wait node: park the job with a `correlation_key`, then resume via `POST /api/jobs/:id/signal` when the human approves.
+### 1. Keep LangGraph planning, move execution envelope to Aetheris
 
----
+- Wrap your LangGraph invocation into a node runner.
+- Feed job goal/input from Aetheris payload.
+- Write LangGraph output back to `payload.Results`.
 
-## Minimal example (conceptual)
+### 2. Route external side effects through Aetheris Tool path
 
-- **Planner**: Returns a TaskGraph with one node, e.g. `langgraph_node`, of type “workflow” or custom.
-- **Node runner**: For that node, your code invokes the LangGraph graph (e.g. `graph.invoke({"goal": goal})`). Pass the goal from the Aetheris job; write the result back into the Aetheris payload so the next step (if any) or job completion can use it.
-- **Tools**: If the graph uses tools that perform external side effects, register them with Aetheris and call them through the Aetheris Tool layer (or ensure they use the same idempotency keys as Aetheris) so that at-most-once is preserved across retries and replays.
+- Any payment/email/webhook/API mutation must run via Aetheris Tool adapter, not direct ad-hoc calls in the bridge.
+- Pass `StepIdempotencyKeyForExternal(...)` to downstream APIs for de-duplication.
 
----
+### 3. Model human review as Aetheris Wait
 
-## Status and next steps
+- Replace ad-hoc “human approval pause” in LangGraph with Aetheris wait semantics:
+  - emit `job_waiting` with `correlation_key`
+  - resume via `POST /api/jobs/:id/signal`
 
-- **Coming soon**: Official LangGraph adapter package or example that wires a LangGraph graph into an Aetheris TaskGraph and documents the exact contract (inputs/outputs, tool delegation, wait/signal).
-- **Today**: Use the [Custom Agent Adapter](custom-agent.md) to wrap your LangGraph agent as a single “black box” node and gain job lifecycle, wait/signal, and audit; then refine toward Option B if you need per-node checkpointing.
+### 4. Validate replay behavior
 
-For full custom agent migration (including imperative agents), see [Custom Agent Adapter](custom-agent.md). For an end-to-end business scenario (refund approval with wait and signal), see [E2E Business Scenario: Refund](../e2e-business-scenario-refund.md).
+- Run:
+  - `GET /api/jobs/:id/events`
+  - `GET /api/jobs/:id/replay`
+  - `aetheris verify <job_id>`
+- Ensure replay injects recorded results and does not re-execute side effects.
+
+## Minimal bridge skeleton
+
+```go
+// inside a custom node runner
+func runLangGraphBridge(ctx context.Context, p *executor.AgentDAGPayload) (*executor.AgentDAGPayload, error) {
+    goal := p.Goal
+    // invoke your LangGraph app (in-process or RPC)
+    // result := langGraphApp.Invoke(goal)
+    result := "langgraph-result"
+
+    if p.Results == nil {
+        p.Results = make(map[string]any)
+    }
+    p.Results["langgraph_result"] = result
+    return p, nil
+}
+```
+
+For side-effect steps, delegate to Tool adapters instead of performing raw external writes in this bridge.
+
+## Error handling and recovery rules
+
+- Treat bridge errors as normal step errors so Retry/Failure policy remains consistent with Aetheris.
+- For transient external failures, prefer Tool-layer retries.
+- For permanent failures, fail the step and keep full trace/evidence.
+
+## Recommended migration path
+
+1. Start with **black-box bridge** to go live quickly.
+2. Split high-risk/high-value LangGraph nodes into dedicated Aetheris steps.
+3. Add Wait + Signal for human checkpoints.
+4. Add forensics export/verify checks in CI.
+
+## Related docs
+
+- [Custom Agent Adapter](custom-agent.md)
+- [Getting Started with Agents](../getting-started-agents.md)
+- [E2E Business Scenario: Refund](../e2e-business-scenario-refund.md)
