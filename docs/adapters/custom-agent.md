@@ -716,7 +716,7 @@ After migration:
 
 ### Q: Can I use LangGraph/LangChain alongside Aetheris?
 
-**A**: Yes. Use LangChain for prompt engineering, RAG; use Aetheris for execution runtime (durability, crash recovery). See `examples/langgraph_adapter/` (TODO).
+**A**: Yes. Use LangChain for prompt engineering and RAG, and use Aetheris for execution runtime (durability, crash recovery). You can start from this adapter guide and `examples/sdk_agent/` as an integration baseline.
 
 ### Q: How do I handle long Tool execution (>5 min)?
 
@@ -733,4 +733,4 @@ After migration:
 - **Docs**: [docs/](../)
 - **Design specs**: [design/](../../design/)
 - **Examples**: [examples/](../../examples/)
-- **Issues**: GitHub Issues (TODO: add link)
+- **Issues**: Open an issue in the repository's **Issues** tab.

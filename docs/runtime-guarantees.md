@@ -493,7 +493,9 @@ Aetheris provides runtime guarantees **given persistent storage**; storage layer
 
 **Prevention**:
 - Use transactional stores (Postgres Ledger + Event Store in same DB)
-- Regular consistency checks (TODO: `aetheris check-consistency` CLI command)
+- Regular consistency checks:
+  - API: `GET /api/forensics/consistency/:job_id`
+  - Offline: `aetheris export <job_id>` + `aetheris verify <evidence.zip>`
 
 ---
 

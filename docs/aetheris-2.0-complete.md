@@ -62,7 +62,6 @@ POST /api/forensics/query           # 复杂查询
 POST /api/forensics/batch-export    # 批量导出
 GET /api/jobs/:id/evidence-graph    # 依赖图
 GET /api/forensics/consistency/:id  # 一致性检查
-# 注：以上取证查询类 API 在当前 main 仍为未实现占位接口（返回 501）
 ```
 
 ---
