@@ -144,7 +144,7 @@ main() {
 
   local tmp_dir
   tmp_dir="$(mktemp -d)"
-  trap 'rm -rf "$tmp_dir"' EXIT
+  trap 'if [[ -n "${tmp_dir:-}" ]]; then rm -rf "$tmp_dir"; fi' EXIT
 
   local post_file="$tmp_dir/post_ms.txt"
   local get_job_file="$tmp_dir/get_job_ms.txt"

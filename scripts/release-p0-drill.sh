@@ -106,31 +106,67 @@ wait_health() {
 
 create_agent() {
   local name="$1"
-  http_request POST "$API_URL/api/agents" "{\"name\":\"$name\"}"
-  if [[ "$RESPONSE_CODE" != "200" ]]; then
-    return 1
-  fi
-  local id
-  id="$(json_get "id" "$RESPONSE_BODY")"
-  if [[ -z "$id" ]]; then
-    return 1
-  fi
-  echo "$id"
+  local i
+  for ((i = 0; i < 5; i++)); do
+    http_request POST "$API_URL/api/agents" "{\"name\":\"$name\"}"
+    if [[ "$RESPONSE_CODE" == "200" ]]; then
+      local id
+      id="$(json_get "id" "$RESPONSE_BODY")"
+      if [[ -n "$id" ]]; then
+        echo "$id"
+        return 0
+      fi
+    fi
+    sleep 1
+  done
+  return 1
 }
 
 create_job() {
   local agent_id="$1"
   local message="$2"
-  http_request POST "$API_URL/api/agents/$agent_id/message" "{\"message\":\"$message\"}"
-  if [[ "$RESPONSE_CODE" != "202" ]]; then
-    return 1
-  fi
+  local i
+  for ((i = 0; i < 3; i++)); do
+    http_request POST "$API_URL/api/agents/$agent_id/message" "{\"message\":\"$message\"}"
+    if [[ "$RESPONSE_CODE" == "202" ]]; then
+      local job_id
+      job_id="$(json_get "job_id" "$RESPONSE_BODY")"
+      if [[ -n "$job_id" ]]; then
+        echo "$job_id"
+        return 0
+      fi
+    fi
+    # 404 交给上层做 Agent 重建；其余短暂错误可重试
+    if [[ "$RESPONSE_CODE" == "404" ]]; then
+      return 1
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+create_job_resilient() {
+  local agent_id="$1"
+  local message="$2"
+  local ts="$3"
   local job_id
-  job_id="$(json_get "job_id" "$RESPONSE_BODY")"
-  if [[ -z "$job_id" ]]; then
+  if job_id="$(create_job "$agent_id" "$message")"; then
+    echo "$agent_id|$job_id"
+    return 0
+  fi
+
+  # API 重启后内存态 Agent 可能丢失（404）；重建 Agent 后重试一次，避免误报 Drill 失败。
+  if [[ "$RESPONSE_CODE" != "404" ]]; then
     return 1
   fi
-  echo "$job_id"
+  local recreated_agent_id
+  if ! recreated_agent_id="$(create_agent "drill-agent-$ts-recovered")"; then
+    return 1
+  fi
+  if ! job_id="$(create_job "$recreated_agent_id" "$message")"; then
+    return 1
+  fi
+  echo "$recreated_agent_id|$job_id"
 }
 
 wait_terminal() {
@@ -176,7 +212,7 @@ main() {
 
   local result_file
   result_file="$(mktemp)"
-  trap 'rm -f "$result_file"' EXIT
+  trap 'if [[ -n "${result_file:-}" ]]; then rm -f "$result_file"; fi' EXIT
 
   local passed=0
   local failed=0
@@ -196,10 +232,12 @@ main() {
 
   echo "[drill] Drill A: worker restart during processing"
   local job_a
-  if ! job_a="$(create_job "$agent_id" "drill-a: please respond with one short sentence")"; then
-    record_result "$result_file" "Drill A (worker crash recovery)" "FAIL" "create job failed"
+  local pair_a
+  if ! pair_a="$(create_job_resilient "$agent_id" "drill-a: please respond with one short sentence" "$ts")"; then
+    record_result "$result_file" "Drill A (worker crash recovery)" "FAIL" "create job failed code=$RESPONSE_CODE"
     failed=$((failed + 1))
   else
+    IFS='|' read -r agent_id job_a <<< "$pair_a"
     compose_cmd restart worker1 >/dev/null
     local terminal_a
     terminal_a="$(wait_terminal "$job_a")"
@@ -214,10 +252,12 @@ main() {
 
   echo "[drill] Drill B: API restart"
   local job_b
-  if ! job_b="$(create_job "$agent_id" "drill-b: please respond with one short sentence")"; then
-    record_result "$result_file" "Drill B (api restart)" "FAIL" "create job failed"
+  local pair_b
+  if ! pair_b="$(create_job_resilient "$agent_id" "drill-b: please respond with one short sentence" "$ts")"; then
+    record_result "$result_file" "Drill B (api restart)" "FAIL" "create job failed code=$RESPONSE_CODE"
     failed=$((failed + 1))
   else
+    IFS='|' read -r agent_id job_b <<< "$pair_b"
     compose_cmd restart api >/dev/null
     if ! wait_health; then
       record_result "$result_file" "Drill B (api restart)" "FAIL" "api did not recover"
@@ -248,10 +288,12 @@ main() {
       failed=$((failed + 1))
     else
       local job_c
-      if ! job_c="$(create_job "$agent_id" "drill-c: please respond with one short sentence")"; then
-        record_result "$result_file" "Drill C (postgres outage)" "FAIL" "create job failed"
+      local pair_c
+      if ! pair_c="$(create_job_resilient "$agent_id" "drill-c: please respond with one short sentence" "$ts")"; then
+        record_result "$result_file" "Drill C (postgres outage)" "FAIL" "create job failed code=$RESPONSE_CODE"
         failed=$((failed + 1))
       else
+        IFS='|' read -r agent_id job_c <<< "$pair_c"
         local terminal_c
         terminal_c="$(wait_terminal "$job_c")"
         if [[ "$terminal_c" == "timeout" || "$terminal_c" == http_* ]]; then
@@ -267,10 +309,17 @@ main() {
 
   echo "[drill] Drill D: replay and trace availability"
   local job_d
-  if ! job_d="$(create_job "$agent_id" "drill-d: please respond with one short sentence")"; then
-    record_result "$result_file" "Drill D (replay/trace)" "FAIL" "create job failed"
+  local agent_d
+  if ! agent_d="$(create_agent "drill-agent-$ts-d")"; then
+    record_result "$result_file" "Drill D (replay/trace)" "FAIL" "create agent failed code=$RESPONSE_CODE"
     failed=$((failed + 1))
   else
+  local pair_d
+  if ! pair_d="$(create_job_resilient "$agent_d" "drill-d: please respond with one short sentence" "$ts")"; then
+    record_result "$result_file" "Drill D (replay/trace)" "FAIL" "create job failed code=$RESPONSE_CODE"
+    failed=$((failed + 1))
+  else
+    IFS='|' read -r agent_id job_d <<< "$pair_d"
     local terminal_d
     terminal_d="$(wait_terminal "$job_d")"
     http_request GET "$API_URL/api/jobs/$job_d/replay"
@@ -291,13 +340,21 @@ main() {
       failed=$((failed + 1))
     fi
   fi
+  fi
 
   echo "[drill] Drill E: forensics export + verify endpoint"
   local job_e
-  if ! job_e="$(create_job "$agent_id" "drill-e: please respond with one short sentence")"; then
-    record_result "$result_file" "Drill E (forensics)" "FAIL" "create job failed"
+  local agent_e
+  if ! agent_e="$(create_agent "drill-agent-$ts-e")"; then
+    record_result "$result_file" "Drill E (forensics)" "FAIL" "create agent failed code=$RESPONSE_CODE"
     failed=$((failed + 1))
   else
+  local pair_e
+  if ! pair_e="$(create_job_resilient "$agent_e" "drill-e: please respond with one short sentence" "$ts")"; then
+    record_result "$result_file" "Drill E (forensics)" "FAIL" "create job failed code=$RESPONSE_CODE"
+    failed=$((failed + 1))
+  else
+    IFS='|' read -r agent_id job_e <<< "$pair_e"
     local terminal_e
     terminal_e="$(wait_terminal "$job_e")"
     http_request POST "$API_URL/api/jobs/$job_e/export"
@@ -318,6 +375,7 @@ main() {
       record_result "$result_file" "Drill E (forensics)" "FAIL" "terminal=$terminal_e export_ok=$export_ok verify_ok=$verify_ok"
       failed=$((failed + 1))
     fi
+  fi
   fi
 
   {
