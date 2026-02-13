@@ -44,6 +44,18 @@ type LLMGen interface {
 	Generate(ctx context.Context, prompt string) (string, error)
 }
 
+// LLMMetadataProvider 可选接口：用于提供模型审计元信息。
+type LLMMetadataProvider interface {
+	ModelInfo(ctx context.Context) LLMModelInfo
+}
+
+// LLMModelInfo LLM 审计元信息。
+type LLMModelInfo struct {
+	Model       string
+	Provider    string
+	Temperature float64
+}
+
 // ToolExec 执行单工具调用（由应用层注入）；state 为再入时传入的上次状态，返回 ToolResult 支持 Done/State/Output
 type ToolExec interface {
 	Execute(ctx context.Context, toolName string, input map[string]any, state interface{}) (ToolResult, error)
@@ -150,11 +162,12 @@ func (a *LLMNodeAdapter) runNode(ctx context.Context, taskID string, cfg map[str
 	}
 	if a.CommandEventSink != nil && jobID != "" {
 		// LLM command_committed payload 包含 model/provider/temperature 供审计与 trace（design/versioning.md）
+		llmInfo := resolveLLMModelInfo(ctx, a.LLM)
 		commitPayload := map[string]interface{}{
 			"result":          resp,
-			"llm_model":       "llm-model-default", // TODO: from LLM.GetModelInfo() when available
-			"llm_provider":    "default",
-			"llm_temperature": 0.7,
+			"llm_model":       llmInfo.Model,
+			"llm_provider":    llmInfo.Provider,
+			"llm_temperature": llmInfo.Temperature,
 		}
 		commitBytes, _ := json.Marshal(commitPayload)
 		_ = a.CommandEventSink.AppendCommandCommitted(ctx, jobID, taskID, taskID, commitBytes, "")
@@ -164,14 +177,14 @@ func (a *LLMNodeAdapter) runNode(ctx context.Context, taskID string, cfg map[str
 	}
 
 	// Evidence: LLM decision metadata for audit (design/execution-forensics.md)
-	// TODO: Extract model/temperature from LLM when GetModelInfo() is available
+	llmInfo := resolveLLMModelInfo(ctx, a.LLM)
 	resultMap := map[string]any{
 		"output": resp,
 		"_evidence": map[string]interface{}{
 			"llm_decision": map[string]interface{}{
-				"model":       "llm-model-default",
-				"provider":    "default",
-				"temperature": 0.7,
+				"model":       llmInfo.Model,
+				"provider":    llmInfo.Provider,
+				"temperature": llmInfo.Temperature,
 			},
 		},
 	}
@@ -181,6 +194,30 @@ func (a *LLMNodeAdapter) runNode(ctx context.Context, taskID string, cfg map[str
 		agent.Session.AddMessage("assistant", resp)
 	}
 	return p, nil
+}
+
+func resolveLLMModelInfo(ctx context.Context, llm LLMGen) LLMModelInfo {
+	info := LLMModelInfo{
+		Model:       "llm-model-default",
+		Provider:    "default",
+		Temperature: 0.7,
+	}
+	if llm == nil {
+		return info
+	}
+	if provider, ok := llm.(LLMMetadataProvider); ok {
+		meta := provider.ModelInfo(ctx)
+		if meta.Model != "" {
+			info.Model = meta.Model
+		}
+		if meta.Provider != "" {
+			info.Provider = meta.Provider
+		}
+		if meta.Temperature >= 0 {
+			info.Temperature = meta.Temperature
+		}
+	}
+	return info
 }
 
 // ToDAGNode 实现 NodeAdapter
