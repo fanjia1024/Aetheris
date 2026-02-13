@@ -15,18 +15,18 @@
 package http
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
-	"rag-platform/internal/agent/job"
+	"rag-platform/internal/runtime/jobstore"
+	"rag-platform/pkg/proof"
 )
 
 // ExportJobForensics 导出 job 的完整证据包（ZIP 格式）
@@ -40,7 +40,6 @@ func (h *Handler) ExportJobForensics(c context.Context, ctx *app.RequestContext)
 		return
 	}
 
-	// 导出证据包
 	zipData, err := h.buildForensicsPackage(c, jobID)
 	if err != nil {
 		hlog.CtxErrorf(c, "failed to build forensics package for job %s: %v", jobID, err)
@@ -50,284 +49,185 @@ func (h *Handler) ExportJobForensics(c context.Context, ctx *app.RequestContext)
 		return
 	}
 
-	// 返回 ZIP 文件
 	filename := fmt.Sprintf("job-%s-forensics-%s.zip", jobID, time.Now().Format("20060102-150405"))
 	ctx.Header("Content-Type", "application/zip")
 	ctx.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
 	ctx.Data(consts.StatusOK, "application/zip", zipData)
 }
 
-// buildForensicsPackage 构建证据包 ZIP 数据
+// buildForensicsPackage 构建与 proof.VerifyEvidenceZip 兼容的证据包
 func (h *Handler) buildForensicsPackage(ctx context.Context, jobID string) ([]byte, error) {
-	// 创建 ZIP buffer
-	buf := new(bytes.Buffer)
-	zipWriter := zip.NewWriter(buf)
-	defer zipWriter.Close()
-
-	// 1. 导出事件流 (events.jsonl)
-	if err := h.exportEvents(ctx, zipWriter, jobID); err != nil {
-		return nil, fmt.Errorf("export events failed: %w", err)
+	if h.jobEventStore == nil {
+		return nil, fmt.Errorf("job event store is not configured")
 	}
 
-	// 2. 导出 Tool Ledger (tool_ledger.json)
-	if err := h.exportToolLedger(ctx, zipWriter, jobID); err != nil {
-		return nil, fmt.Errorf("export tool ledger failed: %w", err)
-	}
+	jobAdapter := &proofJobStoreAdapter{store: h.jobEventStore}
+	ledgerAdapter := &proofLedgerAdapter{store: h.jobEventStore}
 
-	// 3. 导出 LLM Calls (llm_calls.json)
-	if err := h.exportLLMCalls(ctx, zipWriter, jobID); err != nil {
-		return nil, fmt.Errorf("export llm calls failed: %w", err)
-	}
+	return proof.ExportEvidenceZip(
+		ctx,
+		jobID,
+		jobAdapter,
+		ledgerAdapter,
+		proof.ExportOptions{
+			RuntimeVersion: "2.0.0",
+			SchemaVersion:  "2.0",
+		},
+	)
+}
 
-	// 4. 导出 Evidence Graph (evidence_graph.json)
-	if err := h.exportEvidenceGraph(ctx, zipWriter, jobID); err != nil {
-		return nil, fmt.Errorf("export evidence graph failed: %w", err)
-	}
+// proofJobStoreAdapter 将 jobstore.JobStore 适配为 proof.JobStore。
+type proofJobStoreAdapter struct {
+	store jobstore.JobStore
+}
 
-	// 5. 导出 Metadata (metadata.json)
-	if err := h.exportMetadata(ctx, zipWriter, jobID); err != nil {
-		return nil, fmt.Errorf("export metadata failed: %w", err)
-	}
-
-	// 关闭 ZIP writer
-	if err := zipWriter.Close(); err != nil {
+func (a *proofJobStoreAdapter) ListEvents(ctx context.Context, jobID string) ([]proof.Event, error) {
+	events, _, err := a.store.ListEvents(ctx, jobID)
+	if err != nil {
 		return nil, err
 	}
 
-	return buf.Bytes(), nil
+	out := make([]proof.Event, 0, len(events))
+	for _, e := range events {
+		out = append(out, proof.Event{
+			ID:        e.ID,
+			JobID:     e.JobID,
+			Type:      string(e.Type),
+			Payload:   string(e.Payload),
+			CreatedAt: e.CreatedAt,
+			PrevHash:  e.PrevHash,
+			Hash:      e.Hash,
+		})
+	}
+
+	return out, nil
 }
 
-// exportEvents 导出事件流为 JSONL 格式
-func (h *Handler) exportEvents(ctx context.Context, zipWriter *zip.Writer, jobID string) error {
-	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
+// proofLedgerAdapter 基于事件流重建 ledger，保证与 VerifyEvidenceZip 一致性检查兼容。
+type proofLedgerAdapter struct {
+	store jobstore.JobStore
+}
+
+func (a *proofLedgerAdapter) ListToolInvocations(ctx context.Context, jobID string) ([]proof.ToolInvocation, error) {
+	events, _, err := a.store.ListEvents(ctx, jobID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	file, err := zipWriter.Create("events.jsonl")
-	if err != nil {
-		return err
+	type invocationAcc struct {
+		invocationID   string
+		stepID         string
+		toolName       string
+		argsHash       string
+		idempotencyKey string
+		outcome        string
+		result         json.RawMessage
+		timestamp      string
 	}
 
-	// 每个事件一行 JSON
-	for _, event := range events {
-		data, err := json.Marshal(event)
-		if err != nil {
+	byKey := make(map[string]*invocationAcc)
+	for _, e := range events {
+		if e.Type != jobstore.ToolInvocationStarted && e.Type != jobstore.ToolInvocationFinished {
 			continue
 		}
-		if _, err := file.Write(append(data, '\n')); err != nil {
-			return err
-		}
-	}
 
-	return nil
-}
-
-// exportToolLedger 导出 Tool 调用记录
-func (h *Handler) exportToolLedger(ctx context.Context, zipWriter *zip.Writer, jobID string) error {
-	// 从事件流提取 tool invocations（简化实现）
-	// TODO: 连接到真实的 ToolInvocationStore
-	var toolInvocations []map[string]interface{}
-
-	file, err := zipWriter.Create("tool_ledger.json")
-	if err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(toolInvocations, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	_, err = file.Write(data)
-	return err
-}
-
-// exportLLMCalls 导出 LLM 调用元信息
-func (h *Handler) exportLLMCalls(ctx context.Context, zipWriter *zip.Writer, jobID string) error {
-	// 从事件流提取 llm_called / llm_returned 事件
-	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
-	if err != nil {
-		return err
-	}
-
-	var llmCalls []map[string]interface{}
-
-	for _, event := range events {
-		if event.Type == "llm_called" || event.Type == "llm_returned" {
-			var payload map[string]interface{}
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				continue
-			}
-
-			llmCall := map[string]interface{}{
-				"event_type": string(event.Type),
-				"created_at": event.CreatedAt,
-				"payload":    payload,
-			}
-
-			// 提取关键信息
-			if model, ok := payload["model"].(string); ok {
-				llmCall["model"] = model
-			}
-			if provider, ok := payload["provider"].(string); ok {
-				llmCall["provider"] = provider
-			}
-			if tokens, ok := payload["tokens"].(map[string]interface{}); ok {
-				llmCall["tokens"] = tokens
-			}
-
-			llmCalls = append(llmCalls, llmCall)
-		}
-	}
-
-	file, err := zipWriter.Create("llm_calls.json")
-	if err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(llmCalls, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	_, err = file.Write(data)
-	return err
-}
-
-// exportEvidenceGraph 导出决策依赖图
-func (h *Handler) exportEvidenceGraph(ctx context.Context, zipWriter *zip.Writer, jobID string) error {
-	// 从事件流构建决策依赖图
-	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
-	if err != nil {
-		return err
-	}
-
-	// 构建节点关系图：reasoning_snapshot -> tool_invocation -> state_change
-	graph := map[string]interface{}{
-		"nodes": []map[string]interface{}{},
-		"edges": []map[string]interface{}{},
-	}
-
-	nodes := []map[string]interface{}{}
-	edges := []map[string]interface{}{}
-
-	// 解析事件构建图
-	for _, event := range events {
 		var payload map[string]interface{}
-		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		if err := json.Unmarshal(e.Payload, &payload); err != nil {
 			continue
 		}
 
-		switch event.Type {
-		case "reasoning_snapshot_recorded":
-			// 推理节点
-			node := map[string]interface{}{
-				"id":   fmt.Sprintf("reasoning-%s", event.ID),
-				"type": "reasoning",
-				"data": payload,
-			}
-			nodes = append(nodes, node)
+		key := getString(payload, "idempotency_key")
+		if key == "" {
+			continue
+		}
 
-		case "tool_invocation_finished":
-			// Tool 调用节点
-			idempotencyKey, _ := payload["idempotency_key"].(string)
-			node := map[string]interface{}{
-				"id":   fmt.Sprintf("tool-%s", idempotencyKey),
-				"type": "tool",
-				"data": payload,
-			}
-			nodes = append(nodes, node)
+		acc := byKey[key]
+		if acc == nil {
+			acc = &invocationAcc{idempotencyKey: key}
+			byKey[key] = acc
+		}
 
-			// 如果有 step_id，创建边
-			if stepID, ok := payload["step_id"].(string); ok && stepID != "" {
-				edge := map[string]interface{}{
-					"from": fmt.Sprintf("reasoning-%s", stepID),
-					"to":   fmt.Sprintf("tool-%s", idempotencyKey),
-					"type": "invokes",
+		if v := getString(payload, "invocation_id"); v != "" {
+			acc.invocationID = v
+		}
+		if v := getString(payload, "step_id"); v != "" {
+			acc.stepID = v
+		}
+		if v := getString(payload, "tool_name"); v != "" {
+			acc.toolName = v
+		}
+		if v := getString(payload, "arguments_hash"); v != "" {
+			acc.argsHash = v
+		}
+		if v := getString(payload, "started_at"); v != "" && acc.timestamp == "" {
+			acc.timestamp = v
+		}
+		if v := getString(payload, "finished_at"); v != "" {
+			acc.timestamp = v
+		}
+
+		if e.Type == jobstore.ToolInvocationFinished {
+			acc.outcome = getString(payload, "outcome")
+			if resultRaw, ok := payload["result"]; ok {
+				if b, err := json.Marshal(resultRaw); err == nil {
+					acc.result = b
 				}
-				edges = append(edges, edge)
-			}
-
-		case "state_changed":
-			// 状态变更节点
-			nodeID, _ := payload["node_id"].(string)
-			node := map[string]interface{}{
-				"id":   fmt.Sprintf("state-%s", event.ID),
-				"type": "state_change",
-				"data": payload,
-			}
-			nodes = append(nodes, node)
-
-			// 创建从节点到状态变更的边
-			if nodeID != "" {
-				edge := map[string]interface{}{
-					"from": fmt.Sprintf("reasoning-%s", nodeID),
-					"to":   fmt.Sprintf("state-%s", event.ID),
-					"type": "causes",
-				}
-				edges = append(edges, edge)
 			}
 		}
 	}
 
-	graph["nodes"] = nodes
-	graph["edges"] = edges
+	keys := make([]string, 0, len(byKey))
+	for k := range byKey {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 
-	file, err := zipWriter.Create("evidence_graph.json")
-	if err != nil {
-		return err
+	out := make([]proof.ToolInvocation, 0, len(keys))
+	for _, key := range keys {
+		acc := byKey[key]
+		if acc == nil {
+			continue
+		}
+
+		status := "started"
+		committed := false
+		if acc.outcome != "" {
+			status = acc.outcome
+			committed = acc.outcome == "success"
+		}
+
+		out = append(out, proof.ToolInvocation{
+			ID:             fallback(acc.invocationID, key),
+			JobID:          jobID,
+			IdempotencyKey: acc.idempotencyKey,
+			StepID:         acc.stepID,
+			ToolName:       acc.toolName,
+			ArgsHash:       acc.argsHash,
+			Status:         status,
+			Result:         string(acc.result),
+			Committed:      committed,
+			Timestamp:      acc.timestamp,
+		})
 	}
 
-	data, err := json.MarshalIndent(graph, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	_, err = file.Write(data)
-	return err
+	return out, nil
 }
 
-// exportMetadata 导出 job 元信息
-func (h *Handler) exportMetadata(ctx context.Context, zipWriter *zip.Writer, jobID string) error {
-	// 从 job store 获取 job 元信息
-	jobInfo, err := h.jobStore.Get(ctx, jobID)
-	if err != nil {
-		// 如果找不到 job，仍然创建空的 metadata 文件
-		jobInfo = &job.Job{
-			ID:     jobID,
-			Status: 0, // StatusPending
-		}
+func getString(m map[string]interface{}, key string) string {
+	v, ok := m[key]
+	if !ok {
+		return ""
 	}
-
-	metadata := map[string]interface{}{
-		"job_id":                jobInfo.ID,
-		"agent_id":              jobInfo.AgentID,
-		"goal":                  jobInfo.Goal,
-		"status":                jobInfo.Status,
-		"cursor":                jobInfo.Cursor,
-		"retry_count":           jobInfo.RetryCount,
-		"session_id":            jobInfo.SessionID,
-		"created_at":            jobInfo.CreatedAt,
-		"updated_at":            jobInfo.UpdatedAt,
-		"idempotency_key":       jobInfo.IdempotencyKey,
-		"required_capabilities": jobInfo.RequiredCapabilities,
+	s, ok := v.(string)
+	if !ok {
+		return ""
 	}
+	return s
+}
 
-	if !jobInfo.CancelRequestedAt.IsZero() {
-		metadata["cancel_requested_at"] = jobInfo.CancelRequestedAt
+func fallback(v string, d string) string {
+	if v != "" {
+		return v
 	}
-
-	file, err := zipWriter.Create("metadata.json")
-	if err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(metadata, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	_, err = file.Write(data)
-	return err
+	return d
 }
