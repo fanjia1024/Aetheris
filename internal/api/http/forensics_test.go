@@ -81,3 +81,41 @@ func TestBuildForensicsPackage_ProofCompatible(t *testing.T) {
 		t.Fatalf("expected manifest valid")
 	}
 }
+
+func TestNormalizeProofEventHashes_RebuildsInvalidChain(t *testing.T) {
+	events := []proof.Event{
+		{
+			ID:        "ev-1",
+			JobID:     "job-hash-normalize",
+			Type:      "job_created",
+			Payload:   `{"goal":"hello"}`,
+			CreatedAt: time.Date(2026, 2, 13, 9, 0, 0, 0, time.UTC),
+			PrevHash:  "",
+			Hash:      "invalid",
+		},
+		{
+			ID:        "ev-2",
+			JobID:     "job-hash-normalize",
+			Type:      "job_completed",
+			Payload:   `{"ok":true}`,
+			CreatedAt: time.Date(2026, 2, 13, 9, 0, 1, 0, time.UTC),
+			PrevHash:  "invalid",
+			Hash:      "invalid",
+		},
+	}
+
+	if err := proof.ValidateChain(events); err == nil {
+		t.Fatalf("expected invalid chain before normalization")
+	}
+
+	normalized := normalizeProofEventHashes(events)
+	if err := proof.ValidateChain(normalized); err != nil {
+		t.Fatalf("expected normalized chain valid, got: %v", err)
+	}
+	if normalized[0].PrevHash != "" {
+		t.Fatalf("first event prev_hash should be empty after normalization")
+	}
+	if normalized[1].PrevHash != normalized[0].Hash {
+		t.Fatalf("second event prev_hash should point to first event hash")
+	}
+}

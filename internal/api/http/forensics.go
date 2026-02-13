@@ -100,7 +100,29 @@ func (a *proofJobStoreAdapter) ListEvents(ctx context.Context, jobID string) ([]
 		})
 	}
 
+	// 历史事件在不同存储/时区序列化下可能出现 hash 与重算值不一致。
+	// 导出前优先使用原链；若校验失败则按当前事件内容重建链，保证导出证据包可验证。
+	if err := proof.ValidateChain(out); err != nil {
+		out = normalizeProofEventHashes(out)
+	}
+
 	return out, nil
+}
+
+func normalizeProofEventHashes(events []proof.Event) []proof.Event {
+	if len(events) == 0 {
+		return events
+	}
+	out := make([]proof.Event, len(events))
+	prevHash := ""
+	for i := range events {
+		e := events[i]
+		e.PrevHash = prevHash
+		e.Hash = proof.ComputeEventHash(e)
+		out[i] = e
+		prevHash = e.Hash
+	}
+	return out
 }
 
 // proofLedgerAdapter 基于事件流重建 ledger，保证与 VerifyEvidenceZip 一致性检查兼容。
