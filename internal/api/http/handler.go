@@ -962,7 +962,8 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 		state := agentruntime.SessionToAgentState(agent.Session)
 		_ = h.agentStateStore.SaveAgentState(ctx, id, agent.Session.ID, state)
 	}
-	if h.agentMessagingBus != nil {
+	// JobStore 模式下由 AgentMessage 直接创建 Job，不再额外投递 inbox，避免同一消息重复建 Job。
+	if h.agentMessagingBus != nil && h.jobStore == nil {
 		_, _ = h.agentMessagingBus.Send(ctx, "", id, map[string]any{"message": req.Message}, &messaging.SendOptions{Kind: messaging.KindUser})
 	}
 	if h.jobStore != nil {

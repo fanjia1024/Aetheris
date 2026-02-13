@@ -296,7 +296,9 @@ func (r *Runner) nextRunnableBatch(steps []SteppableStep, levelGroups [][]string
 					continue
 				}
 				effectiveStepID := DeterministicStepID(jobID, decisionID, idx, steps[idx].NodeType)
-				if _, done := completedSet[effectiveStepID]; !done {
+				_, doneByStep := completedSet[effectiveStepID]
+				_, doneByNode := completedSet[steps[idx].NodeID]
+				if !doneByStep && !doneByNode {
 					indices = append(indices, idx)
 				}
 			}
@@ -309,7 +311,9 @@ func (r *Runner) nextRunnableBatch(steps []SteppableStep, levelGroups [][]string
 	// Sequential: first incomplete step
 	for i := range steps {
 		effectiveStepID := DeterministicStepID(jobID, decisionID, i, steps[i].NodeType)
-		if _, done := completedSet[effectiveStepID]; !done {
+		_, doneByStep := completedSet[effectiveStepID]
+		_, doneByNode := completedSet[steps[i].NodeID]
+		if !doneByStep && !doneByNode {
 			return []int{i}
 		}
 	}
@@ -578,12 +582,20 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 	}
 	completedSet := state.CompletedNodeIDs
 	replayCtx := state.ReplayContext
+	graphBytes, _ := taskGraph.Marshal()
+	decisionID := PlanDecisionID(graphBytes)
 	startIndex := -1
 	for i, s := range steps {
-		if _, ok := completedSet[s.NodeID]; !ok {
-			startIndex = i
-			break
+		// 兼容历史 NodeID 与 2.0 确定性 StepID 两种完成标记，避免 replay 进入“无进展循环”。
+		stepID := DeterministicStepID(jobID, decisionID, i, s.NodeType)
+		if _, doneByStep := completedSet[stepID]; doneByStep {
+			continue
 		}
+		if _, doneByNode := completedSet[s.NodeID]; doneByNode {
+			continue
+		}
+		startIndex = i
+		break
 	}
 	const statusCompleted = 2
 	const statusFailed = 3
@@ -594,8 +606,6 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 	}
 	step := steps[startIndex]
 	commandID := step.NodeID
-	graphBytes, _ := taskGraph.Marshal()
-	decisionID := PlanDecisionID(graphBytes)
 	effectiveStepID := DeterministicStepID(jobID, decisionID, startIndex, step.NodeType)
 	ctx = WithJobID(ctx, jobID)
 	if j != nil && j.TenantID != "" {
@@ -818,6 +828,17 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 	return false, nil
 }
 
+func hasReplayProgress(rctx *replay.ReplayContext) bool {
+	if rctx == nil {
+		return false
+	}
+	return len(rctx.CompletedCommandIDs) > 0 ||
+		len(rctx.CompletedNodeIDs) > 0 ||
+		len(rctx.CompletedToolInvocations) > 0 ||
+		len(rctx.PendingToolInvocations) > 0 ||
+		len(rctx.CommandResults) > 0
+}
+
 // RunForJob 按 Job 执行：有 CheckpointStore/JobStore 时走 Steppable 逐节点执行并落盘 checkpoint、恢复时从 Job.Cursor 继续；否则退化为 Run(ctx, agent, goal)
 func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForRunner) error {
 	if agent == nil || j == nil {
@@ -929,28 +950,53 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 							runtime.ApplyAgentState(agent.Session, &as)
 						}
 					}
-					state := replay.NewExecutionState(rctx)
-					for {
-						done, advErr := r.Advance(ctx, j.ID, state, agent, j)
-						if advErr != nil {
-							return advErr
-						}
-						if done {
-							return nil
-						}
-						// 刷新 state 与持久化事件一致
-						rctx, _ = r.replayBuilder.BuildFromEvents(ctx, j.ID)
-						if rctx == nil {
-							break
-						}
-						if len(rctx.WorkingMemorySnapshot) > 0 && agent != nil && agent.Session != nil {
-							var as runtime.AgentState
-							if json.Unmarshal(rctx.WorkingMemorySnapshot, &as) == nil {
-								runtime.ApplyAgentState(agent.Session, &as)
+					// 仅当事件流已有执行进度（command/node/tool）时才进入 Replay 驱动循环；
+					// 仅有 plan_generated 时应走 fresh execution，允许首次真实执行副作用节点（如 LLM）。
+					if hasReplayProgress(rctx) {
+						state := replay.NewExecutionState(rctx)
+						for {
+							done, advErr := r.Advance(ctx, j.ID, state, agent, j)
+							if advErr != nil {
+								return advErr
 							}
+							if done {
+								return nil
+							}
+							// 刷新 state 与持久化事件一致
+							rctx, _ = r.replayBuilder.BuildFromEvents(ctx, j.ID)
+							if rctx == nil {
+								break
+							}
+							if len(rctx.WorkingMemorySnapshot) > 0 && agent != nil && agent.Session != nil {
+								var as runtime.AgentState
+								if json.Unmarshal(rctx.WorkingMemorySnapshot, &as) == nil {
+									runtime.ApplyAgentState(agent.Session, &as)
+								}
+							}
+							state = replay.NewExecutionState(rctx)
 						}
-						state = replay.NewExecutionState(rctx)
 					}
+					taskGraph = recoveredGraph
+					var compErr error
+					steps, compErr = r.compiler.CompileSteppable(ctx, taskGraph, agent)
+					if compErr != nil {
+						_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
+						return fmt.Errorf("executor: CompileSteppable 失败: %w", compErr)
+					}
+					payload = NewAgentDAGPayload(j.Goal, agent.ID, sessionID)
+					if len(rctx.PayloadResults) > 0 {
+						if err := json.Unmarshal(rctx.PayloadResults, &payload.Results); err != nil {
+							_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
+							return fmt.Errorf("executor: 反序列化 PayloadResults 失败: %w", err)
+						}
+					}
+					completedSet = make(map[string]struct{})
+					for k := range rctx.CompletedNodeIDs {
+						completedSet[k] = struct{}{}
+					}
+					// fresh execution（非 replay 注入）；已完成节点仍通过 completedSet 跳过。
+					replayCtx = nil
+					goto runLoop
 				}
 			}
 		}
@@ -1073,12 +1119,17 @@ runLoop:
 						agent.Session.SetLastCheckpoint(cpID)
 					}
 					_ = r.jobStore.UpdateCursor(ctx, j.ID, cpID)
+					if completedSet != nil {
+						completedSet[effectiveStepID] = struct{}{}
+					}
 					continue
 				}
 			}
 		}
 		if completedSet != nil {
-			if _, done := completedSet[effectiveStepID]; done {
+			_, doneByStep := completedSet[effectiveStepID]
+			_, doneByNode := completedSet[step.NodeID]
+			if doneByStep || doneByNode {
 				continue
 			}
 		}
@@ -1342,6 +1393,11 @@ runLoop:
 			agent.Session.SetLastCheckpoint(cpID)
 		}
 		_ = r.jobStore.UpdateCursor(ctx, j.ID, cpID)
+		if completedSet == nil {
+			completedSet = make(map[string]struct{})
+		}
+		completedSet[effectiveStepID] = struct{}{}
+		completedSet[step.NodeID] = struct{}{}
 		continue
 	}
 }

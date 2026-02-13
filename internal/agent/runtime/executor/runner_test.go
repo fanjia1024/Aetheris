@@ -264,3 +264,86 @@ func TestReplayPath_DoesNotCallLLM(t *testing.T) {
 		t.Errorf("UpdateStatus status = %d, want %d (Completed)", gotStatus, statusCompleted)
 	}
 }
+
+// 已完成集合若仅包含确定性 step_id，也应被识别为已完成，避免 Advance 无进展循环。
+func TestAdvance_StepIDCompleted_MarksDone(t *testing.T) {
+	ctx := context.Background()
+	jobID := "job-stepid-completed"
+	graph := &planner.TaskGraph{
+		Nodes: []planner.TaskNode{{ID: "n1", Type: planner.NodeLLM}},
+		Edges: []planner.TaskEdge{},
+	}
+	graphBytes, err := graph.Marshal()
+	if err != nil {
+		t.Fatalf("marshal graph: %v", err)
+	}
+	stepID := DeterministicStepID(jobID, PlanDecisionID(graphBytes), 0, planner.NodeLLM)
+	state := replay.NewExecutionState(&replay.ReplayContext{
+		TaskGraphState:   graphBytes,
+		CompletedNodeIDs: map[string]struct{}{stepID: {}},
+	})
+
+	store := &fakeJobStoreForRunner{}
+	runner := NewRunner(NewCompiler(map[string]NodeAdapter{
+		planner.NodeLLM: &LLMNodeAdapter{LLM: &countingLLM{}},
+	}))
+	runner.SetCheckpointStores(runtime.NewCheckpointStoreMem(), store)
+
+	done, err := runner.Advance(ctx, jobID, state, &runtime.Agent{ID: "a1"}, &JobForRunner{ID: jobID, AgentID: "a1", Goal: "g1"})
+	if err != nil {
+		t.Fatalf("Advance err: %v", err)
+	}
+	if !done {
+		t.Fatalf("Advance done = false, want true")
+	}
+	_, status := store.getLast()
+	const statusCompleted = 2
+	if status != statusCompleted {
+		t.Fatalf("UpdateStatus = %d, want %d", status, statusCompleted)
+	}
+}
+
+// 仅有 plan_generated（无 command/node 完成记录）时应走首次执行，而不是 replay 注入路径。
+func TestRunForJob_PlanOnly_ExecutesLLM(t *testing.T) {
+	ctx := context.Background()
+	jobID := "job-plan-only-exec"
+	eventStore := jobstore.NewMemoryStore()
+	taskGraph := &planner.TaskGraph{
+		Nodes: []planner.TaskNode{{ID: "n1", Type: planner.NodeLLM}},
+		Edges: []planner.TaskEdge{},
+	}
+	graphBytes, err := taskGraph.Marshal()
+	if err != nil {
+		t.Fatalf("marshal graph: %v", err)
+	}
+	planPayload, _ := json.Marshal(map[string]interface{}{
+		"task_graph": json.RawMessage(graphBytes),
+		"goal":       "g1",
+	})
+	if _, err := eventStore.Append(ctx, jobID, 0, jobstore.JobEvent{JobID: jobID, Type: jobstore.PlanGenerated, Payload: planPayload}); err != nil {
+		t.Fatalf("append plan_generated: %v", err)
+	}
+
+	fakeJobStore := &fakeJobStoreForRunner{}
+	cpStore := runtime.NewCheckpointStoreMem()
+	mockLLM := &countingLLM{}
+	compiler := NewCompiler(map[string]NodeAdapter{
+		planner.NodeLLM: &LLMNodeAdapter{LLM: mockLLM},
+	})
+	runner := NewRunner(compiler)
+	runner.SetCheckpointStores(cpStore, fakeJobStore)
+	runner.SetReplayContextBuilder(replay.NewReplayContextBuilder(eventStore))
+
+	err = runner.RunForJob(ctx, &runtime.Agent{ID: "a1"}, &JobForRunner{ID: jobID, AgentID: "a1", Goal: "g1"})
+	if err != nil {
+		t.Fatalf("RunForJob: %v", err)
+	}
+	if mockLLM.Calls() == 0 {
+		t.Fatalf("expected LLM to be executed for plan-only job")
+	}
+	_, status := fakeJobStore.getLast()
+	const statusCompleted = 2
+	if status != statusCompleted {
+		t.Fatalf("UpdateStatus = %d, want %d", status, statusCompleted)
+	}
+}

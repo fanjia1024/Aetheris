@@ -286,8 +286,11 @@ func (r *AgentJobRunner) executeJob(ctx context.Context, jobID string, attemptID
 		defer func() { _ = r.instanceStore.UpdateCurrentJob(context.Background(), j.AgentID, "") }()
 	}
 	err = r.runJob(runCtx, j)
+	wasCanceled := runCtx.Err() == context.Canceled
+	// runJob 返回后主动结束 runCtx，确保 Heartbeat 协程退出，避免等待 heartbeatDone 时阻塞。
+	cancel()
 	<-heartbeatDone
-	if runCtx.Err() == context.Canceled {
+	if wasCanceled {
 		r.logger.Info("Job 已取消", "job_id", jobID)
 		dur := time.Since(start).Seconds()
 		metrics.JobTotal.WithLabelValues("cancelled").Inc()

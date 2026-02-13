@@ -159,9 +159,38 @@ func NewApp(cfg *config.Config) (*App, error) {
 		dagRunner.SetRecordedEffectsRecorder(api.NewRecordedEffectsRecorder(pgEventStore))
 		dagRunner.SetReplayContextBuilder(api.NewReplayContextBuilder(pgEventStore))
 		dagRunner.SetReplayPolicy(replaysandbox.DefaultPolicy{})
+		if cfg.Worker.Timeout != "" {
+			if d, err := time.ParseDuration(cfg.Worker.Timeout); err == nil && d > 0 {
+				dagRunner.SetStepTimeout(d)
+			}
+		}
 		maxAttempts := cfg.Worker.MaxAttempts
 		if maxAttempts <= 0 {
 			maxAttempts = 3
+		}
+		waitPlanReady := func(ctx context.Context, jobID string, maxWait time.Duration) error {
+			if maxWait <= 0 {
+				maxWait = 15 * time.Second
+			}
+			deadline := time.Now().Add(maxWait)
+			for {
+				events, _, err := pgEventStore.ListEvents(ctx, jobID)
+				if err == nil {
+					for _, e := range events {
+						if e.Type == jobstore.PlanGenerated {
+							return nil
+						}
+					}
+				}
+				if time.Now().After(deadline) {
+					return fmt.Errorf("plan_generated not ready within %s", maxWait)
+				}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(200 * time.Millisecond):
+				}
+			}
 		}
 		runJob := func(ctx context.Context, j *job.Job) error {
 			sessionID := j.SessionID
@@ -179,6 +208,9 @@ func NewApp(cfg *config.Config) (*App, error) {
 			tenantID := j.TenantID
 			if tenantID == "" {
 				tenantID = "default"
+			}
+			if err := waitPlanReady(ctx, j.ID, 20*time.Second); err != nil {
+				return err
 			}
 			err := dagRunner.RunForJob(ctx, agent, &agentexec.JobForRunner{
 				ID: j.ID, AgentID: j.AgentID, Goal: j.Goal, Cursor: j.Cursor, TenantID: tenantID,
