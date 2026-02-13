@@ -4,7 +4,7 @@
 BIN_DIR   := bin
 API_BIN   := $(BIN_DIR)/api
 WORKER_BIN := $(BIN_DIR)/worker
-CLI_BIN   := $(BIN_DIR)/corag
+CLI_BIN   := $(BIN_DIR)/aetheris
 API_PID   := $(BIN_DIR)/api.pid
 WORKER_PID := $(BIN_DIR)/worker.pid
 API_LOG   := $(BIN_DIR)/api.log

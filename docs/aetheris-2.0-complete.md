@@ -1,5 +1,7 @@
 # Aetheris 2.0 Complete - 生产级可审计 Agent Runtime
 
+> 当前状态（main）：部分 2.0 CLI/API 仍在开发中。`aetheris verify <evidence.zip>` 与 Forensics API 查询类接口尚未实现完成。
+
 ## 总览
 
 Aetheris 2.0 通过 3 个里程碑（M1、M2、M3）实现了**审计合规 / 取证（Forensics）**的完整能力，从"可证明"到"可合规"再到"可查询"，构建了生产级可审计 Agent Runtime。
@@ -21,7 +23,7 @@ Aetheris 2.0 通过 3 个里程碑（M1、M2、M3）实现了**审计合规 / �
 **CLI**:
 ```bash
 aetheris export job_123        # 导出证据包
-aetheris verify evidence.zip   # 离线验证
+# aetheris verify evidence.zip # 计划能力，当前 main 未实现
 ```
 
 ### M2: RBAC + 脱敏 + 留存 ✅
@@ -60,6 +62,7 @@ POST /api/forensics/query           # 复杂查询
 POST /api/forensics/batch-export    # 批量导出
 GET /api/jobs/:id/evidence-graph    # 依赖图
 GET /api/forensics/consistency/:id  # 一致性检查
+# 注：以上取证查询类 API 在当前 main 仍为未实现占位接口（返回 501）
 ```
 
 ---
@@ -351,7 +354,7 @@ forensics:
 
 ```bash
 aetheris export <job_id>         # 导出证据包
-aetheris verify <evidence.zip>   # 验证证据包
+# aetheris verify <evidence.zip> # 计划能力，当前 main 未实现
 ```
 
 ### M2 命令
@@ -390,6 +393,8 @@ aetheris forensics check <job_id>  # 一致性检查
 - `GET /api/forensics/consistency/:job_id` - 一致性检查
 - `GET /api/jobs/:id/evidence-graph` - Evidence Graph
 - `GET /api/jobs/:id/audit-log` - 访问审计日志
+
+注：当前 main 分支以上取证查询类 API 返回 `501 Not Implemented`。
 
 ---
 
@@ -544,7 +549,7 @@ aetheris chat demo-agent
 aetheris export <job_id>
 
 # 4. 验证证据包
-aetheris verify evidence-<job_id>.zip
+# aetheris verify evidence-<job_id>.zip  # 计划能力，当前 main 未实现
 
 # 5. 查看 UI
 open http://localhost:8080/api/jobs/<job_id>/trace/page

@@ -39,6 +39,8 @@ The CLI uses the **AETHERIS_API_URL** environment variable for the API base URL;
 | debug \<job_id\> [--compare-replay] | Agent debugger: timeline + evidence + replay verification |
 | verify \<job_id\> | Execution verification: execution_hash, event_chain_root_hash, ledger proof, replay proof |
 
+`verify <evidence.zip>` command entry exists but is not implemented on current `main`.
+
 ## Mapping to REST API
 
 | CLI command | REST API |

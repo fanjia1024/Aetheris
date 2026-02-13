@@ -1,5 +1,7 @@
 # Aetheris 完整 Roadmap 实施总结
 
+> 历史路线总结文档，部分条目与当前 `main` 实现状态不一致；请以 `README.md` 与 `docs/cli.md` 的现状说明为准。
+
 ## 🎉 所有里程碑完成
 
 从 2.0 Roadmap 规划到 3.0 (M4) 完整实施，Aetheris 现已成为**企业级智能审计平台**。

@@ -1,5 +1,7 @@
 # 2.0-M1 Implementation Summary
 
+> 历史阶段性总结文档。以当前 `main` 实际行为为准：`aetheris verify <evidence.zip>` 仍未实现。
+
 ## 完成状态
 
 **所有 10 个任务已完成** ✓

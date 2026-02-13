@@ -1,5 +1,7 @@
 # Evidence Package - 可验证证据包系统
 
+> 当前状态（main）：`aetheris export <job_id>` 可用；`aetheris verify <evidence.zip>` 命令入口已保留但尚未实现。
+
 ## 概述
 
 Evidence Package 是 Aetheris 2.0-M1 的核心特性，提供**可离线验证**的证据包系统。任何人拿到一个 job 的证据包（ZIP 文件），在没有数据库、没有运行时环境的情况下，也能验证：
@@ -101,33 +103,15 @@ aetheris export job_abc123 --output /path/to/evidence.zip
 $ aetheris export job_abc123
 Exporting evidence package for job job_abc123...
 ✓ Evidence package exported to: evidence-job_abc123.zip
-  To verify: aetheris verify evidence-job_abc123.zip
+  Verification command is planned: aetheris verify evidence-job_abc123.zip (not implemented on main)
 ```
 
-### 验证证据包
+### 验证证据包（计划中）
 
 ```bash
-# 基本用法
+# 当前 main 分支会返回未实现：
 aetheris verify <evidence.zip>
-
-# 示例：验证通过
-$ aetheris verify evidence.zip
-Verifying evidence package: evidence.zip
-
-=== Verification Results ===
-✓ Verification PASSED
-  - Events: 482 valid
-  - Hash chain: OK
-  - Ledger consistency: OK
-
-# 示例：验证失败（证据包被篡改）
-$ aetheris verify tampered-evidence.zip
-Verifying evidence package: tampered-evidence.zip
-
-=== Verification Results ===
-✗ Verification FAILED
-  - file hash mismatch for events.ndjson: expected abc123..., got def456...
-  - hash chain broken at event 5: prev_hash=xyz, expected=abc
+# stderr: verify <evidence.zip> is not implemented yet
 ```
 
 ---
