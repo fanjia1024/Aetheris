@@ -291,3 +291,46 @@ func TestJobSignal_ConcurrentVersionConflictStillIdempotent(t *testing.T) {
 		t.Fatalf("wait_completed count = %d, want 1", waitCompleted)
 	}
 }
+
+func TestGetJobReplay_StepNodeID(t *testing.T) {
+	ctx := context.Background()
+	jobID := "job-replay-step"
+	meta := job.NewJobStoreMem()
+	_, err := meta.Create(ctx, &job.Job{ID: jobID, AgentID: "a1", Goal: "g1", Status: job.StatusRunning})
+	if err != nil {
+		t.Fatalf("Create job: %v", err)
+	}
+	eventStore := jobstore.NewMemoryStore()
+	graph := &struct {
+		Nodes []map[string]any `json:"nodes"`
+		Edges []map[string]any `json:"edges"`
+	}{
+		Nodes: []map[string]any{{"id": "n1", "type": "llm"}},
+		Edges: []map[string]any{},
+	}
+	graphBytes, _ := json.Marshal(graph)
+	planPayload, _ := json.Marshal(map[string]any{"task_graph": json.RawMessage(graphBytes), "goal": "g1"})
+	_, _ = eventStore.Append(ctx, jobID, 0, jobstore.JobEvent{JobID: jobID, Type: jobstore.PlanGenerated, Payload: planPayload})
+	_, _ = eventStore.Append(ctx, jobID, 1, jobstore.JobEvent{JobID: jobID, Type: jobstore.CommandCommitted, Payload: []byte(`{"node_id":"n1","command_id":"n1","result":{"answer":"ok"}}`)})
+	_, _ = eventStore.Append(ctx, jobID, 2, jobstore.JobEvent{JobID: jobID, Type: jobstore.NodeFinished, Payload: []byte(`{"node_id":"n1","step_id":"n1","payload_results":{"n1":{"answer":"ok"}},"result_type":"success"}`)})
+
+	handler := NewHandler(nil, nil)
+	handler.SetJobStore(meta)
+	handler.SetJobEventStore(eventStore)
+	s := server.Default(server.WithHostPorts(":0"))
+	s.GET("/api/jobs/:id/replay", func(ctx context.Context, c *app.RequestContext) {
+		handler.GetJobReplay(ctx, c)
+	})
+
+	w := ut.PerformRequest(s.Engine, "GET", "/api/jobs/"+jobID+"/replay?step_node_id=n1", &ut.Body{Body: bytes.NewReader(nil), Len: 0})
+	if got := w.Result().StatusCode(); got != 200 {
+		t.Fatalf("status = %d, want 200", got)
+	}
+	body := w.Result().Body()
+	if !bytes.Contains(body, []byte(`"step_replay"`)) {
+		t.Fatalf("response missing step_replay: %s", body)
+	}
+	if !bytes.Contains(body, []byte(`"step_node_id":"n1"`)) {
+		t.Fatalf("response missing step_node_id n1: %s", body)
+	}
+}

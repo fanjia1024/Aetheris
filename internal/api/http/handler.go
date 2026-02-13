@@ -1585,6 +1585,7 @@ func (h *Handler) GetJobReplay(ctx context.Context, c *app.RequestContext) {
 		"read_only": true,
 		"timeline":  timeline,
 	}
+	stepNodeID := c.Query("step_node_id")
 	// Query 语义：当前执行状态（已完成节点、游标、阶段），不推进执行
 	builder := replay.NewReplayContextBuilder(h.jobEventStore)
 	if rc, errBuild := builder.BuildFromEvents(ctx, jobID); errBuild == nil && rc != nil {
@@ -1609,6 +1610,21 @@ func (h *Handler) GetJobReplay(ctx context.Context, c *app.RequestContext) {
 			"completed_node_ids": completedIDs,
 			"cursor_node":        rc.CursorNode,
 			"phase":              phaseStr,
+		}
+		if stepNodeID != "" {
+			stateAtStep := json.RawMessage([]byte("{}"))
+			if payloadBytes, ok := rc.PayloadResultsByNode[stepNodeID]; ok && len(payloadBytes) > 0 {
+				stateAtStep = json.RawMessage(payloadBytes)
+			}
+			stepResult := json.RawMessage([]byte("{}"))
+			if resultBytes, ok := rc.CommandResults[stepNodeID]; ok && len(resultBytes) > 0 {
+				stepResult = json.RawMessage(resultBytes)
+			}
+			resp["step_replay"] = map[string]interface{}{
+				"step_node_id":  stepNodeID,
+				"state_at_step": stateAtStep,
+				"step_result":   stepResult,
+			}
 		}
 	}
 	c.JSON(consts.StatusOK, resp)
@@ -1898,6 +1914,32 @@ func (h *Handler) GetJobCognitionTrace(ctx context.Context, c *app.RequestContex
 	})
 }
 
+// GetTraceOverviewPage 返回 Trace 聚合页（按 agent 展示多 Job 概览）。
+func (h *Handler) GetTraceOverviewPage(ctx context.Context, c *app.RequestContext) {
+	if h.jobStore == nil {
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "Job 未启用"})
+		return
+	}
+	agentIDs := c.Query("agent_ids")
+	if agentIDs == "" {
+		agentIDs = c.Query("agent_id")
+	}
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	var b strings.Builder
+	b.WriteString("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Trace Overview</title><style>")
+	b.WriteString("body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;margin:1rem;} table{border-collapse:collapse;width:100%;margin-top:0.6rem;} th,td{border:1px solid #ddd;padding:0.4rem 0.6rem;text-align:left;} th{background:#f6f6f6;} .agent-block{margin:1rem 0;padding:0.8rem;border:1px solid #ddd;border-radius:6px;} .muted{color:#666;} input{padding:0.35rem 0.45rem;} button{padding:0.35rem 0.6rem;}")
+	b.WriteString("</style></head><body>")
+	b.WriteString("<h1>Trace UI 2.0 Overview</h1>")
+	b.WriteString("<p class=\"muted\">Multi-job aggregation by agent. Click trace links to inspect single-job details and step-level replay.</p>")
+	b.WriteString("<form id=\"q\"><label>Agent IDs (comma-separated): <input id=\"agent_ids\" name=\"agent_ids\" value=\"")
+	b.WriteString(html.EscapeString(agentIDs))
+	b.WriteString("\"/></label> <button type=\"submit\">Load</button></form>")
+	b.WriteString("<div id=\"content\"></div>")
+	b.WriteString("<script>(function(){ function esc(s){ return String(s||'').replace(/[&<>\\\"]/g,function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','\\\"':'&quot;'}[c]); }); } function parseIDs(){ var raw = document.getElementById('agent_ids').value || ''; return raw.split(',').map(function(s){ return s.trim(); }).filter(Boolean); } function renderBlock(agentID, jobs){ var html = '<div class=\"agent-block\"><h3>Agent: '+esc(agentID)+'</h3>'; html += '<table><thead><tr><th>Job ID</th><th>Status</th><th>Updated</th><th>Goal</th><th>Trace</th></tr></thead><tbody>'; if(!jobs || jobs.length===0){ html += '<tr><td colspan=\"5\" class=\"muted\">No jobs</td></tr>'; } else { jobs.forEach(function(j){ html += '<tr><td>'+esc(j.id)+'</td><td>'+esc(j.status)+'</td><td>'+esc(j.updated_at)+'</td><td>'+esc(j.goal)+'</td><td><a href=\"/api/jobs/'+encodeURIComponent(j.id)+'/trace/page\" target=\"_blank\">open trace</a></td></tr>'; }); } html += '</tbody></table></div>'; return html; } function load(){ var ids = parseIDs(); var content = document.getElementById('content'); if(ids.length===0){ content.innerHTML = '<p class=\"muted\">Enter at least one agent id.</p>'; return; } content.innerHTML = '<p class=\"muted\">Loading...</p>'; var reqs = ids.map(function(id){ return fetch('/api/agents/'+encodeURIComponent(id)+'/jobs?limit=50').then(function(r){ return r.ok ? r.json() : { jobs: [], _error: 'HTTP '+r.status }; }).then(function(data){ return { id:id, jobs:(data.jobs||[]), error:data._error||'' }; }).catch(function(e){ return { id:id, jobs:[], error:String(e) }; }); }); Promise.all(reqs).then(function(all){ var html=''; all.forEach(function(x){ html += renderBlock(x.id, x.jobs); if(x.error){ html += '<p class=\"muted\">'+esc(x.error)+'</p>'; } }); content.innerHTML = html; }); } document.getElementById('q').addEventListener('submit', function(e){ e.preventDefault(); load(); }); load(); })();</script>")
+	b.WriteString("</body></html>")
+	c.WriteString(b.String())
+}
+
 // GetJobTracePage 返回简单 Trace 回放页（HTML）
 func (h *Handler) GetJobTracePage(ctx context.Context, c *app.RequestContext) {
 	if h.jobEventStore == nil || h.jobStore == nil {
@@ -2052,6 +2094,7 @@ func buildTraceHTML(jobID string, j *job.Job, events []jobstore.JobEvent) string
 	b.WriteString("<p class=\"placeholder\" id=\"detail-placeholder\">Select a step or tree node.</p>")
 	b.WriteString("<div id=\"detail-content\" style=\"display:none;\">")
 	b.WriteString("<h3>Step</h3><div class=\"step-view\" id=\"detail-step-view\"></div>")
+	b.WriteString("<h3>Replay control</h3><div><button id=\"replay-step-btn\" type=\"button\">Replay selected step</button><pre id=\"replay-step-result\"></pre></div>")
 	b.WriteString("<h3>Payload</h3><pre id=\"detail-payload\"></pre>")
 	b.WriteString("<h3>Tool I/O</h3><pre id=\"detail-tool-io\"></pre>")
 	b.WriteString("<h3>Reasoning</h3><div id=\"detail-reasoning\"></div>")
@@ -2068,6 +2111,8 @@ func buildTraceHTML(jobID string, j *job.Job, events []jobstore.JobEvent) string
 	writeTracePageScript(&b)
 	b.WriteString("</script><script>")
 	writeTraceFilterAndDAGScript(&b)
+	b.WriteString("</script><script>")
+	writeTraceReplayControlScript(&b)
 	b.WriteString("</script></body></html>")
 	return b.String()
 }
@@ -2080,6 +2125,11 @@ func writeTraceFilterAndDAGScript(b *strings.Builder) {
 // writeTracePageScript writes the Trace page JS: timeline bar + select() with step view, reasoning, state diff.
 func writeTracePageScript(b *strings.Builder) {
 	b.WriteString("(function(){ var T = window.__TRACE__; var ph = document.getElementById('detail-placeholder'); var content = document.getElementById('detail-content'); var stepViewEl = document.getElementById('detail-step-view'); var payloadEl = document.getElementById('detail-payload'); var toolIoEl = document.getElementById('detail-tool-io'); var reasoningEl = document.getElementById('detail-reasoning'); var stateDiffEl = document.getElementById('detail-state-diff'); var segs = T.timeline_segments || []; var bar = document.getElementById('timeline-bar'); segs.forEach(function(s){ var c = s.type; if(s.status === 'permanent_failure' || s.status === 'compensatable_failure') c += ' failed'; else if(s.status === 'retryable_failure') c += ' retryable'; var d = document.createElement('span'); d.className = 'seg ' + c; d.textContent = s.label + (s.duration_ms ? ' ' + s.duration_ms + 'ms' : ''); bar.appendChild(d); }); function row(el,k,v){ if(!v) return; var p = document.createElement('div'); p.textContent = k + ':'; var p2 = document.createElement('div'); p2.textContent = v; el.appendChild(p); el.appendChild(p2); } function select(spanId){ document.querySelectorAll('.step-timeline .step').forEach(function(el){ el.classList.toggle('selected', el.getAttribute('data-span-id') === spanId); }); document.querySelectorAll('.tree-section [data-span-id]').forEach(function(el){ el.classList.toggle('selected', el.getAttribute('data-span-id') === spanId); }); var step = T.steps.find(function(s){ return s.span_id === spanId; }); if(!step){ ph.style.display='block'; content.style.display='none'; return; } ph.style.display='none'; content.style.display='block'; stepViewEl.innerHTML = ''; row(stepViewEl,'Step', step.label); row(stepViewEl,'State', step.state || 'ok'); row(stepViewEl,'Attempts', step.attempts ? String(step.attempts) : ''); row(stepViewEl,'Worker', step.worker_id); row(stepViewEl,'Duration', step.duration_ms ? step.duration_ms + 'ms' : ''); row(stepViewEl,'Result type', step.result_type); row(stepViewEl,'Reason', step.reason); var events = T.timeline.filter(function(e){ try{ var p = typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload; return (p && (p.trace_span_id === spanId || p.node_id === spanId)); }catch(_){ return false;} }); payloadEl.textContent = events.length ? JSON.stringify(events.map(function(e){ return { type: e.type, created_at: e.created_at, payload: e.payload }; }), null, 2) : ''; var io = []; var inv = step.tool_invocation; if(inv){ if(inv.input) io.push('Input: ' + (typeof inv.input === 'string' ? inv.input : JSON.stringify(inv.input))); if(inv.output) io.push('Output: ' + (typeof inv.output === 'string' ? inv.output : JSON.stringify(inv.output))); if(inv.summary) io.push('Summary: ' + inv.summary); if(inv.error) io.push('Error: ' + inv.error); if(inv.idempotent) io.push('Idempotent: true'); } if(!io.length){ var flat = (T.flat_steps || []).find(function(s){ return s.span_id === spanId; }); if(flat){ if(flat.input) io.push('Input: ' + (typeof flat.input === 'string' ? flat.input : JSON.stringify(flat.input))); if(flat.output) io.push('Output: ' + (typeof flat.output === 'string' ? flat.output : JSON.stringify(flat.output))); } } toolIoEl.textContent = io.length ? io.join('\\n\\n') : '(none)'; reasoningEl.innerHTML = ''; if(step.reasoning && step.reasoning.length){ step.reasoning.forEach(function(r){ var p = document.createElement('p'); p.innerHTML = '<strong>' + (r.role || '') + '</strong>: ' + (r.content || ''); reasoningEl.appendChild(p); }); } else { var p = document.createElement('p'); p.className = 'placeholder'; p.textContent = 'Reasoning snapshot (none recorded)'; reasoningEl.appendChild(p); } stateDiffEl.innerHTML = ''; if(step.state_diff && (step.state_diff.state_before || step.state_diff.state_after || (step.state_diff.changed_keys && step.state_diff.changed_keys.length) || (step.state_diff.state_changes && step.state_diff.state_changes.length))){ if(step.state_diff.changed_keys && step.state_diff.changed_keys.length){ var h4 = document.createElement('h4'); h4.textContent = 'Changed keys'; stateDiffEl.appendChild(h4); var ul = document.createElement('ul'); ul.className = 'changed-keys-list'; step.state_diff.changed_keys.forEach(function(k){ var li = document.createElement('li'); li.textContent = k; ul.appendChild(li); }); stateDiffEl.appendChild(ul); } var before = document.createElement('p'); before.textContent = 'Before: ' + (step.state_diff.state_before ? (typeof step.state_diff.state_before === 'string' ? step.state_diff.state_before : JSON.stringify(step.state_diff.state_before)) : '{}'); stateDiffEl.appendChild(before); var after = document.createElement('p'); after.textContent = 'After: ' + (step.state_diff.state_after ? (typeof step.state_diff.state_after === 'string' ? step.state_diff.state_after : JSON.stringify(step.state_diff.state_after)) : '{}'); stateDiffEl.appendChild(after); if(step.state_diff.tool_side_effects && step.state_diff.tool_side_effects.length){ var te = document.createElement('p'); te.textContent = 'Side effects: ' + step.state_diff.tool_side_effects.join('; '); stateDiffEl.appendChild(te); } if(step.state_diff.resource_refs && step.state_diff.resource_refs.length){ var rr = document.createElement('p'); rr.textContent = 'Resources: ' + step.state_diff.resource_refs.join(', '); stateDiffEl.appendChild(rr); } if(step.state_diff.state_changes && step.state_diff.state_changes.length){ var sch = document.createElement('h4'); sch.textContent = 'External state changed (audit)'; stateDiffEl.appendChild(sch); var ul = document.createElement('ul'); ul.className = 'state-changes-list'; step.state_diff.state_changes.forEach(function(c){ var li = document.createElement('li'); li.textContent = (c.resource_type || '') + ' ' + (c.resource_id || '') + ' ' + (c.operation || ''); ul.appendChild(li); }); stateDiffEl.appendChild(ul); } } else { var p = document.createElement('p'); p.className = 'placeholder'; p.textContent = 'State diff (none)'; stateDiffEl.appendChild(p); } } document.getElementById('step-timeline').addEventListener('click', function(ev){ var el = ev.target.closest('.step'); if(el) select(el.getAttribute('data-span-id')); }); document.getElementById('trace-tree').addEventListener('click', function(ev){ var el = ev.target.closest('[data-span-id]'); if(el) select(el.getAttribute('data-span-id')); }); })();")
+}
+
+// writeTraceReplayControlScript writes JS for step-level replay query.
+func writeTraceReplayControlScript(b *strings.Builder) {
+	b.WriteString("(function(){ var T = window.__TRACE__ || {}; var btn = document.getElementById('replay-step-btn'); var out = document.getElementById('replay-step-result'); if(!btn || !out) return; btn.addEventListener('click', function(){ var sel = document.querySelector('.step-timeline .step.selected'); if(!sel){ out.textContent = 'Select a step first.'; return; } var spanId = sel.getAttribute('data-span-id') || ''; if(!spanId){ out.textContent = 'Invalid step id.'; return; } var url = '/api/jobs/' + encodeURIComponent(T.job_id || '') + '/replay?step_node_id=' + encodeURIComponent(spanId); fetch(url).then(function(r){ if(!r.ok){ throw new Error('HTTP ' + r.status); } return r.json(); }).then(function(data){ out.textContent = JSON.stringify(data.step_replay || data, null, 2); }).catch(function(err){ out.textContent = 'Replay query failed: ' + String(err); }); }); })();")
 }
 
 // renderTraceTreeHTML renders tree nodes with data-span-id for selection. Nodes with children use <details>/<summary> for folding.

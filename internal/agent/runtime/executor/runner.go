@@ -587,6 +587,7 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 	}
 	const statusCompleted = 2
 	const statusFailed = 3
+	const statusWaiting = 5
 	if startIndex < 0 || startIndex >= len(steps) {
 		_ = r.jobStore.UpdateStatus(ctx, jobID, statusCompleted)
 		return true, nil
@@ -728,6 +729,19 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 	}
 	if runErr == nil {
 		payload, runErr = step.Run(runCtx, payload)
+	}
+	if correlationKey, waitReason, waitNow := signalWaitFromError(runErr); waitNow {
+		if r.nodeEventSink != nil {
+			resumptionCtx := map[string]interface{}{
+				"payload_results":  payload.Results,
+				"plan_decision_id": PlanDecisionID(graphBytes),
+				"cursor_node":      step.NodeID,
+			}
+			resumptionBytes, _ := json.Marshal(resumptionCtx)
+			_ = r.nodeEventSink.AppendJobWaiting(ctx, jobID, step.NodeID, "signal", waitReason, time.Now().Add(24*time.Hour), correlationKey, resumptionBytes)
+		}
+		_ = r.jobStore.UpdateStatus(ctx, jobID, statusWaiting)
+		return false, ErrJobWaiting
 	}
 	durationMs := time.Since(stepStart).Milliseconds()
 	nodeType := step.NodeType
@@ -1200,17 +1214,15 @@ runLoop:
 			payload, runErr = step.Run(runCtx, payload)
 		}
 		durationMs := time.Since(stepStart).Milliseconds()
-		var capReq *CapabilityRequiresApproval
-		if errors.As(runErr, &capReq) && capReq != nil {
+		if correlationKey, waitReason, waitNow := signalWaitFromError(runErr); waitNow {
 			if r.nodeEventSink != nil {
-				// Capability approval wait: also save resumption context
 				resumptionCtx := map[string]interface{}{
 					"payload_results":  payload.Results,
 					"plan_decision_id": PlanDecisionID(graphBytes),
 					"cursor_node":      step.NodeID,
 				}
 				resumptionBytes, _ := json.Marshal(resumptionCtx)
-				_ = r.nodeEventSink.AppendJobWaiting(ctx, j.ID, step.NodeID, "signal", "capability_approval", time.Now().Add(24*time.Hour), capReq.CorrelationKey, resumptionBytes)
+				_ = r.nodeEventSink.AppendJobWaiting(ctx, j.ID, step.NodeID, "signal", waitReason, time.Now().Add(24*time.Hour), correlationKey, resumptionBytes)
 			}
 			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusWaiting)
 			return ErrJobWaiting

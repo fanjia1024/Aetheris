@@ -1,6 +1,6 @@
 # LangGraph Adapter (Migration Guide)
 
-This document explains how to run a **LangGraph-based agent** on Aetheris and keep Aetheris runtime guarantees (durability, replay determinism, at-most-once side effects).
+This document explains how to run a **LangGraph-based agent** on Aetheris and keep runtime guarantees (durability, replay determinism, at-most-once side effects).
 
 ## What is supported today
 
@@ -11,7 +11,7 @@ You can migrate LangGraph in two practical patterns:
 2. **Node-by-node bridge (advanced)**  
    Map important LangGraph nodes to Aetheris steps for finer-grained trace and checkpointing.
 
-No dedicated `pkg/adapters/langgraph` package is required to start. You can implement the bridge in your app layer and runtime node adapters.
+In 2.0, Aetheris provides a built-in `langgraph` node adapter entry in executor (`LangGraphNodeAdapter`) with `invoke/stream/state` client interface.
 
 ## Runtime integration points (code pointers)
 
@@ -20,6 +20,7 @@ No dedicated `pkg/adapters/langgraph` package is required to start. You can impl
   - `internal/app/api/agent_v1.go`
 - Node execution:
   - `internal/agent/runtime/executor/node_adapter.go`
+  - `internal/agent/runtime/executor/langgraph_adapter.go`
   - `internal/agent/runtime/executor/runner.go`
 - Side-effect and replay guarantees:
   - `design/effect-system.md`
@@ -27,9 +28,9 @@ No dedicated `pkg/adapters/langgraph` package is required to start. You can impl
 
 ## Step-by-step migration
 
-### 1. Keep LangGraph planning, move execution envelope to Aetheris
+### 1. Keep LangGraph logic, move execution envelope to Aetheris
 
-- Wrap your LangGraph invocation into a node runner.
+- Use a `TaskNode{Type: "langgraph"}` and register `LangGraphNodeAdapter`.
 - Feed job goal/input from Aetheris payload.
 - Write LangGraph output back to `payload.Results`.
 
@@ -44,29 +45,56 @@ No dedicated `pkg/adapters/langgraph` package is required to start. You can impl
   - emit `job_waiting` with `correlation_key`
   - resume via `POST /api/jobs/:id/signal`
 
-### 4. Validate replay behavior
+### 4. Validate replay and signal behavior
 
 - Run:
   - `GET /api/jobs/:id/events`
   - `GET /api/jobs/:id/replay`
   - `aetheris verify <job_id>`
 - Ensure replay injects recorded results and does not re-execute side effects.
+- For wait/resume paths, ensure `wait_completed` resumes job without re-invoking already completed langgraph steps.
 
-## Minimal bridge skeleton
+## Minimal runnable skeleton
 
 ```go
-// inside a custom node runner
-func runLangGraphBridge(ctx context.Context, p *executor.AgentDAGPayload) (*executor.AgentDAGPayload, error) {
-    goal := p.Goal
-    // invoke your LangGraph app (in-process or RPC)
-    // result := langGraphApp.Invoke(goal)
-    result := "langgraph-result"
+type MyLangGraphClient struct{}
 
-    if p.Results == nil {
-        p.Results = make(map[string]any)
-    }
-    p.Results["langgraph_result"] = result
-    return p, nil
+func (c *MyLangGraphClient) Invoke(ctx context.Context, input map[string]any) (map[string]any, error) {
+    // call langgraph invoke API
+    return map[string]any{"result": "ok"}, nil
+}
+
+func (c *MyLangGraphClient) Stream(ctx context.Context, input map[string]any, onChunk func(map[string]any) error) error {
+    return nil
+}
+
+func (c *MyLangGraphClient) State(ctx context.Context, threadID string) (map[string]any, error) {
+    return map[string]any{"thread_id": threadID}, nil
+}
+
+compiler := executor.NewCompiler(map[string]executor.NodeAdapter{
+    planner.NodeLangGraph: &executor.LangGraphNodeAdapter{
+        Client: &MyLangGraphClient{},
+    },
+    planner.NodeTool: &executor.ToolNodeAdapter{ /* ... */ },
+})
+_ = compiler
+```
+
+TaskGraph example:
+
+```go
+&planner.TaskGraph{
+    Nodes: []planner.TaskNode{
+        {ID: "lg_invoke", Type: planner.NodeLangGraph},
+        {ID: "wait_approval", Type: planner.NodeWait, Config: map[string]any{
+            "wait_kind": "signal",
+            "correlation_key": "approval-123",
+        }},
+    },
+    Edges: []planner.TaskEdge{
+        {From: "lg_invoke", To: "wait_approval"},
+    },
 }
 ```
 
@@ -74,9 +102,11 @@ For side-effect steps, delegate to Tool adapters instead of performing raw exter
 
 ## Error handling and recovery rules
 
-- Treat bridge errors as normal step errors so Retry/Failure policy remains consistent with Aetheris.
-- For transient external failures, prefer Tool-layer retries.
-- For permanent failures, fail the step and keep full trace/evidence.
+- `LangGraphError{Code: retryable}` → mapped to `StepResultRetryableFailure`
+- `LangGraphError{Code: permanent}` → mapped to `StepResultPermanentFailure`
+- `LangGraphError{Code: wait, correlation_key=...}` → mapped to signal wait (`job_waiting` + `ErrJobWaiting`)
+
+This keeps retry/failure/wait semantics consistent with native nodes.
 
 ## Recommended migration path
 
@@ -84,6 +114,17 @@ For side-effect steps, delegate to Tool adapters instead of performing raw exter
 2. Split high-risk/high-value LangGraph nodes into dedicated Aetheris steps.
 3. Add Wait + Signal for human checkpoints.
 4. Add forensics export/verify checks in CI.
+
+## Integration test
+
+Reference test:
+
+- `internal/agent/runtime/executor/langgraph_adapter_test.go`
+
+It covers:
+
+- Error mapping (`retryable` / `permanent` / `wait`)
+- Replay + signal resume path (after `wait_completed`, langgraph invoke is not re-executed)
 
 ## Related docs
 

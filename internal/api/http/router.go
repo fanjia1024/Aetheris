@@ -182,6 +182,7 @@ func (r *Router) Build(addr string, opts ...config.Option) *server.Hertz {
 	}
 	api.GET("/observability/summary", r.authChainWith(auth.PermissionJobView, r.handler.GetObservabilitySummary)...)
 	api.GET("/observability/stuck", r.authChainWith(auth.PermissionJobView, r.handler.GetObservabilityStuck)...)
+	api.GET("/trace/overview/page", r.authChainWith(auth.PermissionTraceView, r.handler.GetTraceOverviewPage)...)
 
 	return h
 }

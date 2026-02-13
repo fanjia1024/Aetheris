@@ -143,6 +143,7 @@ func NewDAGCompiler(llmClient llm.Client, toolsReg *tools.Registry, engine *eino
 		planner.NodeWait:      &agentexec.WaitNodeAdapter{},
 		planner.NodeApproval:  &agentexec.ApprovalNodeAdapter{},
 		planner.NodeCondition: &agentexec.ConditionNodeAdapter{},
+		planner.NodeLangGraph: &agentexec.LangGraphNodeAdapter{},
 	}
 	return agentexec.NewCompiler(adapters)
 }

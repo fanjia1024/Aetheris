@@ -74,3 +74,11 @@ func TestForensicsConsistencyValidationErrorShape(t *testing.T) {
 		t.Fatalf("response body missing validation error field: %s", respBody)
 	}
 }
+
+func TestRouter_TraceOverviewPageRoute(t *testing.T) {
+	s := buildRouterForTest(false)
+	w := ut.PerformRequest(s.Engine, "GET", "/api/trace/overview/page", &ut.Body{Body: bytes.NewReader(nil), Len: 0})
+	if got := w.Result().StatusCode(); got == 404 {
+		t.Fatalf("GET /api/trace/overview/page status = %d, want non-404", got)
+	}
+}

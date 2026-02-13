@@ -6,11 +6,19 @@
 
 当 `jobstore.type` 为 `postgres` 或 API 使用事件存储时，可为单个 Job 打开 **Trace 回放页**，查看执行时间线、每步延迟、重试原因与节点输入输出。
 
+### Trace UI 2.0 additions
+
+- **Multi-job / agent aggregation page**: `GET /api/trace/overview/page?agent_ids=<a1,a2>`  
+  聚合多个 agent 的 Job 列表，并可一键跳转每个 Job 的 trace 页。
+- **Step-level replay control**: 在 `GET /api/jobs/:id/trace/page` 详情区可对当前选中 step 执行 replay 查询（调用 `GET /api/jobs/:id/replay?step_node_id=<step>`）。
+- **State diff view**: 详情区继续展示 state before/after、changed keys、external state changes（来自 `state_checkpointed`）。
+
 ### 如何打开
 
 - **URL**：`GET /api/jobs/:job_id/trace/page`（需替换 `:job_id` 为实际 Job ID）。
 - 示例：Job ID 为 `job-xxx` 时，在浏览器打开 `http://localhost:8080/api/jobs/job-xxx/trace/page`（若 API 启用了认证，需带 Cookie 或 Token）。
 - **JSON 接口**：`GET /api/jobs/:job_id/trace` 返回时间线与执行树 JSON，供自定义前端或脚本使用。
+- **Step replay query**：`GET /api/jobs/:job_id/replay?step_node_id=<node_id>` 返回 `step_replay`（该步 state/result 快照）。
 
 ### 页面内容
 

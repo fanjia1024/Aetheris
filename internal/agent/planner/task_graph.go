@@ -30,6 +30,8 @@ const (
 	NodeApproval = "approval"
 	// NodeCondition 条件等待节点：内建等待节点，默认 wait_kind=condition，常用于外部条件达成再继续
 	NodeCondition = "condition"
+	// NodeLangGraph LangGraph 桥接节点：通过 LangGraph Adapter 调用外部图执行器（invoke/stream/state）
+	NodeLangGraph = "langgraph"
 )
 
 // WaitKind 等待类型（NodeWait 时 Config["wait_kind"]）
@@ -45,7 +47,7 @@ const (
 // TaskNode 任务图中的节点
 type TaskNode struct {
 	ID       string         `json:"id"`
-	Type     string         `json:"type"` // tool / workflow / llm / wait / approval / condition
+	Type     string         `json:"type"` // tool / workflow / llm / wait / approval / condition / langgraph
 	Config   map[string]any `json:"config,omitempty"`
 	ToolName string         `json:"tool_name,omitempty"` // Type=tool 时使用
 	Workflow string         `json:"workflow,omitempty"`  // Type=workflow 时使用
