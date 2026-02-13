@@ -136,6 +136,9 @@ func (c *Compiler) CompileSteppable(ctx context.Context, g *planner.TaskGraph, a
 	if g == nil || len(g.Nodes) == 0 {
 		return nil, fmt.Errorf("executor: TaskGraph 为空")
 	}
+	if c.registry == nil {
+		c.registry = NewNodeAdapterRegistry(nil)
+	}
 	order, err := TopoOrder(g)
 	if err != nil {
 		return nil, err
@@ -150,8 +153,8 @@ func (c *Compiler) CompileSteppable(ctx context.Context, g *planner.TaskGraph, a
 		if node == nil {
 			return nil, fmt.Errorf("executor: 节点 %s 不在图中", id)
 		}
-		adapter := c.adapters[node.Type]
-		if adapter == nil {
+		adapter, ok := c.registry.Get(node.Type)
+		if !ok || adapter == nil {
 			return nil, fmt.Errorf("executor: 未知节点类型 %q (节点 %s)", node.Type, id)
 		}
 		run, err := adapter.ToNodeRunner(node, agent)

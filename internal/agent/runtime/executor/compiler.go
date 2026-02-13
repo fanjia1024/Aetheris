@@ -26,23 +26,28 @@ import (
 
 // Compiler 将 TaskGraph 编译为 eino compose.Graph
 type Compiler struct {
-	adapters map[string]NodeAdapter
+	registry *NodeAdapterRegistry
 }
 
 // NewCompiler 创建编译器，adapters 按 TaskNode.Type 索引（如 planner.NodeLLM, planner.NodeTool, planner.NodeWorkflow）
 func NewCompiler(adapters map[string]NodeAdapter) *Compiler {
-	if adapters == nil {
-		adapters = make(map[string]NodeAdapter)
-	}
-	return &Compiler{adapters: adapters}
+	return &Compiler{registry: NewNodeAdapterRegistry(adapters)}
 }
 
 // Register 注册某类型的 NodeAdapter
 func (c *Compiler) Register(nodeType string, adapter NodeAdapter) {
-	if c.adapters == nil {
-		c.adapters = make(map[string]NodeAdapter)
+	if c.registry == nil {
+		c.registry = NewNodeAdapterRegistry(nil)
 	}
-	c.adapters[nodeType] = adapter
+	c.registry.Register(nodeType, adapter)
+}
+
+// RegisteredNodeTypes 返回当前已注册节点类型（按字典序），用于 custom node discovery。
+func (c *Compiler) RegisteredNodeTypes() []string {
+	if c == nil || c.registry == nil {
+		return nil
+	}
+	return c.registry.List()
 }
 
 // Compile 将 TaskGraph 转为 compose.Graph，并连接 START/END
@@ -50,14 +55,17 @@ func (c *Compiler) Compile(ctx context.Context, g *planner.TaskGraph, agent *run
 	if g == nil || len(g.Nodes) == 0 {
 		return nil, fmt.Errorf("executor: TaskGraph 为空")
 	}
+	if c.registry == nil {
+		c.registry = NewNodeAdapterRegistry(nil)
+	}
 	graph := compose.NewGraph[*AgentDAGPayload, *AgentDAGPayload]()
 
 	nodeIDs := make(map[string]struct{})
 	for i := range g.Nodes {
 		node := &g.Nodes[i]
 		nodeIDs[node.ID] = struct{}{}
-		adapter := c.adapters[node.Type]
-		if adapter == nil {
+		adapter, ok := c.registry.Get(node.Type)
+		if !ok || adapter == nil {
 			return nil, fmt.Errorf("executor: 未知节点类型 %q (节点 %s)", node.Type, node.ID)
 		}
 		lambda, err := adapter.ToDAGNode(node, agent)

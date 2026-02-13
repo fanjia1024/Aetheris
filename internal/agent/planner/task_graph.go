@@ -26,6 +26,10 @@ const (
 	NodeLLM      = "llm"
 	// NodeWait 等待节点：挂起直到收到 signal/continue（design/job-state-machine.md）；Config 含 wait_kind, reason, expires_at 等
 	NodeWait = "wait"
+	// NodeApproval 审批节点：内建等待节点，默认 wait_kind=signal，常用于人类审批流程
+	NodeApproval = "approval"
+	// NodeCondition 条件等待节点：内建等待节点，默认 wait_kind=condition，常用于外部条件达成再继续
+	NodeCondition = "condition"
 )
 
 // WaitKind 等待类型（NodeWait 时 Config["wait_kind"]）
@@ -41,7 +45,7 @@ const (
 // TaskNode 任务图中的节点
 type TaskNode struct {
 	ID       string         `json:"id"`
-	Type     string         `json:"type"` // tool / workflow / llm
+	Type     string         `json:"type"` // tool / workflow / llm / wait / approval / condition
 	Config   map[string]any `json:"config,omitempty"`
 	ToolName string         `json:"tool_name,omitempty"` // Type=tool 时使用
 	Workflow string         `json:"workflow,omitempty"`  // Type=workflow 时使用

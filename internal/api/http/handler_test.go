@@ -237,3 +237,57 @@ func TestJobSignal_SuccessAndIdempotentUnblock(t *testing.T) {
 }
 
 var _ signal.SignalInbox = (*fakeSignalInbox)(nil)
+
+type conflictOnceEventStore struct {
+	jobstore.JobStore
+	conflictOnce bool
+}
+
+func (s *conflictOnceEventStore) Append(ctx context.Context, jobID string, expectedVersion int, event jobstore.JobEvent) (int, error) {
+	if s.conflictOnce && event.Type == jobstore.WaitCompleted {
+		s.conflictOnce = false
+		// 注入“并发请求已成功提交同一 wait_completed”场景，然后返回版本冲突，模拟 fault-injection/chaos。
+		_, currentVersion, err := s.JobStore.ListEvents(ctx, jobID)
+		if err == nil {
+			_, _ = s.JobStore.Append(ctx, jobID, currentVersion, event)
+		}
+		return 0, jobstore.ErrVersionMismatch
+	}
+	return s.JobStore.Append(ctx, jobID, expectedVersion, event)
+}
+
+// TestJobSignal_ConcurrentVersionConflictStillIdempotent 验证 wait_completed 追加遇到版本冲突（并发场景）时，API 能重读事件并按幂等成功返回。
+func TestJobSignal_ConcurrentVersionConflictStillIdempotent(t *testing.T) {
+	ctx := context.Background()
+	handler, jobID := setupJobSignalHandler(t)
+	baseStore := handler.jobEventStore
+	handler.SetJobEventStore(&conflictOnceEventStore{JobStore: baseStore, conflictOnce: true})
+	h := server.Default(server.WithHostPorts(":0"))
+	h.POST("/api/jobs/:id/signal", func(ctx context.Context, c *app.RequestContext) {
+		handler.JobSignal(ctx, c)
+	})
+
+	body := []byte(`{"correlation_key":"expected-key","payload":{"approved":true}}`)
+	w := ut.PerformRequest(h.Engine, "POST", "/api/jobs/"+jobID+"/signal", &ut.Body{Body: bytes.NewReader(body), Len: len(body)})
+	resp := w.Result()
+	if resp.StatusCode() != 200 {
+		t.Fatalf("JobSignal status got %d, want 200", resp.StatusCode())
+	}
+	if !bytes.Contains(resp.Body(), []byte("并发幂等")) {
+		t.Fatalf("JobSignal body should indicate concurrent idempotent delivery: %s", resp.Body())
+	}
+
+	events, _, err := baseStore.ListEvents(ctx, jobID)
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	waitCompleted := 0
+	for _, e := range events {
+		if e.Type == jobstore.WaitCompleted {
+			waitCompleted++
+		}
+	}
+	if waitCompleted != 1 {
+		t.Fatalf("wait_completed count = %d, want 1", waitCompleted)
+	}
+}

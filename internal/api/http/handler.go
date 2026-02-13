@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -1402,6 +1403,20 @@ func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
 		JobID: jobID, Type: jobstore.WaitCompleted, Payload: evPayload,
 	})
 	if err != nil {
+		if errors.Is(err, jobstore.ErrVersionMismatch) {
+			latestEvents, _, listErr := h.jobEventStore.ListEvents(ctx, jobID)
+			if listErr == nil && lastEventIsWaitCompletedWithCorrelationKey(latestEvents, req.CorrelationKey) {
+				if h.signalInbox != nil && signalID != "" {
+					_ = h.signalInbox.MarkAcked(ctx, jobID, signalID)
+				}
+				c.JSON(consts.StatusOK, map[string]interface{}{
+					"job_id":  jobID,
+					"status":  j.Status,
+					"message": "signal 已送达（并发幂等）",
+				})
+				return
+			}
+		}
 		hlog.CtxErrorf(ctx, "Append WaitCompleted: %v", err)
 		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "写入事件失败"})
 		return

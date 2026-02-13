@@ -82,6 +82,26 @@ func isStepFailure(t StepResultType) bool {
 	}
 }
 
+func isWaitLikeNodeType(nodeType string) bool {
+	switch nodeType {
+	case planner.NodeWait, planner.NodeApproval, planner.NodeCondition:
+		return true
+	default:
+		return false
+	}
+}
+
+func waitDefaultsForNodeType(nodeType string) (waitKind string, reason string) {
+	switch nodeType {
+	case planner.NodeApproval:
+		return "signal", "approval_required"
+	case planner.NodeCondition:
+		return planner.WaitKindCondition, "wait_condition"
+	default:
+		return "signal", ""
+	}
+}
+
 // ClassifyError maps runErr to (resultType, reason). Default is PermanentFailure.
 func ClassifyError(runErr error) (StepResultType, string) {
 	if runErr == nil {
@@ -946,7 +966,7 @@ runLoop:
 		}
 		hasWait := false
 		for _, idx := range batch {
-			if steps[idx].NodeType == planner.NodeWait {
+			if isWaitLikeNodeType(steps[idx].NodeType) {
 				hasWait = true
 				break
 			}
@@ -1053,7 +1073,7 @@ runLoop:
 			_ = r.nodeEventSink.AppendNodeStarted(ctx, j.ID, step.NodeID, 1, "")
 		}
 		// Wait 节点：不执行，写 job_waiting 并置为 Waiting，由 API signal 后重新入队继续（design/job-state-machine.md）
-		if step.NodeType == planner.NodeWait {
+		if isWaitLikeNodeType(step.NodeType) {
 			waitKind, reason, waitChannel := "", "", ""
 			var expiresAt time.Time
 			for _, n := range taskGraph.Nodes {
@@ -1075,11 +1095,26 @@ runLoop:
 					break
 				}
 			}
+			defaultWaitKind, defaultReason := waitDefaultsForNodeType(step.NodeType)
+			if waitKind == "" {
+				waitKind = defaultWaitKind
+			}
+			if reason == "" {
+				reason = defaultReason
+			}
 			if expiresAt.IsZero() {
 				expiresAt = time.Now().Add(24 * time.Hour)
 			}
 			if r.nodeEventSink != nil {
 				correlationKey := "wait-" + uuid.New().String()
+				for _, n := range taskGraph.Nodes {
+					if n.ID == step.NodeID && n.Config != nil {
+						if cfgCK, ok := n.Config["correlation_key"].(string); ok && cfgCK != "" {
+							correlationKey = cfgCK
+						}
+						break
+					}
+				}
 				if waitKind == planner.WaitKindMessage && waitChannel != "" {
 					correlationKey = waitChannel
 				}

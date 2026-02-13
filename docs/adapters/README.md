@@ -6,6 +6,7 @@ This page compares available migration adapters and helps you choose one.
 |---------|----------|--------|------------------------|
 | [Custom Agent Adapter](custom-agent.md) | Existing imperative/custom agents | Low-Medium | Step-level (TaskGraph-based) |
 | [LangGraph Adapter](langgraph.md) | Existing LangGraph flows | Medium | Bridge-level first, then step-level |
+| [Custom Node Registration](custom-nodes.md) | Extending TaskGraph with built-in/custom node types | Low | Step-level (adapter-based) |
 
 ## Selection guide
 
@@ -19,4 +20,3 @@ Regardless of adapter:
 1. External side effects must go through Aetheris Tool path.
 2. Wait/signal must use Aetheris wait contract (`correlation_key`).
 3. Replay determinism must be validated in staging before production rollout.
-

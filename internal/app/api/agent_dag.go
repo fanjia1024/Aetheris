@@ -137,10 +137,12 @@ func NewDAGCompiler(llmClient llm.Client, toolsReg *tools.Registry, engine *eino
 		workflowAdapter.CommandEventSink = commandEventSink
 	}
 	adapters := map[string]agentexec.NodeAdapter{
-		planner.NodeLLM:      llmAdapter,
-		planner.NodeTool:     toolAdapter,
-		planner.NodeWorkflow: workflowAdapter,
-		planner.NodeWait:     &agentexec.WaitNodeAdapter{},
+		planner.NodeLLM:       llmAdapter,
+		planner.NodeTool:      toolAdapter,
+		planner.NodeWorkflow:  workflowAdapter,
+		planner.NodeWait:      &agentexec.WaitNodeAdapter{},
+		planner.NodeApproval:  &agentexec.ApprovalNodeAdapter{},
+		planner.NodeCondition: &agentexec.ConditionNodeAdapter{},
 	}
 	return agentexec.NewCompiler(adapters)
 }
