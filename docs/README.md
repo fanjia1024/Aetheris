@@ -24,6 +24,7 @@ Environment variables use `AETHERIS_*` prefix (e.g., `AETHERIS_API_URL`).
 Recommended **Go 1.25.7+**, aligned with go.mod and CI.
 
 - [CHANGELOG.md](../CHANGELOG.md) — Version history and notable changes (v0.8 persistent runtime, event JobStore, Job/Scheduler/Checkpoint/Steppable, v1 Agent API, TaskGraph execution layer, RulePlanner, planner selection, etc.)
+- [STATUS.md](STATUS.md) — Single source of truth for current release status and post-2.0 evolution policy
 
 ## Recommended reading order
 
@@ -60,6 +61,7 @@ Recommended **Go 1.25.7+**, aligned with go.mod and CI.
 
 ## Release and acceptance
 
+- [STATUS.md](STATUS.md) — Authoritative current status (use this when roadmap docs conflict)
 - [release-acceptance-v0.9.md](release-acceptance-v0.9.md) — v0.9 runtime correctness (Worker crash recovery, API restart, multi-Worker, Replay)
 - [release-certification-1.0.md](release-certification-1.0.md) — 1.0 release gate checklist
 - [release-checklist-v1.0.md](release-checklist-v1.0.md) — Post-release checklist (core features, distributed, CLI/API, logging and docs)
