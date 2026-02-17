@@ -89,6 +89,10 @@ const (
 	HumanApprovalGiven   EventType = "human_approval_given"   // 人类审批
 	PaymentExecuted      EventType = "payment_executed"       // 支付执行
 	EmailSent            EventType = "email_sent"             // 邮件发送
+
+	// 2.1: Evidence Export audit events
+	EvidenceExportRequested EventType = "evidence_export_requested" // 证据导出请求
+	EvidenceExportCompleted EventType = "evidence_export_completed" // 证据导出完成
 )
 
 // JobWaitingPayload job_waiting 事件 payload 契约；只有携带相同 correlation_key 的 signal 才能解除该 block（design/runtime-contract.md）
