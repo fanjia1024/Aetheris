@@ -87,5 +87,26 @@ func (s *ToolInvocationStoreMem) SetFinished(ctx context.Context, idempotencyKey
 	r.Result = make([]byte, len(result))
 	copy(r.Result, result)
 	r.Committed = committed
+	r.ExternalID = externalID
 	return nil
+}
+
+// ListByJobID 列出指定 job 的所有工具调用（2.1 Evidence Export）
+func (s *ToolInvocationStoreMem) ListByJobID(ctx context.Context, jobID string) ([]ToolInvocationRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var records []ToolInvocationRecord
+	for _, r := range s.byKey {
+		if r.JobID == jobID {
+			cp := *r
+			if len(r.Result) > 0 {
+				cp.Result = make([]byte, len(r.Result))
+				copy(cp.Result, r.Result)
+			}
+			records = append(records, cp)
+		}
+	}
+
+	return records, nil
 }

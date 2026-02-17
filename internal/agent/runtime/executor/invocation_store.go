@@ -14,7 +14,10 @@
 
 package executor
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // ToolInvocationStatus 持久化记录状态（与常见命名对应：pending→started, running→started, succeeded→success, failed→failure）
 // Ledger 状态机语义：无记录=NEW，started=INFLIGHT，success/confirmed+Committed=COMMITTED；事件流恢复=RECOVERABLE。见 design/1.0-runtime-semantics.md
@@ -34,9 +37,13 @@ type ToolInvocationRecord struct {
 	ToolName       string
 	ArgsHash       string
 	IdempotencyKey string
-	Status         string // started | success | failure | timeout | confirmed
-	Result         []byte // 成功时的 result JSON（result_snapshot）
-	Committed      bool   // true 仅当已执行且结果已持久化，跨进程权威
+	Status         string     // started | success | failure | timeout | confirmed
+	Result         []byte     // 成功时的 result JSON（result_snapshot）
+	Committed      bool       // true 仅当已执行且结果已持久化，跨进程权威
+	CreatedAt      time.Time  // 2.1: 创建时间（用于 Evidence Export）
+	UpdatedAt      time.Time  // 2.1: 更新时间
+	ConfirmedAt    *time.Time // 2.1: 确认时间（可选）
+	ExternalID     string     // 2.1: 外部 ID（可选）
 }
 
 // ToolInvocationStore 工具调用持久化存储；Runner/Adapter 先查再执行，避免 double-commit
@@ -47,4 +54,6 @@ type ToolInvocationStore interface {
 	SetStarted(ctx context.Context, r *ToolInvocationRecord) error
 	// SetFinished 更新为完成态并设置 committed（执行成功后调用，再写事件）；externalID 可选，非空时写入 tool_invocations.external_id（provenance）
 	SetFinished(ctx context.Context, idempotencyKey string, status string, result []byte, committed bool, externalID string) error
+	// ListByJobID 列出指定 job 的所有工具调用（2.1 Evidence Export）
+	ListByJobID(ctx context.Context, jobID string) ([]ToolInvocationRecord, error)
 }

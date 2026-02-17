@@ -88,3 +88,40 @@ func (s *ToolInvocationStorePg) SetFinished(ctx context.Context, idempotencyKey 
 	)
 	return err
 }
+
+// ListByJobID 列出指定 job 的所有工具调用（2.1 Evidence Export）
+func (s *ToolInvocationStorePg) ListByJobID(ctx context.Context, jobID string) ([]ToolInvocationRecord, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT invocation_id, job_id, step_id, tool_name, args_hash, idempotency_key, status, result, committed, created_at, updated_at, confirmed_at, external_id
+		 FROM tool_invocations WHERE job_id = $1 ORDER BY created_at`,
+		jobID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []ToolInvocationRecord
+	for rows.Next() {
+		var r ToolInvocationRecord
+		var result []byte
+		var createdAt, updatedAt, confirmedAt interface{}
+		var externalID *string
+
+		err := rows.Scan(&r.InvocationID, &r.JobID, &r.StepID, &r.ToolName, &r.ArgsHash,
+			&r.IdempotencyKey, &r.Status, &result, &r.Committed,
+			&createdAt, &updatedAt, &confirmedAt, &externalID)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(result) > 0 {
+			r.Result = make([]byte, len(result))
+			copy(r.Result, result)
+		}
+
+		records = append(records, r)
+	}
+
+	return records, rows.Err()
+}
