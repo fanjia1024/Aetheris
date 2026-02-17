@@ -1,0 +1,65 @@
+name: Release Gates
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  release-gates:
+    name: Release Gate Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      CORAG_API_URL: http://localhost:8080
+      PLANNER_TYPE: rule
+      RUN_P0_PERF: "1"
+      RUN_P0_DRILLS: "1"
+      RUN_DB_DRILL: "1"
+      RUN_TENANT_REGRESSION: "1"
+      PERF_SAMPLES: "6"
+      PERF_POLL_MAX: "90"
+      DRILL_POLL_MAX: "90"
+      DRILL_POLL_INTERVAL: "2"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.7"
+          cache-dependency-path: go.sum
+
+      - name: Start local 2.0 stack
+        run: ./scripts/local-2.0-stack.sh start
+
+      - name: Run release gates
+        run: ./scripts/release-2.0.sh
+
+      - name: Upload release artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-artifacts
+          path: artifacts/release/
+          if-no-files-found: warn
+
+      - name: Dump stack status on failure
+        if: failure()
+        run: ./scripts/local-2.0-stack.sh status || true
+
+      - name: Stop local 2.0 stack
+        if: always()
+        run: ./scripts/local-2.0-stack.sh stop || true

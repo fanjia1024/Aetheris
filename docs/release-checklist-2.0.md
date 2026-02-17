@@ -10,6 +10,11 @@ Run from repository root:
 ./scripts/release-2.0.sh
 ```
 
+CI equivalent:
+
+- `.github/workflows/release-gates.yml` runs the same gate path on `main/master` pushes and `v*` tags.
+- Gate artifacts are uploaded from `artifacts/release/`.
+
 Expected:
 - `gofmt` clean
 - `go vet` clean
@@ -100,3 +105,31 @@ Artifact:
 ```bash
 RUN_P0_PERF=1 RUN_P0_DRILLS=1 ./scripts/release-2.0.sh
 ```
+
+### 6.4 Execute tenant regression gate
+
+```bash
+./scripts/release-tenant-regression.sh
+```
+
+Artifact:
+- `artifacts/release/tenant-regression-2.0-*.md`
+
+## 7. Failure triage (when release gate fails)
+
+1. Check workflow artifact bundle (`artifacts/release/*`) first:
+   - `perf-baseline-2.0-*.md`
+   - `failure-drill-2.0-*.md`
+   - `tenant-regression-2.0-*.md`
+2. If perf gate failed:
+   - verify API health latency and completion ratio in report
+   - confirm local stack resources and DB health
+3. If drill gate failed:
+   - identify failed drill item (A/B/C/D/E) from report
+   - replay the same drill locally with `scripts/release-p0-drill.sh`
+4. If DB outage drill failed:
+   - check compose recovery order and Postgres health transitions
+5. If tenant regression gate failed:
+   - run `./scripts/release-tenant-regression.sh` locally and identify failing suite (`internal/api/http` or `pkg/auth`)
+   - inspect role assignment, permission check, and tenant-boundary test assertions
+6. Re-run full gate only after root cause is fixed and documented.
