@@ -88,7 +88,7 @@ services:
         condition: service_healthy
 
   prometheus:
-    image: prom/prometheus:v2.47.0
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v2.47.0}
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
     command:

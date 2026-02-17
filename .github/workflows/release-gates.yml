@@ -24,6 +24,7 @@ jobs:
     env:
       CORAG_API_URL: http://localhost:8080
       PLANNER_TYPE: rule
+      PROMETHEUS_IMAGE: prom/prometheus:v2.47.0
       RUN_P0_PERF: "1"
       RUN_P0_DRILLS: "1"
       RUN_DB_DRILL: "1"
