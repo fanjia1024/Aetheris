@@ -27,7 +27,9 @@ import (
 
 	"rag-platform/internal/agent/job"
 	"rag-platform/internal/agent/signal"
+	"rag-platform/internal/api/http/middleware"
 	"rag-platform/internal/runtime/jobstore"
+	"rag-platform/pkg/auth"
 )
 
 func TestHealthCheck(t *testing.T) {
@@ -292,6 +294,163 @@ func TestJobSignal_ConcurrentVersionConflictStillIdempotent(t *testing.T) {
 	}
 }
 
+func TestGetJob_TenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	meta := job.NewJobStoreMem()
+	eventStore := jobstore.NewMemoryStore()
+
+	targetJob := &job.Job{
+		ID:       "job-tenant-a",
+		AgentID:  "agent-1",
+		Goal:     "goal",
+		Status:   job.StatusPending,
+		TenantID: "tenant-a",
+	}
+	if _, err := meta.Create(ctx, targetJob); err != nil {
+		t.Fatalf("Create tenant job: %v", err)
+	}
+	if _, err := eventStore.Append(ctx, targetJob.ID, 0, jobstore.JobEvent{
+		JobID: targetJob.ID,
+		Type:  jobstore.JobCreated,
+	}); err != nil {
+		t.Fatalf("Append JobCreated: %v", err)
+	}
+
+	handler := NewHandler(nil, nil)
+	handler.SetJobStore(meta)
+	handler.SetJobEventStore(eventStore)
+
+	t.Run("tenant matched", func(t *testing.T) {
+		h := server.Default(server.WithHostPorts(":0"))
+		h.GET("/api/jobs/:id", func(c context.Context, reqCtx *app.RequestContext) {
+			handler.GetJob(auth.WithTenantID(c, "tenant-a"), reqCtx)
+		})
+
+		w := ut.PerformRequest(h.Engine, "GET", "/api/jobs/"+targetJob.ID, &ut.Body{Body: bytes.NewReader(nil), Len: 0})
+		resp := w.Result()
+		if resp.StatusCode() != 200 {
+			t.Fatalf("matched tenant status got %d, want 200", resp.StatusCode())
+		}
+		if !bytes.Contains(resp.Body(), []byte(targetJob.ID)) {
+			t.Fatalf("matched tenant body should contain job id, got %s", resp.Body())
+		}
+	})
+
+	t.Run("tenant mismatched", func(t *testing.T) {
+		h := server.Default(server.WithHostPorts(":0"))
+		h.GET("/api/jobs/:id", func(c context.Context, reqCtx *app.RequestContext) {
+			handler.GetJob(auth.WithTenantID(c, "tenant-b"), reqCtx)
+		})
+
+		w := ut.PerformRequest(h.Engine, "GET", "/api/jobs/"+targetJob.ID, &ut.Body{Body: bytes.NewReader(nil), Len: 0})
+		resp := w.Result()
+		if resp.StatusCode() != 404 {
+			t.Fatalf("mismatched tenant status got %d, want 404", resp.StatusCode())
+		}
+	})
+}
+
+func TestGetJob_DefaultTenantFallback(t *testing.T) {
+	ctx := context.Background()
+	meta := job.NewJobStoreMem()
+	eventStore := jobstore.NewMemoryStore()
+	targetJob := &job.Job{
+		ID:       "job-default-tenant",
+		AgentID:  "agent-1",
+		Goal:     "goal",
+		Status:   job.StatusPending,
+		TenantID: "default",
+	}
+	if _, err := meta.Create(ctx, targetJob); err != nil {
+		t.Fatalf("Create default tenant job: %v", err)
+	}
+	if _, err := eventStore.Append(ctx, targetJob.ID, 0, jobstore.JobEvent{
+		JobID: targetJob.ID,
+		Type:  jobstore.JobCreated,
+	}); err != nil {
+		t.Fatalf("Append JobCreated: %v", err)
+	}
+	handler := NewHandler(nil, nil)
+	handler.SetJobStore(meta)
+	handler.SetJobEventStore(eventStore)
+
+	h := server.Default(server.WithHostPorts(":0"))
+	h.GET("/api/jobs/:id", func(c context.Context, reqCtx *app.RequestContext) {
+		handler.GetJob(c, reqCtx) // no tenant in context -> fallback "default"
+	})
+
+	w := ut.PerformRequest(h.Engine, "GET", "/api/jobs/"+targetJob.ID, &ut.Body{Body: bytes.NewReader(nil), Len: 0})
+	resp := w.Result()
+	if resp.StatusCode() != 200 {
+		t.Fatalf("default tenant fallback status got %d, want 200", resp.StatusCode())
+	}
+}
+
+func TestJobStop_RBACAndTenantMatrix(t *testing.T) {
+	roleStore := auth.NewMemoryRoleStore()
+	rbac := auth.NewSimpleRBACChecker(roleStore)
+	ctx := context.Background()
+	if err := rbac.AssignRole(ctx, "tenant-a", "operator-user", auth.RoleOperator); err != nil {
+		t.Fatalf("AssignRole tenant-a operator-user: %v", err)
+	}
+	if err := rbac.AssignRole(ctx, "tenant-a", "normal-user", auth.RoleUser); err != nil {
+		t.Fatalf("AssignRole tenant-a normal-user: %v", err)
+	}
+	if err := rbac.AssignRole(ctx, "tenant-b", "operator-user", auth.RoleOperator); err != nil {
+		t.Fatalf("AssignRole tenant-b operator-user: %v", err)
+	}
+	authz := middleware.NewAuthZMiddleware(rbac)
+
+	type tc struct {
+		name       string
+		reqTenant  string
+		reqUser    string
+		expectCode int
+	}
+	cases := []tc{
+		{name: "same tenant + operator role", reqTenant: "tenant-a", reqUser: "operator-user", expectCode: 200},
+		{name: "same tenant + user role denied by RBAC", reqTenant: "tenant-a", reqUser: "normal-user", expectCode: 403},
+		{name: "cross tenant + same operator role denied by tenant isolation", reqTenant: "tenant-b", reqUser: "operator-user", expectCode: 404},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			jobID := "job-stop-rbac-" + tt.reqTenant + "-" + tt.reqUser
+			meta := job.NewJobStoreMem()
+			if _, err := meta.Create(ctx, &job.Job{
+				ID:       jobID,
+				AgentID:  "agent-1",
+				Goal:     "goal",
+				Status:   job.StatusRunning,
+				TenantID: "tenant-a",
+			}); err != nil {
+				t.Fatalf("Create job: %v", err)
+			}
+			handler := NewHandler(nil, nil)
+			handler.SetJobStore(meta)
+
+			h := server.Default(server.WithHostPorts(":0"))
+			h.POST(
+				"/api/jobs/:id/stop",
+				func(c context.Context, reqCtx *app.RequestContext) {
+					c = auth.WithTenantID(c, tt.reqTenant)
+					c = auth.WithUserID(c, tt.reqUser)
+					reqCtx.Next(c)
+				},
+				authz.RequirePermission(auth.PermissionJobStop),
+				func(c context.Context, reqCtx *app.RequestContext) {
+					handler.JobStop(c, reqCtx)
+				},
+			)
+
+			w := ut.PerformRequest(h.Engine, "POST", "/api/jobs/"+jobID+"/stop", &ut.Body{Body: bytes.NewReader(nil), Len: 0})
+			if got := w.Result().StatusCode(); got != tt.expectCode {
+				t.Fatalf("status got %d, want %d, body=%s", got, tt.expectCode, w.Result().Body())
+			}
+		})
+	}
+}
+
 func TestGetJobReplay_StepNodeID(t *testing.T) {
 	ctx := context.Background()
 	jobID := "job-replay-step"
@@ -333,4 +492,139 @@ func TestGetJobReplay_StepNodeID(t *testing.T) {
 	if !bytes.Contains(body, []byte(`"step_node_id":"n1"`)) {
 		t.Fatalf("response missing step_node_id n1: %s", body)
 	}
+}
+
+func setupTenantJobWithEvents(t *testing.T, jobID, tenantID string, events []jobstore.JobEvent) *Handler {
+	t.Helper()
+	ctx := context.Background()
+	meta := job.NewJobStoreMem()
+	eventStore := jobstore.NewMemoryStore()
+
+	targetJob := &job.Job{
+		ID:       jobID,
+		AgentID:  "agent-1",
+		Goal:     "goal",
+		Status:   job.StatusRunning,
+		TenantID: tenantID,
+	}
+	if _, err := meta.Create(ctx, targetJob); err != nil {
+		t.Fatalf("Create tenant job: %v", err)
+	}
+	for i, e := range events {
+		e.JobID = jobID
+		if _, err := eventStore.Append(ctx, jobID, i, e); err != nil {
+			t.Fatalf("Append event[%d]: %v", i, err)
+		}
+	}
+
+	handler := NewHandler(nil, nil)
+	handler.SetJobStore(meta)
+	handler.SetJobEventStore(eventStore)
+	return handler
+}
+
+func TestGetJobEvents_TenantIsolation(t *testing.T) {
+	jobID := "job-events-tenant-a"
+	handler := setupTenantJobWithEvents(t, jobID, "tenant-a", []jobstore.JobEvent{
+		{Type: jobstore.JobCreated},
+		{Type: jobstore.JobRunning},
+	})
+
+	t.Run("tenant matched", func(t *testing.T) {
+		h := server.Default(server.WithHostPorts(":0"))
+		h.GET("/api/jobs/:id/events", func(c context.Context, reqCtx *app.RequestContext) {
+			handler.GetJobEvents(auth.WithTenantID(c, "tenant-a"), reqCtx)
+		})
+		w := ut.PerformRequest(h.Engine, "GET", "/api/jobs/"+jobID+"/events", &ut.Body{Body: bytes.NewReader(nil), Len: 0})
+		resp := w.Result()
+		if resp.StatusCode() != 200 {
+			t.Fatalf("matched tenant status got %d, want 200", resp.StatusCode())
+		}
+		if !bytes.Contains(resp.Body(), []byte(`"events"`)) {
+			t.Fatalf("matched tenant body missing events: %s", resp.Body())
+		}
+	})
+
+	t.Run("tenant mismatched", func(t *testing.T) {
+		h := server.Default(server.WithHostPorts(":0"))
+		h.GET("/api/jobs/:id/events", func(c context.Context, reqCtx *app.RequestContext) {
+			handler.GetJobEvents(auth.WithTenantID(c, "tenant-b"), reqCtx)
+		})
+		w := ut.PerformRequest(h.Engine, "GET", "/api/jobs/"+jobID+"/events", &ut.Body{Body: bytes.NewReader(nil), Len: 0})
+		resp := w.Result()
+		if resp.StatusCode() != 404 {
+			t.Fatalf("mismatched tenant status got %d, want 404", resp.StatusCode())
+		}
+	})
+}
+
+func TestGetJobReplay_TenantIsolation(t *testing.T) {
+	jobID := "job-replay-tenant-a"
+	handler := setupTenantJobWithEvents(t, jobID, "tenant-a", []jobstore.JobEvent{
+		{Type: jobstore.JobCreated},
+		{Type: jobstore.JobRunning},
+	})
+
+	t.Run("tenant matched", func(t *testing.T) {
+		h := server.Default(server.WithHostPorts(":0"))
+		h.GET("/api/jobs/:id/replay", func(c context.Context, reqCtx *app.RequestContext) {
+			handler.GetJobReplay(auth.WithTenantID(c, "tenant-a"), reqCtx)
+		})
+		w := ut.PerformRequest(h.Engine, "GET", "/api/jobs/"+jobID+"/replay", &ut.Body{Body: bytes.NewReader(nil), Len: 0})
+		resp := w.Result()
+		if resp.StatusCode() != 200 {
+			t.Fatalf("matched tenant status got %d, want 200", resp.StatusCode())
+		}
+		if !bytes.Contains(resp.Body(), []byte(`"timeline"`)) {
+			t.Fatalf("matched tenant body missing timeline: %s", resp.Body())
+		}
+	})
+
+	t.Run("tenant mismatched", func(t *testing.T) {
+		h := server.Default(server.WithHostPorts(":0"))
+		h.GET("/api/jobs/:id/replay", func(c context.Context, reqCtx *app.RequestContext) {
+			handler.GetJobReplay(auth.WithTenantID(c, "tenant-b"), reqCtx)
+		})
+		w := ut.PerformRequest(h.Engine, "GET", "/api/jobs/"+jobID+"/replay", &ut.Body{Body: bytes.NewReader(nil), Len: 0})
+		resp := w.Result()
+		if resp.StatusCode() != 404 {
+			t.Fatalf("mismatched tenant status got %d, want 404", resp.StatusCode())
+		}
+	})
+}
+
+func TestGetJobTrace_TenantIsolation(t *testing.T) {
+	jobID := "job-trace-tenant-a"
+	handler := setupTenantJobWithEvents(t, jobID, "tenant-a", []jobstore.JobEvent{
+		{Type: jobstore.JobCreated},
+		{Type: jobstore.NodeStarted, Payload: []byte(`{"node_id":"n1"}`)},
+		{Type: jobstore.NodeFinished, Payload: []byte(`{"node_id":"n1"}`)},
+	})
+
+	t.Run("tenant matched", func(t *testing.T) {
+		h := server.Default(server.WithHostPorts(":0"))
+		h.GET("/api/jobs/:id/trace", func(c context.Context, reqCtx *app.RequestContext) {
+			handler.GetJobTrace(auth.WithTenantID(c, "tenant-a"), reqCtx)
+		})
+		w := ut.PerformRequest(h.Engine, "GET", "/api/jobs/"+jobID+"/trace", &ut.Body{Body: bytes.NewReader(nil), Len: 0})
+		resp := w.Result()
+		if resp.StatusCode() != 200 {
+			t.Fatalf("matched tenant status got %d, want 200", resp.StatusCode())
+		}
+		if !bytes.Contains(resp.Body(), []byte(`"timeline"`)) {
+			t.Fatalf("matched tenant body missing timeline: %s", resp.Body())
+		}
+	})
+
+	t.Run("tenant mismatched", func(t *testing.T) {
+		h := server.Default(server.WithHostPorts(":0"))
+		h.GET("/api/jobs/:id/trace", func(c context.Context, reqCtx *app.RequestContext) {
+			handler.GetJobTrace(auth.WithTenantID(c, "tenant-b"), reqCtx)
+		})
+		w := ut.PerformRequest(h.Engine, "GET", "/api/jobs/"+jobID+"/trace", &ut.Body{Body: bytes.NewReader(nil), Len: 0})
+		resp := w.Result()
+		if resp.StatusCode() != 404 {
+			t.Fatalf("mismatched tenant status got %d, want 404", resp.StatusCode())
+		}
+	})
 }
