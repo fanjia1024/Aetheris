@@ -18,9 +18,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
+	"github.com/cloudwego/eino/schema"
 )
 
 // ToolConfig 工具配置
@@ -30,14 +32,53 @@ type ToolConfig struct {
 	Parameters  map[string]string `json:"parameters"`
 }
 
-func createPlaceholderTool(name, desc string) tool.BaseTool {
-	t, err := utils.InferTool(name, desc, func(ctx context.Context, input string) (string, error) {
-		return fmt.Sprintf("%s 结果: %s", name, input), nil
-	})
+var inferStringTool = func(name, desc string, fn func(context.Context, string) (string, error)) (tool.InvokableTool, error) {
+	return utils.InferTool(name, desc, fn)
+}
+
+type unavailableTool struct {
+	info      *schema.ToolInfo
+	createErr error
+}
+
+func (u *unavailableTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
+	return u.info, nil
+}
+
+func (u *unavailableTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
+	return "", fmt.Errorf("tool %q unavailable: %w", u.info.Name, u.createErr)
+}
+
+func makeUnavailableTool(name, desc string, err error) tool.InvokableTool {
+	slog.Error("创建工具失败，降级为不可用占位工具", "tool", name, "error", err)
+	return &unavailableTool{
+		info: &schema.ToolInfo{
+			Name: name,
+			Desc: desc,
+			ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+				"input": {
+					Type:     schema.String,
+					Desc:     "tool input",
+					Required: false,
+				},
+			}),
+		},
+		createErr: err,
+	}
+}
+
+func inferToolOrUnavailable(name, desc string, fn func(context.Context, string) (string, error)) tool.InvokableTool {
+	t, err := inferStringTool(name, desc, fn)
 	if err != nil {
-		panic(err)
+		return makeUnavailableTool(name, desc, err)
 	}
 	return t
+}
+
+func createPlaceholderTool(name, desc string) tool.BaseTool {
+	return inferToolOrUnavailable(name, desc, func(ctx context.Context, input string) (string, error) {
+		return fmt.Sprintf("%s 结果: %s", name, input), nil
+	})
 }
 
 // retrieverInput 检索工具入参（JSON）
@@ -50,7 +91,7 @@ type retrieverInput struct {
 // CreateRetrieverTool 创建检索工具（若 engine.Retriever 已注入则对接真实检索）
 func CreateRetrieverTool(engine *Engine) tool.BaseTool {
 	if engine != nil && engine.Retriever != nil {
-		t, err := utils.InferTool("retriever", "检索相关文档。input 为 JSON：{\"query\":\"问题\",\"collection\":\"集合名\",\"top_k\":10}", func(ctx context.Context, input string) (string, error) {
+		return inferToolOrUnavailable("retriever", "检索相关文档。input 为 JSON：{\"query\":\"问题\",\"collection\":\"集合名\",\"top_k\":10}", func(ctx context.Context, input string) (string, error) {
 			var in retrieverInput
 			if err := json.Unmarshal([]byte(input), &in); err != nil {
 				in = retrieverInput{Query: input, Collection: "default", TopK: 10}
@@ -68,10 +109,6 @@ func CreateRetrieverTool(engine *Engine) tool.BaseTool {
 			out, _ := json.Marshal(chunks)
 			return string(out), nil
 		})
-		if err != nil {
-			panic(err)
-		}
-		return t
 	}
 	return createPlaceholderTool("retriever", "检索相关文档")
 }
@@ -79,7 +116,7 @@ func CreateRetrieverTool(engine *Engine) tool.BaseTool {
 // CreateGeneratorTool 创建生成工具（若 engine.Generator 已注入则对接真实生成）
 func CreateGeneratorTool(engine *Engine) tool.BaseTool {
 	if engine != nil && engine.Generator != nil {
-		t, err := utils.InferTool("generator", "根据提示生成回答。input 为提示文本或 JSON {\"prompt\":\"...\"}", func(ctx context.Context, input string) (string, error) {
+		return inferToolOrUnavailable("generator", "根据提示生成回答。input 为提示文本或 JSON {\"prompt\":\"...\"}", func(ctx context.Context, input string) (string, error) {
 			prompt := input
 			var in struct {
 				Prompt string `json:"prompt"`
@@ -89,10 +126,6 @@ func CreateGeneratorTool(engine *Engine) tool.BaseTool {
 			}
 			return engine.Generator.Generate(ctx, prompt)
 		})
-		if err != nil {
-			panic(err)
-		}
-		return t
 	}
 	return createPlaceholderTool("generator", "生成回答")
 }
@@ -105,7 +138,7 @@ type docInput struct {
 // CreateDocumentLoaderTool 创建文档加载工具
 func CreateDocumentLoaderTool(engine *Engine) tool.BaseTool {
 	if engine != nil && engine.DocumentLoader != nil {
-		t, err := utils.InferTool("document_loader", "加载文档。input 为 JSON {\"path\":\"文件路径\"} 或直接路径", func(ctx context.Context, input string) (string, error) {
+		return inferToolOrUnavailable("document_loader", "加载文档。input 为 JSON {\"path\":\"文件路径\"} 或直接路径", func(ctx context.Context, input string) (string, error) {
 			var in docInput
 			if err := json.Unmarshal([]byte(input), &in); err != nil {
 				in = docInput{Path: input}
@@ -121,10 +154,6 @@ func CreateDocumentLoaderTool(engine *Engine) tool.BaseTool {
 			out, _ := json.Marshal(result)
 			return string(out), nil
 		})
-		if err != nil {
-			panic(err)
-		}
-		return t
 	}
 	return createPlaceholderTool("document_loader", "加载文档")
 }
@@ -132,7 +161,7 @@ func CreateDocumentLoaderTool(engine *Engine) tool.BaseTool {
 // CreateDocumentParserTool 创建文档解析工具
 func CreateDocumentParserTool(engine *Engine) tool.BaseTool {
 	if engine != nil && engine.DocumentParser != nil {
-		t, err := utils.InferTool("document_parser", "解析文档。input 为文档对象 JSON", func(ctx context.Context, input string) (string, error) {
+		return inferToolOrUnavailable("document_parser", "解析文档。input 为文档对象 JSON", func(ctx context.Context, input string) (string, error) {
 			var doc interface{}
 			_ = json.Unmarshal([]byte(input), &doc)
 			result, err := engine.DocumentParser.Parse(ctx, doc)
@@ -142,10 +171,6 @@ func CreateDocumentParserTool(engine *Engine) tool.BaseTool {
 			out, _ := json.Marshal(result)
 			return string(out), nil
 		})
-		if err != nil {
-			panic(err)
-		}
-		return t
 	}
 	return createPlaceholderTool("document_parser", "解析文档")
 }
@@ -153,7 +178,7 @@ func CreateDocumentParserTool(engine *Engine) tool.BaseTool {
 // CreateSplitterTool 创建文档切片工具
 func CreateSplitterTool(engine *Engine) tool.BaseTool {
 	if engine != nil && engine.DocumentSplitter != nil {
-		t, err := utils.InferTool("splitter", "文档切片。input 为文档对象 JSON", func(ctx context.Context, input string) (string, error) {
+		return inferToolOrUnavailable("splitter", "文档切片。input 为文档对象 JSON", func(ctx context.Context, input string) (string, error) {
 			var doc interface{}
 			_ = json.Unmarshal([]byte(input), &doc)
 			result, err := engine.DocumentSplitter.Split(ctx, doc)
@@ -163,10 +188,6 @@ func CreateSplitterTool(engine *Engine) tool.BaseTool {
 			out, _ := json.Marshal(result)
 			return string(out), nil
 		})
-		if err != nil {
-			panic(err)
-		}
-		return t
 	}
 	return createPlaceholderTool("splitter", "文档切片")
 }
@@ -174,7 +195,7 @@ func CreateSplitterTool(engine *Engine) tool.BaseTool {
 // CreateEmbeddingTool 创建文本向量化工具
 func CreateEmbeddingTool(engine *Engine) tool.BaseTool {
 	if engine != nil && engine.DocumentEmbedding != nil {
-		t, err := utils.InferTool("embedding", "文本向量化。input 为文档对象 JSON", func(ctx context.Context, input string) (string, error) {
+		return inferToolOrUnavailable("embedding", "文本向量化。input 为文档对象 JSON", func(ctx context.Context, input string) (string, error) {
 			var doc interface{}
 			_ = json.Unmarshal([]byte(input), &doc)
 			result, err := engine.DocumentEmbedding.Embed(ctx, doc)
@@ -184,10 +205,6 @@ func CreateEmbeddingTool(engine *Engine) tool.BaseTool {
 			out, _ := json.Marshal(result)
 			return string(out), nil
 		})
-		if err != nil {
-			panic(err)
-		}
-		return t
 	}
 	return createPlaceholderTool("embedding", "文本向量化")
 }
@@ -195,7 +212,7 @@ func CreateEmbeddingTool(engine *Engine) tool.BaseTool {
 // CreateIndexBuilderTool 创建索引构建工具
 func CreateIndexBuilderTool(engine *Engine) tool.BaseTool {
 	if engine != nil && engine.DocumentIndexer != nil {
-		t, err := utils.InferTool("index_builder", "构建索引。input 为文档对象 JSON", func(ctx context.Context, input string) (string, error) {
+		return inferToolOrUnavailable("index_builder", "构建索引。input 为文档对象 JSON", func(ctx context.Context, input string) (string, error) {
 			var doc interface{}
 			_ = json.Unmarshal([]byte(input), &doc)
 			result, err := engine.DocumentIndexer.Index(ctx, doc)
@@ -205,10 +222,6 @@ func CreateIndexBuilderTool(engine *Engine) tool.BaseTool {
 			out, _ := json.Marshal(result)
 			return string(out), nil
 		})
-		if err != nil {
-			panic(err)
-		}
-		return t
 	}
 	return createPlaceholderTool("index_builder", "构建索引")
 }

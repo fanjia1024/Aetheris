@@ -10,11 +10,26 @@ From the repo root:
 go build -o bin/aetheris ./cmd/cli
 ```
 
+`bin/aetheris` (and any root-level `./cli` executable) is a build artifact and should not be committed to git.
+
 Put `bin/aetheris` in your PATH to run it directly. Or run without building:
 
 ```bash
 go run ./cmd/cli <command> [args]
 ```
+
+## Release build (example)
+
+Build reproducible release artifacts to `artifacts/`:
+
+```bash
+mkdir -p artifacts
+GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o artifacts/aetheris-darwin-arm64 ./cmd/cli
+GOOS=linux  GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o artifacts/aetheris-linux-amd64 ./cmd/cli
+shasum -a 256 artifacts/aetheris-* > artifacts/aetheris-checksums.txt
+```
+
+This repo stores source and build scripts only. Publish binaries via release assets, not as tracked files in the repository.
 
 ## API base URL
 

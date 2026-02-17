@@ -808,8 +808,20 @@ func (h *Handler) AgentStream(ctx context.Context, c *app.RequestContext) {
 }
 
 func jsonString(v interface{}) string {
-	b, _ := json.Marshal(v)
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "{}"
+	}
 	return string(b)
+}
+
+func marshalJSON(ctx context.Context, v interface{}, scene string) ([]byte, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		hlog.CtxErrorf(ctx, "JSON 序列化失败 (%s): %v", scene, err)
+		return nil, err
+	}
+	return b, nil
 }
 
 // AgentRun Agent 入口：找到或创建 session，在 session 上执行 Agent，保存后返回；优先使用 ADK Runner
@@ -979,7 +991,13 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 		}
 		metrics.JobsTotal.WithLabelValues(tenantID, "pending").Inc()
 		if h.jobEventStore != nil {
-			payload, _ := json.Marshal(map[string]string{"agent_id": id, "goal": req.Message})
+			payload, errMarshal := marshalJSON(ctx, map[string]string{"agent_id": id, "goal": req.Message}, "job_created_payload")
+			if errMarshal != nil {
+				c.JSON(consts.StatusInternalServerError, map[string]string{
+					"error": "创建任务事件失败",
+				})
+				return
+			}
 			ver, errAppend := h.jobEventStore.Append(ctx, jobIDOut, 0, jobstore.JobEvent{
 				JobID: jobIDOut, Type: jobstore.JobCreated, Payload: payload,
 			})
@@ -1002,26 +1020,45 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 						h := sha256.Sum256(graphBytes)
 						planHash = hex.EncodeToString(h[:])
 					}
-					payloadPlan, _ := json.Marshal(map[string]interface{}{
+					payloadPlan, errMarshal := marshalJSON(ctx, map[string]interface{}{
 						"task_graph": json.RawMessage(graphBytes),
 						"goal":       req.Message,
 						"plan_hash":  planHash,
-					})
-					verPlan, _ := h.jobEventStore.Append(ctx, jobIDOut, ver, jobstore.JobEvent{
+					}, "plan_generated_payload")
+					if errMarshal != nil {
+						c.JSON(consts.StatusInternalServerError, map[string]string{
+							"error": "计划事件序列化失败",
+						})
+						return
+					}
+					verPlan, errPlanAppend := h.jobEventStore.Append(ctx, jobIDOut, ver, jobstore.JobEvent{
 						JobID: jobIDOut, Type: jobstore.PlanGenerated, Payload: payloadPlan,
 					})
+					if errPlanAppend != nil {
+						hlog.CtxErrorf(ctx, "追加 PlanGenerated 事件失败: %v", errPlanAppend)
+						c.JSON(consts.StatusInternalServerError, map[string]string{
+							"error": "写入计划事件失败",
+						})
+						return
+					}
 					taskGraphSummary := string(graphBytes)
 					if len(graphBytes) > 512 {
 						taskGraphSummary = string(graphBytes[:512]) + "..."
 					}
-					dsPayload, _ := json.Marshal(map[string]interface{}{
+					dsPayload, errMarshal := marshalJSON(ctx, map[string]interface{}{
 						"goal":               req.Message,
 						"task_graph_summary": taskGraphSummary,
 						"plan_hash":          planHash,
-					})
-					_, _ = h.jobEventStore.Append(ctx, jobIDOut, verPlan, jobstore.JobEvent{
-						JobID: jobIDOut, Type: jobstore.DecisionSnapshot, Payload: dsPayload,
-					})
+					}, "decision_snapshot_payload")
+					if errMarshal != nil {
+						hlog.CtxErrorf(ctx, "DecisionSnapshot 序列化失败: %v", errMarshal)
+					} else {
+						if _, err := h.jobEventStore.Append(ctx, jobIDOut, verPlan, jobstore.JobEvent{
+							JobID: jobIDOut, Type: jobstore.DecisionSnapshot, Payload: dsPayload,
+						}); err != nil {
+							hlog.CtxErrorf(ctx, "追加 DecisionSnapshot 事件失败（不影响主流程）: %v", err)
+						}
+					}
 				}
 			}
 		}
@@ -1384,7 +1421,11 @@ func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
 		req.Payload = make(map[string]interface{})
 	}
 	nodeID := waitPayload.NodeID
-	payloadBytes, _ := json.Marshal(req.Payload)
+	payloadBytes, errMarshal := marshalJSON(ctx, req.Payload, "job_signal_request_payload")
+	if errMarshal != nil {
+		c.JSON(consts.StatusBadRequest, map[string]string{"error": "signal payload 非法，无法序列化"})
+		return
+	}
 	// 2.0 at-least-once：先写持久化 inbox，再 Append wait_completed，API 崩溃不丢 signal
 	var signalID string
 	if h.signalInbox != nil {
@@ -1395,11 +1436,15 @@ func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
 			return
 		}
 	}
-	evPayload, _ := json.Marshal(map[string]interface{}{
+	evPayload, errMarshal := marshalJSON(ctx, map[string]interface{}{
 		"node_id":         nodeID,
 		"payload":         json.RawMessage(payloadBytes),
 		"correlation_key": req.CorrelationKey,
-	})
+	}, "job_wait_completed_payload")
+	if errMarshal != nil {
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "构建 wait_completed 事件失败"})
+		return
+	}
 	_, err = h.jobEventStore.Append(ctx, jobID, ver, jobstore.JobEvent{
 		JobID: jobID, Type: jobstore.WaitCompleted, Payload: evPayload,
 	})
@@ -1474,7 +1519,11 @@ func (h *Handler) JobMessage(ctx context.Context, c *app.RequestContext) {
 		CorrelationKey: req.CorrelationKey,
 		Payload:        req.Payload,
 	}
-	msgBytes, _ := json.Marshal(msgPayload)
+	msgBytes, errMarshal := marshalJSON(ctx, msgPayload, "job_message_payload")
+	if errMarshal != nil {
+		c.JSON(consts.StatusBadRequest, map[string]string{"error": "message payload 非法，无法序列化"})
+		return
+	}
 	events, ver, err := h.jobEventStore.ListEvents(ctx, jobID)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
@@ -1512,11 +1561,15 @@ func (h *Handler) JobMessage(ctx context.Context, c *app.RequestContext) {
 				})
 				return
 			}
-			evPayload, _ := json.Marshal(map[string]interface{}{
+			evPayload, errMarshal := marshalJSON(ctx, map[string]interface{}{
 				"node_id":         waitPayload.NodeID,
 				"payload":         req.Payload,
 				"correlation_key": waitPayload.CorrelationKey,
-			})
+			}, "job_message_wait_completed_payload")
+			if errMarshal != nil {
+				c.JSON(consts.StatusInternalServerError, map[string]string{"error": "构建 wait_completed 事件失败"})
+				return
+			}
 			_, ver2, _ := h.jobEventStore.ListEvents(ctx, jobID)
 			_, _ = h.jobEventStore.Append(ctx, jobID, ver2, jobstore.JobEvent{
 				JobID: jobID, Type: jobstore.WaitCompleted, Payload: evPayload,
@@ -2000,7 +2053,10 @@ func buildTraceHTML(jobID string, j *job.Job, events []jobstore.JobEvent) string
 		"dag_nodes":         dagNodes,
 		"dag_edges":         dagEdges,
 	}
-	jsonBytes, _ := json.Marshal(traceData)
+	jsonBytes, err := json.Marshal(traceData)
+	if err != nil {
+		jsonBytes = []byte("{}")
+	}
 	jsonStr := string(jsonBytes)
 
 	var b strings.Builder

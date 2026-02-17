@@ -124,6 +124,14 @@ func ClassifyError(runErr error) (StepResultType, string) {
 	return StepResultPermanentFailure, reason
 }
 
+func marshalJSONForRunner(v any, scene string) ([]byte, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("executor: 序列化失败(%s): %w", scene, err)
+	}
+	return b, nil
+}
+
 // JobStoreForRunner 供 Runner 更新 Job 游标与状态的最小接口，避免 executor 依赖 job 包
 type JobStoreForRunner interface {
 	UpdateCursor(ctx context.Context, jobID string, cursor string) error
@@ -461,7 +469,11 @@ func (r *Runner) runParallelLevel(
 		}
 	}
 	// NodeFinished for each (sorted by node ID)
-	payloadResultsMerged, _ := json.Marshal(payload.Results)
+	payloadResultsMerged, err := marshalJSONForRunner(payload.Results, "parallel_payload_results_merged")
+	if err != nil {
+		_ = r.jobStore.UpdateStatus(ctx, j.ID, 3)
+		return err
+	}
 	for _, nodeID := range nodeIDs {
 		for _, res := range results {
 			if steps[res.idx].NodeID != nodeID {
@@ -483,7 +495,11 @@ func (r *Runner) runParallelLevel(
 			break
 		}
 	}
-	payloadResults, _ := json.Marshal(payload.Results)
+	payloadResults, err := marshalJSONForRunner(payload.Results, "parallel_payload_results_checkpoint")
+	if err != nil {
+		_ = r.jobStore.UpdateStatus(ctx, j.ID, 3)
+		return err
+	}
 	lastIdx := results[len(results)-1].idx
 	lastNodeID := steps[lastIdx].NodeID
 	cp := runtime.NewNodeCheckpoint(agent.ID, sessionID, j.ID, lastNodeID, graphBytes, payloadResults, nil)
@@ -627,7 +643,11 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 					}
 					payload.Results[step.NodeID] = nodeResult
 				}
-				payloadResults, _ := json.Marshal(payload.Results)
+				payloadResults, err := marshalJSONForRunner(payload.Results, "advance_injected_payload_results")
+				if err != nil {
+					_ = r.jobStore.UpdateStatus(ctx, jobID, statusFailed)
+					return false, err
+				}
 				if _, done := completedSet[effectiveStepID]; !done && r.nodeEventSink != nil {
 					rt := StepResultPure
 					if step.NodeType == "tool" {
@@ -663,7 +683,11 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 						payload.Results[step.NodeID] = nodeResult
 					}
 				}
-				payloadResults, _ := json.Marshal(payload.Results)
+				payloadResults, err := marshalJSONForRunner(payload.Results, "advance_replayed_payload_results")
+				if err != nil {
+					_ = r.jobStore.UpdateStatus(ctx, jobID, statusFailed)
+					return false, err
+				}
 				if _, done := completedSet[effectiveStepID]; !done && r.nodeEventSink != nil {
 					rt := StepResultPure
 					if step.NodeType == "tool" {
@@ -690,7 +714,11 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 		return false, nil
 	}
 	// 执行一步
-	stateBefore, _ := json.Marshal(payload.Results)
+	stateBefore, err := marshalJSONForRunner(payload.Results, "advance_state_before")
+	if err != nil {
+		_ = r.jobStore.UpdateStatus(ctx, jobID, statusFailed)
+		return false, err
+	}
 	if r.nodeEventSink != nil {
 		_ = r.nodeEventSink.AppendNodeStarted(ctx, jobID, step.NodeID, 1, "")
 	}
@@ -747,7 +775,11 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 				"plan_decision_id": PlanDecisionID(graphBytes),
 				"cursor_node":      step.NodeID,
 			}
-			resumptionBytes, _ := json.Marshal(resumptionCtx)
+			resumptionBytes, err := marshalJSONForRunner(resumptionCtx, "advance_signal_wait_resumption")
+			if err != nil {
+				_ = r.jobStore.UpdateStatus(ctx, jobID, statusFailed)
+				return false, err
+			}
 			_ = r.nodeEventSink.AppendJobWaiting(ctx, jobID, step.NodeID, "signal", waitReason, time.Now().Add(24*time.Hour), correlationKey, resumptionBytes)
 		}
 		_ = r.jobStore.UpdateStatus(ctx, jobID, statusWaiting)
@@ -786,7 +818,11 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 			resultType = StepResultPure
 		}
 	}
-	payloadResults, _ := json.Marshal(payload.Results)
+	payloadResults, err := marshalJSONForRunner(payload.Results, "advance_payload_results")
+	if err != nil {
+		_ = r.jobStore.UpdateStatus(ctx, jobID, statusFailed)
+		return false, err
+	}
 	if runErr != nil && len(payloadResults) == 0 {
 		payloadResults = []byte("{}")
 	}
@@ -1054,7 +1090,11 @@ runLoop:
 						}
 						payload.Results[step.NodeID] = nodeResult
 					}
-					payloadResults, _ := json.Marshal(payload.Results)
+					payloadResults, err := marshalJSONForRunner(payload.Results, "runloop_injected_payload_results")
+					if err != nil {
+						_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
+						return err
+					}
 					if completedSet != nil {
 						if _, done := completedSet[effectiveStepID]; !done {
 							rt := StepResultPure
@@ -1095,7 +1135,11 @@ runLoop:
 							payload.Results[step.NodeID] = nodeResult
 						}
 					}
-					payloadResults, _ := json.Marshal(payload.Results)
+					payloadResults, err := marshalJSONForRunner(payload.Results, "runloop_replayed_payload_results")
+					if err != nil {
+						_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
+						return err
+					}
 					if completedSet != nil {
 						if _, done := completedSet[effectiveStepID]; !done {
 							rt := StepResultPure
@@ -1133,7 +1177,11 @@ runLoop:
 				continue
 			}
 		}
-		stateBefore, _ := json.Marshal(payload.Results)
+		stateBefore, err := marshalJSONForRunner(payload.Results, "runloop_state_before")
+		if err != nil {
+			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
+			return err
+		}
 		if r.nodeEventSink != nil {
 			_ = r.nodeEventSink.AppendNodeStarted(ctx, j.ID, step.NodeID, 1, "")
 		}
@@ -1192,14 +1240,22 @@ runLoop:
 				if agent != nil && agent.Session != nil {
 					state := runtime.SessionToAgentState(agent.Session)
 					if state != nil {
-						wm, _ := json.Marshal(state)
+						wm, err := marshalJSONForRunner(state, "runloop_memory_snapshot")
+						if err != nil {
+							_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
+							return err
+						}
 						resumptionCtx["memory_snapshot"] = map[string]interface{}{
 							"working_memory": json.RawMessage(wm),
 							"snapshot_at":    time.Now().Format(time.RFC3339),
 						}
 					}
 				}
-				resumptionBytes, _ := json.Marshal(resumptionCtx)
+				resumptionBytes, err := marshalJSONForRunner(resumptionCtx, "runloop_wait_resumption")
+				if err != nil {
+					_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
+					return err
+				}
 				_ = r.nodeEventSink.AppendJobWaiting(ctx, j.ID, step.NodeID, waitKind, reason, expiresAt, correlationKey, resumptionBytes)
 			}
 			// StatusWaiting vs StatusParked：通过 config.park 控制（design/agent-process-model.md § Process State）
@@ -1272,7 +1328,11 @@ runLoop:
 					"plan_decision_id": PlanDecisionID(graphBytes),
 					"cursor_node":      step.NodeID,
 				}
-				resumptionBytes, _ := json.Marshal(resumptionCtx)
+				resumptionBytes, err := marshalJSONForRunner(resumptionCtx, "runloop_signal_wait_resumption")
+				if err != nil {
+					_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
+					return err
+				}
 				_ = r.nodeEventSink.AppendJobWaiting(ctx, j.ID, step.NodeID, "signal", waitReason, time.Now().Add(24*time.Hour), correlationKey, resumptionBytes)
 			}
 			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusWaiting)
@@ -1311,7 +1371,11 @@ runLoop:
 				resultType = StepResultPure
 			}
 		}
-		payloadResults, _ := json.Marshal(payload.Results)
+		payloadResults, err := marshalJSONForRunner(payload.Results, "runloop_payload_results")
+		if err != nil {
+			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
+			return err
+		}
 		if runErr != nil && len(payloadResults) == 0 {
 			payloadResults = []byte("{}")
 		}
