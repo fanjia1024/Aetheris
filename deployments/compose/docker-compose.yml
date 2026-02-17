@@ -1,7 +1,6 @@
 # CoRag API + 2 Workers + Postgres（v1.0 可部署验收）
 # 从仓库根目录执行: docker compose -f deployments/compose/docker-compose.yml up -d
 # 或进入本目录: docker compose up -d（context 需包含 ../..）
-version: "3.8"
 
 services:
   postgres:
@@ -89,7 +88,7 @@ services:
         condition: service_healthy
 
   prometheus:
-    image: prometheus/prometheus:v2.47.0
+    image: prom/prometheus:v2.47.0
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
     command:
