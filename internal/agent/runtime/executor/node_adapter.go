@@ -260,6 +260,8 @@ type ToolNodeAdapter struct {
 	ResourceVerifier   ResourceVerifier // 可选；Confirmation Replay 时校验外部资源仍存在，不通过则失败 job
 	// RetryPolicy 可选；Tool 执行失败时按策略重试（2.0 Tool Contract），同一 idempotency_key 下为同步重试
 	RetryPolicy *RetryPolicy
+	// RateLimiter 可选；Tool 执行前限流，防止打爆外部 API（2.0 Operational）
+	RateLimiter *ToolRateLimiter
 }
 
 // runConfirmation 在注入前校验本步的 StateChanged；若 verifier 存在且有待校验项且任一项失败则返回永久失败错误
@@ -575,6 +577,20 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 			return nil, &StepFailure{Type: StepResultPermanentFailure, Inner: fmt.Errorf("%s", denyMsg), NodeID: taskID}
 		}
 	}
+
+	// 2.0: Rate limiting（防止打爆外部 API）
+	if a.RateLimiter != nil {
+		startWait := time.Now()
+		if err := a.RateLimiter.Wait(ctx, toolName); err != nil {
+			return nil, &StepFailure{Type: StepResultRetryableFailure, Inner: fmt.Errorf("rate limit wait failed: %w", err), NodeID: taskID}
+		}
+		waitDuration := time.Since(startWait)
+		if waitDuration > 100*time.Millisecond {
+			metrics.RateLimitWaitSeconds.WithLabelValues("tool", toolName).Observe(waitDuration.Seconds())
+		}
+		defer a.RateLimiter.Release(toolName)
+	}
+
 	var result ToolResult
 	var err error
 	maxAttempts := 1
