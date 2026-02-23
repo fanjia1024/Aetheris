@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"rag-platform/internal/app/worker"
 	"rag-platform/pkg/config"
@@ -49,8 +50,8 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
 
-	// 优雅关闭
-	ctx, cancel := context.WithTimeout(context.Background(), 30)
+	// 优雅关闭（30 秒超时：等待 in-flight job 完成再释放 lease）
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := app.Shutdown(ctx); err != nil {

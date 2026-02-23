@@ -47,7 +47,7 @@ func TestGC_ArchiveAndDelete(t *testing.T) {
 	store := &fakeLifecycleStore{
 		JobStore: NewMemoryStore(),
 		expiredBatches: [][]ToolInvocationRef{
-			{{ID: "inv_1"}, {ID: "inv_2"}},
+			{{JobID: "job_1", IdempotencyKey: "inv_1"}, {JobID: "job_1", IdempotencyKey: "inv_2"}},
 		},
 	}
 	cfg := GCConfig{
@@ -71,7 +71,7 @@ func TestGC_DeleteOnly(t *testing.T) {
 	store := &fakeLifecycleStore{
 		JobStore: NewMemoryStore(),
 		expiredBatches: [][]ToolInvocationRef{
-			{{ID: "inv_1"}},
+			{{JobID: "job_1", IdempotencyKey: "inv_1"}},
 		},
 	}
 	cfg := GCConfig{

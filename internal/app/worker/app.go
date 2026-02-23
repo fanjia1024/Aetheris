@@ -33,6 +33,7 @@ import (
 	"rag-platform/internal/agent/job"
 	"rag-platform/internal/agent/messaging"
 	"rag-platform/internal/agent/planner"
+	"rag-platform/internal/agent/replay"
 	replaysandbox "rag-platform/internal/agent/replay/sandbox"
 	"rag-platform/internal/agent/runtime"
 	agentexec "rag-platform/internal/agent/runtime/executor"
@@ -41,6 +42,7 @@ import (
 	"rag-platform/internal/app"
 	"rag-platform/internal/app/api"
 	"rag-platform/internal/ingestqueue"
+	llmmod "rag-platform/internal/model/llm"
 	"rag-platform/internal/runtime/eino"
 	"rag-platform/internal/runtime/jobstore"
 	"rag-platform/internal/storage/metadata"
@@ -60,6 +62,8 @@ type App struct {
 	shutdown       chan struct{}
 	agentJobRunner *AgentJobRunner
 	agentJobCancel context.CancelFunc
+	jobEventStore  jobstore.JobStore // 用于 Snapshot 自动化与 GC goroutine（仅 postgres 模式下非 nil）
+	replayBuilder  replay.ReplayContextBuilder
 }
 
 // NewApp 创建新的 Worker 应用
@@ -119,9 +123,35 @@ func NewApp(cfg *config.Config) (*App, error) {
 		if err != nil {
 			return nil, fmt.Errorf("初始化 Job 元数据(postgres) 失败: %w", err)
 		}
-		llmClient, err := app.NewLLMClientFromConfig(cfg)
+		llmClientRaw, err := app.NewLLMClientFromConfig(cfg)
 		if err != nil {
 			return nil, fmt.Errorf("初始化 LLM 客户端失败: %w", err)
+		}
+		// LLM 限流包装
+		var llmClient llmmod.Client = llmClientRaw
+		if cfg != nil && len(cfg.RateLimits.LLM) > 0 {
+			llmLimiterConfigs := make(map[string]llmmod.LLMLimitConfig, len(cfg.RateLimits.LLM))
+			for provider, c := range cfg.RateLimits.LLM {
+				if provider == "_default" {
+					continue
+				}
+				llmLimiterConfigs[provider] = llmmod.LLMLimitConfig{
+					TokensPerMinute:   c.TokensPerMinute,
+					RequestsPerMinute: c.RequestsPerMinute,
+					MaxConcurrent:     c.MaxConcurrent,
+				}
+			}
+			var llmDefaults *llmmod.LLMLimitConfig
+			if d, ok := cfg.RateLimits.LLM["_default"]; ok {
+				llmDefaults = &llmmod.LLMLimitConfig{
+					TokensPerMinute:   d.TokensPerMinute,
+					RequestsPerMinute: d.RequestsPerMinute,
+					MaxConcurrent:     d.MaxConcurrent,
+				}
+			}
+			llmRateLimiter := llmmod.NewLLMRateLimiter(llmLimiterConfigs, llmDefaults)
+			llmClient = llmmod.NewRateLimitedClient(llmClientRaw, llmRateLimiter)
+			logger.Info("Worker LLM 限流已启用", "providers", len(llmLimiterConfigs))
 		}
 		toolsReg := tools.NewRegistry()
 		tools.RegisterBuiltin(toolsReg, engine, nil)
@@ -146,7 +176,23 @@ func NewApp(cfg *config.Config) (*App, error) {
 		if token := os.Getenv("GITHUB_TOKEN"); token != "" {
 			resourceVerifier = verifier.NewGitHubVerifier(token)
 		}
-		dagCompiler := api.NewDAGCompiler(llmClient, toolsReg, engine, nodeEventSink, nodeEventSink, invocationStore, nil, resourceVerifier, api.NewAttemptValidator(pgEventStore))
+		// Tool 限流器（可选）
+		var toolRateLimiter *agentexec.ToolRateLimiter
+		if cfg != nil && len(cfg.RateLimits.Tools) > 0 {
+			toolLimiterConfigs := make(map[string]agentexec.ToolLimitConfig, len(cfg.RateLimits.Tools))
+			for toolName, c := range cfg.RateLimits.Tools {
+				if toolName == "_default" {
+					continue
+				}
+				toolLimiterConfigs[toolName] = agentexec.ToolLimitConfig{QPS: c.QPS, MaxConcurrent: c.MaxConcurrent, Burst: c.Burst}
+			}
+			var toolDefaults *agentexec.ToolLimitConfig
+			if d, ok := cfg.RateLimits.Tools["_default"]; ok {
+				toolDefaults = &agentexec.ToolLimitConfig{QPS: d.QPS, MaxConcurrent: d.MaxConcurrent, Burst: d.Burst}
+			}
+			toolRateLimiter = agentexec.NewToolRateLimiter(toolLimiterConfigs, toolDefaults)
+		}
+		dagCompiler := api.NewDAGCompilerWithOptions(llmClient, toolsReg, engine, nodeEventSink, nodeEventSink, invocationStore, nil, resourceVerifier, api.NewAttemptValidator(pgEventStore), toolRateLimiter)
 		dagRunner := api.NewDAGRunner(dagCompiler)
 		checkpointStore := runtime.NewCheckpointStoreMem()
 		agentStateStore, errState := runtime.NewAgentStateStorePg(context.Background(), dsn)
@@ -274,6 +320,8 @@ func NewApp(cfg *config.Config) (*App, error) {
 			runner.SetInstanceStore(instanceStore)
 		}
 		appObj.agentJobRunner = runner
+		appObj.jobEventStore = pgEventStore
+		appObj.replayBuilder = replay.NewReplayContextBuilder(pgEventStore)
 		logger.Info("Worker Agent Job 模式已启用", "worker_id", DefaultWorkerID(), "dsn", dsn)
 	}
 
@@ -317,6 +365,16 @@ func (a *App) Start() error {
 		a.logger.Info("Prometheus /metrics 已启用", "addr", addr)
 	}
 
+	// Snapshot 自动化（2.0 performance）：每小时扫描事件数 > 1000 的 Job，自动创建快照减少 Replay 开销
+	if a.jobEventStore != nil {
+		go a.runSnapshotLoop()
+	}
+
+	// Storage GC（2.0 operational）：每 24h 清理超 TTL 的 tool_invocations 记录
+	if a.jobEventStore != nil {
+		go a.runGCLoop()
+	}
+
 	// 启动工作队列消费者：收到入库任务时调用 engine.ExecuteWorkflow(ctx, "ingest_pipeline", payload)
 	if err := a.startWorkerQueue(); err != nil {
 		return fmt.Errorf("启动工作队列失败: %w", err)
@@ -326,21 +384,151 @@ func (a *App) Start() error {
 	return nil
 }
 
-// Shutdown 关闭应用
+// runSnapshotLoop 定时扫描高事件量的 Job 并自动创建快照（每小时运行一次）
+func (a *App) runSnapshotLoop() {
+	const (
+		snapshotInterval = 1 * time.Hour
+		eventThreshold   = 1000 // 事件数超过此值时触发快照
+		batchLimit       = 50
+	)
+	ticker := time.NewTicker(snapshotInterval)
+	defer ticker.Stop()
+	a.logger.Info("Snapshot 自动化 goroutine 已启动", "interval", snapshotInterval, "event_threshold", eventThreshold)
+
+	for {
+		select {
+		case <-a.shutdown:
+			return
+		case <-ticker.C:
+		}
+		a.triggerSnapshotsForHighEventJobs(eventThreshold, batchLimit)
+	}
+}
+
+// triggerSnapshotsForHighEventJobs 对高事件量的 Job 触发快照创建
+func (a *App) triggerSnapshotsForHighEventJobs(eventThreshold, limit int) {
+	ss, ok := a.jobEventStore.(jobstore.SnapshotJobStore)
+	if !ok {
+		return
+	}
+	if a.replayBuilder == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	jobIDs, err := ss.ListJobsWithHighEventCount(ctx, eventThreshold, limit)
+	if err != nil {
+		a.logger.Warn("Snapshot 扫描失败", "error", err)
+		return
+	}
+	if len(jobIDs) == 0 {
+		return
+	}
+
+	a.logger.Info("Snapshot 自动化触发", "jobs", len(jobIDs))
+	for _, jobID := range jobIDs {
+		if err := ctx.Err(); err != nil {
+			break
+		}
+		// 使用 ReplayContextBuilder 从事件流重建上下文，再序列化为快照
+		rc, err := a.replayBuilder.BuildFromEvents(ctx, jobID)
+		if err != nil || rc == nil {
+			continue
+		}
+		_, version, err := ss.ListEvents(ctx, jobID)
+		if err != nil {
+			continue
+		}
+		snapshotBytes, err := replay.SerializeReplayContext(rc)
+		if err != nil {
+			a.logger.Warn("快照序列化失败", "job_id", jobID, "error", err)
+			continue
+		}
+		if err := ss.CreateSnapshot(ctx, jobID, version, snapshotBytes); err != nil {
+			a.logger.Warn("快照写入失败", "job_id", jobID, "error", err)
+			continue
+		}
+		// 清理旧快照（保留最新一个）
+		if latestSnap, err := ss.GetLatestSnapshot(ctx, jobID); err == nil && latestSnap != nil {
+			_ = ss.DeleteSnapshotsBefore(ctx, jobID, latestSnap.Version)
+		}
+		a.logger.Info("快照已创建", "job_id", jobID, "version", version)
+	}
+}
+
+// runGCLoop 定时清理过期的 tool_invocations 记录（每 24h 运行一次）
+func (a *App) runGCLoop() {
+	const gcInterval = 24 * time.Hour
+	ticker := time.NewTicker(gcInterval)
+	defer ticker.Stop()
+	a.logger.Info("Storage GC goroutine 已启动", "interval", gcInterval)
+
+	for {
+		select {
+		case <-a.shutdown:
+			return
+		case <-ticker.C:
+		}
+		a.runGC()
+	}
+}
+
+// runGC 执行一次 GC
+func (a *App) runGC() {
+	gcCfg := jobstore.GCConfig{
+		Enable:      true,
+		TTLDays:     90,
+		BatchSize:   1000,
+		RunInterval: 24 * time.Hour,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	if err := jobstore.GC(ctx, a.jobEventStore, gcCfg); err != nil {
+		a.logger.Warn("Storage GC 执行失败", "error", err)
+	} else {
+		a.logger.Info("Storage GC 执行完成")
+	}
+}
+
+// Shutdown 优雅关闭应用。
+// 顺序：①停止认领新 Job → ②等待 in-flight Job 完成（受 ctx 超时约束） → ③停止后台 goroutine → ④关闭存储。
 func (a *App) Shutdown(ctx context.Context) error {
 	a.logger.Info("关闭 worker 应用")
 
-	if a.agentJobCancel != nil {
+	// 1. 停止 AgentJobRunner：关闭 stopCh 以停止认领新 Job，然后 wg.Wait() 等待所有 in-flight Job 完成
+	if a.agentJobRunner != nil {
+		// 在后台等待 Stop()；若 ctx 超时则强制取消正在执行的 Job
+		done := make(chan struct{})
+		go func() {
+			a.agentJobRunner.Stop()
+			close(done)
+		}()
+		select {
+		case <-done:
+			a.logger.Info("in-flight Job 已全部完成")
+		case <-ctx.Done():
+			a.logger.Warn("优雅关闭超时，强制终止 in-flight Job")
+			if a.agentJobCancel != nil {
+				a.agentJobCancel()
+			}
+			<-done // 等待 Stop() 返回
+		}
+	} else if a.agentJobCancel != nil {
 		a.agentJobCancel()
 	}
-	if a.agentJobRunner != nil {
-		a.agentJobRunner.Stop()
+
+	// 2. 停止 Snapshot 自动化与 GC goroutine
+	select {
+	case <-a.shutdown:
+		// 已关闭，避免 double-close panic
+	default:
+		close(a.shutdown)
 	}
 
-	// 关闭工作队列
-	close(a.shutdown)
-
-	// 关闭存储
+	// 3. 关闭存储
 	if err := a.metadataStore.Close(); err != nil {
 		a.logger.Error("关闭元数据存储失败", "error", err)
 	}
@@ -349,7 +537,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 		a.logger.Error("关闭向量存储失败", "error", err)
 	}
 
-	// 关闭 eino 引擎
+	// 4. 关闭 eino 引擎
 	if err := a.engine.Shutdown(); err != nil {
 		a.logger.Error("关闭 eino 引擎失败", "error", err)
 	}

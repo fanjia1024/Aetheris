@@ -165,6 +165,32 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		}
 	}
 
+	// LLM 限流：从配置加载 LLMRateLimiter 并包装 llmClientForAgent（防止打爆 Provider API）
+	if llmClientForAgent != nil && bootstrap.Config != nil && len(bootstrap.Config.RateLimits.LLM) > 0 {
+		llmLimiterConfigs := make(map[string]llm.LLMLimitConfig, len(bootstrap.Config.RateLimits.LLM))
+		for provider, c := range bootstrap.Config.RateLimits.LLM {
+			if provider == "_default" {
+				continue
+			}
+			llmLimiterConfigs[provider] = llm.LLMLimitConfig{
+				TokensPerMinute:   c.TokensPerMinute,
+				RequestsPerMinute: c.RequestsPerMinute,
+				MaxConcurrent:     c.MaxConcurrent,
+			}
+		}
+		var llmDefaults *llm.LLMLimitConfig
+		if d, ok := bootstrap.Config.RateLimits.LLM["_default"]; ok {
+			llmDefaults = &llm.LLMLimitConfig{
+				TokensPerMinute:   d.TokensPerMinute,
+				RequestsPerMinute: d.RequestsPerMinute,
+				MaxConcurrent:     d.MaxConcurrent,
+			}
+		}
+		llmRateLimiter := llm.NewLLMRateLimiter(llmLimiterConfigs, llmDefaults)
+		llmClientForAgent = llm.NewRateLimitedClient(llmClientForAgent, llmRateLimiter)
+		bootstrap.Logger.Info("LLM 限流已启用", "providers", len(llmLimiterConfigs))
+	}
+
 	// 装配并注册 ingest_pipeline（loader → parser → splitter → embedding → indexer）；Indexer 由 einoext 工厂创建
 	ingestPipelineEnabled := bootstrap.Config != nil && bootstrap.MetadataStore != nil && (bootstrap.VectorStore != nil || (vecCfg.Type != "" && vecCfg.Type != "memory"))
 	if ingestPipelineEnabled {
@@ -328,7 +354,28 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
 		resourceVerifier = verifier.NewGitHubVerifier(token)
 	}
-	dagCompiler = NewDAGCompiler(llmClientForAgent, toolsReg, engine, nodeEventSink, nodeEventSink, invocationStore, nil, resourceVerifier, NewAttemptValidator(jobEventStore))
+	// Tool 限流器（可选）
+	var toolRateLimiter *agentexec.ToolRateLimiter
+	if bootstrap.Config != nil && len(bootstrap.Config.RateLimits.Tools) > 0 {
+		toolLimiterConfigs := make(map[string]agentexec.ToolLimitConfig, len(bootstrap.Config.RateLimits.Tools))
+		for toolName, c := range bootstrap.Config.RateLimits.Tools {
+			if toolName == "_default" {
+				continue
+			}
+			toolLimiterConfigs[toolName] = agentexec.ToolLimitConfig{
+				QPS:           c.QPS,
+				MaxConcurrent: c.MaxConcurrent,
+				Burst:         c.Burst,
+			}
+		}
+		var toolDefaults *agentexec.ToolLimitConfig
+		if d, ok := bootstrap.Config.RateLimits.Tools["_default"]; ok {
+			toolDefaults = &agentexec.ToolLimitConfig{QPS: d.QPS, MaxConcurrent: d.MaxConcurrent, Burst: d.Burst}
+		}
+		toolRateLimiter = agentexec.NewToolRateLimiter(toolLimiterConfigs, toolDefaults)
+		bootstrap.Logger.Info("Tool 限流已启用", "tools", len(toolLimiterConfigs))
+	}
+	dagCompiler = NewDAGCompilerWithOptions(llmClientForAgent, toolsReg, engine, nodeEventSink, nodeEventSink, invocationStore, nil, resourceVerifier, NewAttemptValidator(jobEventStore), toolRateLimiter)
 	dagRunner = NewDAGRunner(dagCompiler)
 	var agentStateStore runtime.AgentStateStore
 	if bootstrap.Config != nil && bootstrap.Config.JobStore.Type == "postgres" && bootstrap.Config.JobStore.DSN != "" {
@@ -500,6 +547,11 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	// 预置开发账号角色，避免启用 JWT+RBAC 后本地环境无法创建 Agent。
 	_ = roleStore.SetUserRole(context.Background(), "default", "admin", auth.RoleAdmin)
 	_ = roleStore.SetUserRole(context.Background(), "default", "test", auth.RoleUser)
+	// auth 未开启时 user_id 兜底为 "anonymous"，预置 Admin 角色以保持 API 可用（生产环境请开启 JWT）
+	authEnabled := bootstrap.Config != nil && bootstrap.Config.API.Middleware.Auth
+	if !authEnabled {
+		_ = roleStore.SetUserRole(context.Background(), "default", "anonymous", auth.RoleAdmin)
+	}
 	rbacChecker := auth.NewSimpleRBACChecker(roleStore)
 	router.SetAuthZ(middleware.NewAuthZMiddleware(rbacChecker))
 

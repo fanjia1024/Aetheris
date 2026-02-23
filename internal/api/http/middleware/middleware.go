@@ -158,9 +158,11 @@ func getClaimString(claims jwt.MapClaims, key string) string {
 	return ""
 }
 
-// InjectAuthContext 将 tenant_id、user_id 注入 context：优先 X-Tenant-ID header，否则 JWT claims；供 RBAC 与多租户隔离使用
+// InjectAuthContext 将 tenant_id、user_id 注入 context：优先 X-Tenant-ID / X-User-ID header，
+// 其次 JWT claims，最后兜底为 default / anonymous（确保 RBAC 检查不因空值而整体拦截）
 func (m *Middleware) InjectAuthContext() app.HandlerFunc {
 	return func(ctx context.Context, c *app.RequestContext) {
+		// Tenant ID：header > JWT claims > default
 		if tid := string(c.GetHeader("X-Tenant-ID")); tid != "" {
 			ctx = auth.WithTenantID(ctx, tid)
 		} else if claims := jwt.ExtractClaims(ctx, c); getClaimString(claims, "tenant_id") != "" {
@@ -168,9 +170,14 @@ func (m *Middleware) InjectAuthContext() app.HandlerFunc {
 		} else {
 			ctx = auth.WithTenantID(ctx, "default")
 		}
-		claims := jwt.ExtractClaims(ctx, c)
-		if uid := getClaimString(claims, "user_id"); uid != "" {
+
+		// User ID：X-User-ID header > JWT claims > anonymous（保证 RBAC 有值可校验）
+		if uid := string(c.GetHeader("X-User-ID")); uid != "" {
 			ctx = auth.WithUserID(ctx, uid)
+		} else if claims := jwt.ExtractClaims(ctx, c); getClaimString(claims, "user_id") != "" {
+			ctx = auth.WithUserID(ctx, getClaimString(claims, "user_id"))
+		} else {
+			ctx = auth.WithUserID(ctx, "anonymous")
 		}
 		c.Next(ctx)
 	}

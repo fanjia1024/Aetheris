@@ -34,6 +34,27 @@ type Config struct {
 	Storage    StorageConfig    `mapstructure:"storage"`
 	Log        LogConfig        `mapstructure:"log"`
 	Monitoring MonitoringConfig `mapstructure:"monitoring"`
+	RateLimits RateLimitsConfig `mapstructure:"rate_limits"`
+}
+
+// RateLimitsConfig 限流配置（Tool + LLM）
+type RateLimitsConfig struct {
+	Tools map[string]ToolRateLimitConfig `mapstructure:"tools"`
+	LLM   map[string]LLMRateLimitConfig  `mapstructure:"llm"`
+}
+
+// ToolRateLimitConfig 单个 Tool 的限流配置
+type ToolRateLimitConfig struct {
+	QPS           float64 `mapstructure:"qps"`
+	MaxConcurrent int     `mapstructure:"max_concurrent"`
+	Burst         int     `mapstructure:"burst"`
+}
+
+// LLMRateLimitConfig 单个 LLM Provider 的限流配置
+type LLMRateLimitConfig struct {
+	TokensPerMinute   int     `mapstructure:"tokens_per_minute"`
+	RequestsPerMinute float64 `mapstructure:"requests_per_minute"`
+	MaxConcurrent     int     `mapstructure:"max_concurrent"`
 }
 
 // JobStoreConfig 任务事件存储配置（事件流 + 租约）

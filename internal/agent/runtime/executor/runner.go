@@ -965,7 +965,7 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 				if done {
 					return nil
 				}
-				rctx, _ := r.replayBuilder.BuildFromEvents(ctx, j.ID)
+				rctx, _ := r.replayBuilder.BuildFromSnapshot(ctx, j.ID)
 				if rctx == nil {
 					break // 回退到 runLoop
 				}
@@ -977,7 +977,7 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 		// 无 Cursor 时优先从事件流重建状态，走事件驱动循环：state → Advance → 再 state（plan 3.2）。
 		// Replay 协议（design/effect-system.md）：禁止真实调用 LLM/Tool/IO，只读 PlanGenerated、CommandCommitted、ToolInvocationFinished 注入结果。
 		if r.replayBuilder != nil {
-			rctx, rerr := r.replayBuilder.BuildFromEvents(ctx, j.ID)
+			rctx, rerr := r.replayBuilder.BuildFromSnapshot(ctx, j.ID)
 			if rerr == nil && rctx != nil {
 				if recoveredGraph, rerr := rctx.TaskGraph(); rerr == nil && recoveredGraph != nil {
 					if len(rctx.WorkingMemorySnapshot) > 0 && agent != nil && agent.Session != nil {
@@ -999,7 +999,7 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 								return nil
 							}
 							// 刷新 state 与持久化事件一致
-							rctx, _ = r.replayBuilder.BuildFromEvents(ctx, j.ID)
+							rctx, _ = r.replayBuilder.BuildFromSnapshot(ctx, j.ID)
 							if rctx == nil {
 								break
 							}

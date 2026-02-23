@@ -18,9 +18,10 @@ type GCConfig struct {
 	BatchSize      int           `yaml:"batch_size"`
 }
 
-// ToolInvocationRef 需要归档/删除的调用记录引用
+// ToolInvocationRef 需要归档/删除的调用记录引用（复合主键：job_id + idempotency_key）
 type ToolInvocationRef struct {
-	ID string
+	JobID          string
+	IdempotencyKey string
 }
 
 // EffectLifecycleStore 可选扩展接口：支持按 TTL 管理 tool_invocations 生命周期
@@ -31,6 +32,13 @@ type EffectLifecycleStore interface {
 	ArchiveToolInvocations(ctx context.Context, refs []ToolInvocationRef) error
 	// DeleteToolInvocations 删除调用记录
 	DeleteToolInvocations(ctx context.Context, refs []ToolInvocationRef) error
+}
+
+// SnapshotJobStore 扩展接口：支持查询高事件量的 Job 以触发自动快照（2.0 performance）
+type SnapshotJobStore interface {
+	JobStore
+	// ListJobsWithHighEventCount 列出事件数 >= minEvents 的 job_id；用于 Worker 定时快照触发
+	ListJobsWithHighEventCount(ctx context.Context, minEvents int, limit int) ([]string, error)
 }
 
 // DefaultGCConfig 默认 GC 配置

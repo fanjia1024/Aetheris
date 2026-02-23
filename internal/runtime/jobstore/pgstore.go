@@ -418,3 +418,79 @@ func (s *pgStore) DeleteSnapshotsBefore(ctx context.Context, jobID string, befor
 		jobID, beforeVersion)
 	return err
 }
+
+// ListJobsWithHighEventCount 列出事件数超过阈值的 job_id，用于 snapshot 自动化触发（2.0 performance）
+func (s *pgStore) ListJobsWithHighEventCount(ctx context.Context, minEvents int, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT job_id, COUNT(*) AS cnt FROM job_events
+		 GROUP BY job_id HAVING COUNT(*) >= $1
+		 ORDER BY cnt DESC LIMIT $2`,
+		minEvents, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var jobIDs []string
+	for rows.Next() {
+		var jobID string
+		var cnt int
+		if err := rows.Scan(&jobID, &cnt); err != nil {
+			continue
+		}
+		jobIDs = append(jobIDs, jobID)
+	}
+	return jobIDs, rows.Err()
+}
+
+// EffectLifecycleStore 实现（task: storage-gc）
+
+// ListExpiredToolInvocations 列出早于 cutoff 的 tool_invocations 记录（按创建时间）
+func (s *pgStore) ListExpiredToolInvocations(ctx context.Context, cutoff time.Time, limit int) ([]ToolInvocationRef, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT job_id, idempotency_key FROM tool_invocations WHERE created_at < $1 ORDER BY created_at LIMIT $2`,
+		cutoff, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var refs []ToolInvocationRef
+	for rows.Next() {
+		var ref ToolInvocationRef
+		if err := rows.Scan(&ref.JobID, &ref.IdempotencyKey); err != nil {
+			continue
+		}
+		refs = append(refs, ref)
+	}
+	return refs, rows.Err()
+}
+
+// ArchiveToolInvocations 归档调用记录（当前为 no-op，保留接口兼容性）
+func (s *pgStore) ArchiveToolInvocations(_ context.Context, _ []ToolInvocationRef) error {
+	return nil
+}
+
+// DeleteToolInvocations 批量删除 tool_invocations 记录
+func (s *pgStore) DeleteToolInvocations(ctx context.Context, refs []ToolInvocationRef) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	// 使用逐条删除避免复杂的批量 unnest 语法；批次大小由调用方控制（默认 1000）
+	batch := &pgx.Batch{}
+	for _, r := range refs {
+		batch.Queue(`DELETE FROM tool_invocations WHERE job_id = $1 AND idempotency_key = $2`, r.JobID, r.IdempotencyKey)
+	}
+	results := s.pool.SendBatch(ctx, batch)
+	defer results.Close()
+	for range refs {
+		if _, err := results.Exec(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
