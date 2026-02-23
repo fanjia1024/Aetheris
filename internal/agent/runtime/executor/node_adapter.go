@@ -256,28 +256,46 @@ type ToolNodeAdapter struct {
 	// CapabilityPolicyChecker 执行前校验；非 nil 时在 Tools.Execute 前按能力/策略 Check，deny 则失败该步，require_approval 则返回 CapabilityRequiresApproval（design/capability-policy.md）
 	CapabilityPolicyChecker CapabilityPolicyChecker
 	// ToolCapabilityFunc 可选；按工具名解析其声明的 capability，供 Check 使用；未设置时用 toolName
-	ToolCapabilityFunc func(toolName string) string
-	ResourceVerifier   ResourceVerifier // 可选；Confirmation Replay 时校验外部资源仍存在，不通过则失败 job
+	ToolCapabilityFunc     func(toolName string) string
+	ResourceVerifier       ResourceVerifier       // 可选；Confirmation Replay 时校验外部资源仍存在，不通过则按 ReplayVerificationMode 处理
+	ReplayVerificationMode ReplayVerificationMode // 校验失败时的策略：Strict（默认失败）、Warn（记风险继续）、HumanInLoop（返回 ErrReplayVerificationHumanRequired 供 park）
 	// RetryPolicy 可选；Tool 执行失败时按策略重试（2.0 Tool Contract），同一 idempotency_key 下为同步重试
 	RetryPolicy *RetryPolicy
 	// RateLimiter 可选；Tool 执行前限流，防止打爆外部 API（2.0 Operational）
 	RateLimiter *ToolRateLimiter
 }
 
-// runConfirmation 在注入前校验本步的 StateChanged；若 verifier 存在且有待校验项且任一项失败则返回永久失败错误
+// runConfirmation 在注入前校验本步的 StateChanged；若 verifier 存在且有待校验项且任一项失败则按 ReplayVerificationMode 处理
 func (a *ToolNodeAdapter) runConfirmation(ctx context.Context, jobID, taskID string, stepChanges []StateChangeForVerify) error {
 	if a.ResourceVerifier == nil || len(stepChanges) == 0 {
 		return nil
 	}
 	tenant := TenantIDFromContext(ctx)
 	toolLabel := taskID
+	mode := a.ReplayVerificationMode
 	for _, c := range stepChanges {
 		ok, err := a.ResourceVerifier.Verify(ctx, jobID, taskID, c.ResourceType, c.ResourceID, c.Operation, c.ExternalRef)
 		if err != nil {
+			if mode == ReplayVerificationWarn {
+				metrics.ConfirmationReplayWarnTotal.WithLabelValues(tenant, toolLabel).Inc()
+				return nil
+			}
+			if mode == ReplayVerificationHumanInLoop {
+				metrics.ConfirmationReplayFailTotal.WithLabelValues(tenant, toolLabel).Inc()
+				return &StepFailure{Type: StepResultPermanentFailure, Inner: ErrReplayVerificationHumanRequired, NodeID: taskID}
+			}
 			metrics.ConfirmationReplayFailTotal.WithLabelValues(tenant, toolLabel).Inc()
 			return &StepFailure{Type: StepResultPermanentFailure, Inner: err, NodeID: taskID}
 		}
 		if !ok {
+			if mode == ReplayVerificationWarn {
+				metrics.ConfirmationReplayWarnTotal.WithLabelValues(tenant, toolLabel).Inc()
+				return nil
+			}
+			if mode == ReplayVerificationHumanInLoop {
+				metrics.ConfirmationReplayFailTotal.WithLabelValues(tenant, toolLabel).Inc()
+				return &StepFailure{Type: StepResultPermanentFailure, Inner: ErrReplayVerificationHumanRequired, NodeID: taskID}
+			}
 			metrics.ConfirmationReplayFailTotal.WithLabelValues(tenant, toolLabel).Inc()
 			return &StepFailure{Type: StepResultPermanentFailure, Inner: fmt.Errorf("confirmation failed: resource %s %s %s", c.ResourceType, c.ResourceID, c.Operation), NodeID: taskID}
 		}

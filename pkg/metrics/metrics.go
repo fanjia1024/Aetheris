@@ -42,7 +42,7 @@ func init() {
 		JobsTotal, JobLatencySeconds,
 		StepRetriesTotal, StepTimeoutTotal,
 		LeaseAcquireTotal, SchedulerTickDurationSeconds,
-		ToolInvocationsTotal, ToolErrorsTotal, ConfirmationReplayFailTotal,
+		ToolInvocationsTotal, ToolErrorsTotal, ConfirmationReplayFailTotal, ConfirmationReplayWarnTotal,
 	)
 }
 
@@ -311,6 +311,15 @@ var ConfirmationReplayFailTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "aetheris_confirmation_replay_fail_total",
 		Help: "World-consistent replay 校验失败次数",
+	},
+	[]string{"tenant", "tool"},
+)
+
+// ConfirmationReplayWarnTotal ReplayVerificationWarn 模式下校验失败但继续执行的次数（tenant, tool）
+var ConfirmationReplayWarnTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "aetheris_confirmation_replay_warn_total",
+		Help: "Replay verification failed but continued (warn mode)",
 	},
 	[]string{"tenant", "tool"},
 )

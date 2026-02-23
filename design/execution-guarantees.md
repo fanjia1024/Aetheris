@@ -22,6 +22,7 @@
 - **持久化 Job（跨进程/多 Worker）**：必须配置 **JobStore**（如 PostgreSQL）、**Event Store**（含租约/attempt_id 校验）、**InvocationLedger**（及共享 ToolInvocationStore）。可选 **Effect Store** 以达成「崩溃后不重复副作用」与两步提交 catch-up。
 - **单进程/兼容路径**：无 Ledger 时 Tool 步不提供跨 Worker 的 at-most-once 保证；仅适合开发或单 Worker。
 - **Blocked Job**：Reclaim 不得回收「最后事件为 job_waiting」的 Job；只有 wait_completed 后 Job 才重新变为 Pending。见 [runtime-contract.md](runtime-contract.md) § 二、§ 三。
+- **无全局事务**：Ledger 写入与事件提交**不在同一 DB 事务**中；保证依赖**写入顺序**（先 Append 再 Ledger.Commit）与 **Effect Store catch-up**。可证明语义（crash 窗口、幂等键、顺序与补偿）见 [provable-semantics-table.md](provable-semantics-table.md)。
 
 ---
 
@@ -31,4 +32,5 @@
 - [scheduler-correctness.md](scheduler-correctness.md) — 租约、两步提交、Step 状态
 - [runtime-contract.md](runtime-contract.md) — 重放边界、Blocking、租约、PlanGenerated、attempt_id
 - [1.0-runtime-semantics.md](1.0-runtime-semantics.md) — Execution Proof Chain、Ledger 决策、World Safety
+- [provable-semantics-table.md](provable-semantics-table.md) — 可证明语义表（crash 窗口、幂等键、Ledger/Append 顺序）
 - [agent-process-model.md](agent-process-model.md) — Signal、Mailbox、External Event 交付

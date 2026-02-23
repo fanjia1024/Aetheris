@@ -17,6 +17,7 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 )
 
 // StateChanged 单条外部资源变更，供审计、Trace UI 与 Confirmation Replay 校验
@@ -47,6 +48,30 @@ type StateChangeSink interface {
 // ResourceVerifier Confirmation Replay 时校验外部资源是否仍存在/一致；ok==false 或 err!=nil 表示不可信，不得注入结果
 type ResourceVerifier interface {
 	Verify(ctx context.Context, jobID, stepID, resourceType, resourceID, operation, externalRef string) (ok bool, err error)
+}
+
+// ReplayVerificationMode Confirmation Replay 时校验失败的处理策略。见 design/provable-semantics-table.md § 回放策略分级。
+type ReplayVerificationMode int
+
+const (
+	// ReplayVerificationStrict 校验失败则 job 永久失败（默认）
+	ReplayVerificationStrict ReplayVerificationMode = iota
+	// ReplayVerificationWarn 校验失败时记录风险并继续注入结果，不失败 job
+	ReplayVerificationWarn
+	// ReplayVerificationHumanInLoop 校验失败时返回 ErrReplayVerificationHumanRequired，由调用方 park job 并等待人工确认
+	ReplayVerificationHumanInLoop
+)
+
+// ErrReplayVerificationHumanRequired 当 ReplayVerificationMode == HumanInLoop 且校验失败时返回，调用方应 park job 并等待人工确认后恢复
+var ErrReplayVerificationHumanRequired = errors.New("replay verification failed: human-in-loop required")
+
+// NoOpResourceVerifier 默认 ResourceVerifier：不做实际校验，始终返回 (true, nil)。
+// 用于 bootstrap 时挂载「有 Verifier 但暂不校验」的占位；生产环境应替换为具体实现（如 GitHubVerifier）。
+type NoOpResourceVerifier struct{}
+
+// Verify 实现 ResourceVerifier，始终通过
+func (NoOpResourceVerifier) Verify(_ context.Context, _, _, _, _, _, _ string) (bool, error) {
+	return true, nil
 }
 
 // extractStateKeys 提取 state_before 和 state_after 的 keys，用于 Causal Chain Phase 1（design/execution-forensics.md § Causal Dependency）

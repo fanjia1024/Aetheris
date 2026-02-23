@@ -50,9 +50,16 @@ Verification Mode 允许对任意已完成或已失败的 Job 做**离线验证*
 
 ---
 
+## Replay 校验失败策略（运行时）
+
+运行时 Confirmation Replay 时，若 ResourceVerifier 校验失败，按 **ReplayVerificationMode** 处理：strict（默认失败）、warn（记风险继续）、human-in-loop（返回 `ErrReplayVerificationHumanRequired` 供调用方 park）。详见 [provable-semantics-table.md](provable-semantics-table.md) § 回放策略分级；实现：`ToolNodeAdapter.ReplayVerificationMode`、`internal/agent/runtime/executor/state_diff.go`。
+
+---
+
 ## 参考
 
 - [1.0-runtime-semantics.md](1.0-runtime-semantics.md) — Execution Proof Chain、Ledger、Confirmation Replay
 - [execution-proof-sequence.md](execution-proof-sequence.md) — Runner–Ledger–JobStore 序列
 - [docs/runtime-guarantees.md](../docs/runtime-guarantees.md) — Verification Mode 用户说明
 - [event-chain-sealing.md](event-chain-sealing.md) — 事件链密封（2.0 延伸，可选签名）
+- [provable-semantics-table.md](provable-semantics-table.md) — 可证明语义表、回放策略分级

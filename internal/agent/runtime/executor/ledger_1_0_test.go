@@ -16,6 +16,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 
@@ -264,6 +265,86 @@ func TestAdapter_Replay_InjectsResult_NoToolCall(t *testing.T) {
 	if m["output"] != "replayed" {
 		t.Fatalf("expected output replayed, got %v", m)
 	}
+}
+
+// TestAdapter_PendingToolInvocations_NoDoubleExecute 证明：事件流有 started 无 finished（Pending）时，禁止再次执行；
+// 若 Ledger/Store 有已提交结果则 catch-up 注入（0 次 tool 调用），否则永久失败（0 次 tool 调用）。对应 design/fatal-and-chaos-tests.md。
+func TestAdapter_PendingToolInvocations_NoDoubleExecute(t *testing.T) {
+	jobID := job1
+	taskID := step1
+	toolName := tool1
+	cfg := map[string]any{"a": 1}
+	idempotencyKey := IdempotencyKey(jobID, taskID, toolName, cfg)
+	pending := map[string]struct{}{idempotencyKey: {}}
+	var callCount int32
+	tools := &countToolExec{count: &callCount}
+
+	t.Run("pending_no_record_permanent_failure", func(t *testing.T) {
+		store := NewToolInvocationStoreMem()
+		adapter := &ToolNodeAdapter{
+			Tools:            tools,
+			InvocationStore:  store,
+			InvocationLedger: NewInvocationLedgerFromStore(store),
+		}
+		ctx := context.Background()
+		ctx = WithJobID(ctx, jobID)
+		ctx = WithPendingToolInvocations(ctx, pending)
+		payload := &AgentDAGPayload{Results: make(map[string]any)}
+
+		out, err := adapter.runNode(ctx, taskID, toolName, cfg, nil, payload)
+		if err == nil {
+			t.Fatalf("expected StepFailure (invocation in flight or lost), got nil")
+		}
+		if out != nil {
+			t.Fatalf("expected nil payload on failure")
+		}
+		var sf *StepFailure
+		if !errors.As(err, &sf) || sf.Type != StepResultPermanentFailure {
+			t.Fatalf("expected StepResultPermanentFailure, got %T %v", err, err)
+		}
+		if atomic.LoadInt32(&callCount) != 0 {
+			t.Fatalf("expected 0 tool calls when pending and no record, got %d", callCount)
+		}
+	})
+
+	t.Run("pending_with_committed_catch_up_no_tool_call", func(t *testing.T) {
+		store := NewToolInvocationStoreMem()
+		ctx := context.Background()
+		result := []byte(`{"done":true,"output":"from-store"}`)
+		_ = store.SetStarted(ctx, &ToolInvocationRecord{
+			InvocationID:   "inv-1",
+			JobID:          jobID,
+			StepID:         taskID,
+			ToolName:       toolName,
+			IdempotencyKey: idempotencyKey,
+			Status:         ToolInvocationStatusStarted,
+		})
+		_ = store.SetFinished(ctx, idempotencyKey, ToolInvocationStatusSuccess, result, true, "")
+
+		adapter := &ToolNodeAdapter{
+			Tools:            tools,
+			InvocationStore:  store,
+			InvocationLedger: NewInvocationLedgerFromStore(store),
+		}
+		ctx = WithJobID(ctx, jobID)
+		ctx = WithPendingToolInvocations(ctx, pending)
+		payload := &AgentDAGPayload{Results: make(map[string]any)}
+
+		out, err := adapter.runNode(ctx, taskID, toolName, cfg, nil, payload)
+		if err != nil {
+			t.Fatalf("runNode (catch-up): %v", err)
+		}
+		if out == nil || out.Results[taskID] == nil {
+			t.Fatalf("expected result injected from store")
+		}
+		if atomic.LoadInt32(&callCount) != 0 {
+			t.Fatalf("expected 0 tool calls (catch-up only), got %d", callCount)
+		}
+		m, _ := out.Results[taskID].(map[string]any)
+		if m["output"] != "from-store" {
+			t.Fatalf("expected output from store, got %v", m)
+		}
+	})
 }
 
 type countToolExec struct {

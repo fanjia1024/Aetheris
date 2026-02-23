@@ -2,6 +2,8 @@
 
 Runner does not own tool execution; **Ledger is the only arbiter**. The tool is called only when Ledger returns `AllowExecute`. All other paths only read from Store or replay and inject results.
 
+**Transaction boundary**: There is **no single DB transaction** spanning Ledger and JobStore. At-most-once is guaranteed by **write order** (Append before Ledger.Commit) and **Effect Store catch-up** on replay. See [provable-semantics-table.md](provable-semantics-table.md) for crash windows, idempotency rules, and the exact sequence.
+
 ---
 
 ## Sequence diagram
