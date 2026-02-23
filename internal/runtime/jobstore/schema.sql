@@ -90,6 +90,41 @@ CREATE INDEX IF NOT EXISTS idx_tool_invocations_job_id ON tool_invocations (job_
 -- 工具调用溯源：外部系统返回的 ID（design/effect-log-and-provenance.md）
 ALTER TABLE tool_invocations ADD COLUMN IF NOT EXISTS external_id TEXT;
 
+-- Effect Store（两步提交第一阶段）：执行完成先写 effect，再写 command_committed
+CREATE TABLE IF NOT EXISTS effects (
+    id               BIGSERIAL PRIMARY KEY,
+    job_id           TEXT NOT NULL,
+    command_id       TEXT,
+    idempotency_key  TEXT,
+    kind             TEXT NOT NULL,
+    input            BYTEA,
+    output           BYTEA NOT NULL,
+    error            TEXT,
+    metadata         JSONB,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_effects_job_command ON effects (job_id, command_id) WHERE command_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_effects_job_idempotency ON effects (job_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_effects_job_id ON effects (job_id);
+CREATE INDEX IF NOT EXISTS idx_effects_created_at ON effects (created_at);
+
+-- Checkpoint Store（任务恢复点，多进程共享）
+CREATE TABLE IF NOT EXISTS checkpoints (
+    id               TEXT PRIMARY KEY,
+    agent_id         TEXT NOT NULL,
+    session_id       TEXT NOT NULL,
+    job_id           TEXT,
+    task_graph_state BYTEA,
+    memory_state     BYTEA,
+    cursor_node      TEXT,
+    payload_results  BYTEA,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_checkpoints_agent_id ON checkpoints (agent_id);
+CREATE INDEX IF NOT EXISTS idx_checkpoints_job_id ON checkpoints (job_id) WHERE job_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_checkpoints_created_at ON checkpoints (created_at);
+
 -- 入库任务队列（API 入队、Worker 认领执行 ingest_pipeline）
 CREATE TABLE IF NOT EXISTS ingest_tasks (
     id          TEXT PRIMARY KEY,

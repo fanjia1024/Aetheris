@@ -68,6 +68,9 @@ type App struct {
 
 // NewApp 创建新的 Worker 应用
 func NewApp(cfg *config.Config) (*App, error) {
+	if err := validateProductionRuntimeConfig(cfg); err != nil {
+		return nil, err
+	}
 	// 初始化日志
 	logCfg := &log.Config{}
 	if cfg != nil {
@@ -172,6 +175,20 @@ func NewApp(cfg *config.Config) (*App, error) {
 		if invocationStore == nil {
 			invocationStore = agentexec.NewToolInvocationStoreMem()
 		}
+		var effectStore agentexec.EffectStore
+		if cfg.EffectStore.Type == "postgres" && cfg.EffectStore.DSN != "" {
+			effPoolConfig, errPool := pgxpool.ParseConfig(cfg.EffectStore.DSN)
+			if errPool != nil {
+				return nil, fmt.Errorf("解析 EffectStore DSN 失败: %w", errPool)
+			}
+			effPool, errPool := pgxpool.NewWithConfig(context.Background(), effPoolConfig)
+			if errPool != nil {
+				return nil, fmt.Errorf("创建 EffectStore 连接池失败: %w", errPool)
+			}
+			effectStore = agentexec.NewEffectStorePg(effPool)
+		} else {
+			effectStore = agentexec.NewEffectStoreMem()
+		}
 		var resourceVerifier agentexec.ResourceVerifier
 		if token := os.Getenv("GITHUB_TOKEN"); token != "" {
 			resourceVerifier = verifier.NewGitHubVerifier(token)
@@ -192,9 +209,20 @@ func NewApp(cfg *config.Config) (*App, error) {
 			}
 			toolRateLimiter = agentexec.NewToolRateLimiter(toolLimiterConfigs, toolDefaults)
 		}
-		dagCompiler := api.NewDAGCompilerWithOptions(llmClient, toolsReg, engine, nodeEventSink, nodeEventSink, invocationStore, nil, resourceVerifier, api.NewAttemptValidator(pgEventStore), toolRateLimiter)
+		dagCompiler := api.NewDAGCompilerWithOptions(llmClient, toolsReg, engine, nodeEventSink, nodeEventSink, invocationStore, effectStore, resourceVerifier, api.NewAttemptValidator(pgEventStore), toolRateLimiter)
 		dagRunner := api.NewDAGRunner(dagCompiler)
 		checkpointStore := runtime.NewCheckpointStoreMem()
+		if cfg.CheckpointStore.Type == "postgres" && cfg.CheckpointStore.DSN != "" {
+			cpPoolConfig, errPool := pgxpool.ParseConfig(cfg.CheckpointStore.DSN)
+			if errPool != nil {
+				return nil, fmt.Errorf("解析 CheckpointStore DSN 失败: %w", errPool)
+			}
+			cpPool, errPool := pgxpool.NewWithConfig(context.Background(), cpPoolConfig)
+			if errPool != nil {
+				return nil, fmt.Errorf("创建 CheckpointStore 连接池失败: %w", errPool)
+			}
+			checkpointStore = runtime.NewCheckpointStorePg(cpPool)
+		}
 		agentStateStore, errState := runtime.NewAgentStateStorePg(context.Background(), dsn)
 		if errState != nil {
 			return nil, fmt.Errorf("初始化 AgentStateStore(postgres) 失败: %w", errState)
@@ -570,6 +598,26 @@ func (a *App) startWorkerQueue() error {
 	}
 	go a.runIngestQueueLoop(queue, workerID, pollInterval)
 	a.logger.Info("入库队列消费者已启动", "worker_id", workerID, "poll_interval", pollInterval)
+	return nil
+}
+
+func validateProductionRuntimeConfig(cfg *config.Config) error {
+	if cfg == nil {
+		return nil
+	}
+	prod := cfg.Runtime.Profile == "prod" || cfg.Runtime.Strict
+	if !prod {
+		return nil
+	}
+	if cfg.JobStore.Type != "postgres" || cfg.JobStore.DSN == "" {
+		return fmt.Errorf("production requires jobstore.type=postgres with dsn")
+	}
+	if cfg.EffectStore.Type != "postgres" || cfg.EffectStore.DSN == "" {
+		return fmt.Errorf("production requires effect_store.type=postgres with dsn")
+	}
+	if cfg.CheckpointStore.Type != "postgres" || cfg.CheckpointStore.DSN == "" {
+		return fmt.Errorf("production requires checkpoint_store.type=postgres with dsn")
+	}
 	return nil
 }
 

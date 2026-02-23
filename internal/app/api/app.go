@@ -59,6 +59,7 @@ import (
 	"rag-platform/internal/splitter"
 	"rag-platform/internal/storage/vector"
 	"rag-platform/pkg/auth"
+	"rag-platform/pkg/config"
 )
 
 // otelProviderShutdown 用于优雅关闭时关闭 OpenTelemetry provider
@@ -110,6 +111,9 @@ func (g *grpcRun) GracefulStop() {
 
 // NewApp 创建 API 应用（由 cmd/api 调用）
 func NewApp(bootstrap *app.Bootstrap) (*App, error) {
+	if err := validateProductionRuntimeConfig(bootstrap.Config); err != nil {
+		return nil, err
+	}
 	engine, err := eino.NewEngine(bootstrap.Config, bootstrap.Logger)
 	if err != nil {
 		return nil, fmt.Errorf("初始化 eino 引擎失败: %w", err)
@@ -349,6 +353,20 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	} else {
 		invocationStore = agentexec.NewToolInvocationStoreMem()
 	}
+	var effectStore agentexec.EffectStore
+	if bootstrap.Config != nil && bootstrap.Config.EffectStore.Type == "postgres" && bootstrap.Config.EffectStore.DSN != "" {
+		effPoolConfig, errPool := pgxpool.ParseConfig(bootstrap.Config.EffectStore.DSN)
+		if errPool != nil {
+			return nil, fmt.Errorf("解析 EffectStore DSN 失败: %w", errPool)
+		}
+		effPool, errPool := pgxpool.NewWithConfig(context.Background(), effPoolConfig)
+		if errPool != nil {
+			return nil, fmt.Errorf("创建 EffectStore 连接池失败: %w", errPool)
+		}
+		effectStore = agentexec.NewEffectStorePg(effPool)
+	} else {
+		effectStore = agentexec.NewEffectStoreMem()
+	}
 	nodeEventSink := NewNodeEventSink(jobEventStore)
 	var resourceVerifier agentexec.ResourceVerifier
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
@@ -375,7 +393,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		toolRateLimiter = agentexec.NewToolRateLimiter(toolLimiterConfigs, toolDefaults)
 		bootstrap.Logger.Info("Tool 限流已启用", "tools", len(toolLimiterConfigs))
 	}
-	dagCompiler = NewDAGCompilerWithOptions(llmClientForAgent, toolsReg, engine, nodeEventSink, nodeEventSink, invocationStore, nil, resourceVerifier, NewAttemptValidator(jobEventStore), toolRateLimiter)
+	dagCompiler = NewDAGCompilerWithOptions(llmClientForAgent, toolsReg, engine, nodeEventSink, nodeEventSink, invocationStore, effectStore, resourceVerifier, NewAttemptValidator(jobEventStore), toolRateLimiter)
 	dagRunner = NewDAGRunner(dagCompiler)
 	var agentStateStore runtime.AgentStateStore
 	if bootstrap.Config != nil && bootstrap.Config.JobStore.Type == "postgres" && bootstrap.Config.JobStore.DSN != "" {
@@ -418,6 +436,17 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		}
 	}
 	checkpointStore := runtime.NewCheckpointStoreMem()
+	if bootstrap.Config != nil && bootstrap.Config.CheckpointStore.Type == "postgres" && bootstrap.Config.CheckpointStore.DSN != "" {
+		cpPoolConfig, errPool := pgxpool.ParseConfig(bootstrap.Config.CheckpointStore.DSN)
+		if errPool != nil {
+			return nil, fmt.Errorf("解析 CheckpointStore DSN 失败: %w", errPool)
+		}
+		cpPool, errPool := pgxpool.NewWithConfig(context.Background(), cpPoolConfig)
+		if errPool != nil {
+			return nil, fmt.Errorf("创建 CheckpointStore 连接池失败: %w", errPool)
+		}
+		checkpointStore = runtime.NewCheckpointStorePg(cpPool)
+	}
 	dagRunner.SetCheckpointStores(checkpointStore, &jobStoreForRunnerAdapter{JobStore: jobStore})
 	dagRunner.SetPlanGeneratedSink(NewPlanGeneratedSink(jobEventStore))
 	dagRunner.SetNodeEventSink(nodeEventSink)
@@ -685,6 +714,26 @@ func parseDuration(s string, defaultVal time.Duration) time.Duration {
 		return defaultVal
 	}
 	return d
+}
+
+func validateProductionRuntimeConfig(cfg *config.Config) error {
+	if cfg == nil {
+		return nil
+	}
+	prod := cfg.Runtime.Profile == "prod" || cfg.Runtime.Strict
+	if !prod {
+		return nil
+	}
+	if cfg.JobStore.Type != "postgres" || cfg.JobStore.DSN == "" {
+		return fmt.Errorf("production requires jobstore.type=postgres with dsn")
+	}
+	if cfg.EffectStore.Type != "postgres" || cfg.EffectStore.DSN == "" {
+		return fmt.Errorf("production requires effect_store.type=postgres with dsn")
+	}
+	if cfg.CheckpointStore.Type != "postgres" || cfg.CheckpointStore.DSN == "" {
+		return fmt.Errorf("production requires checkpoint_store.type=postgres with dsn")
+	}
+	return nil
 }
 
 // startGRPC 创建并启动 gRPC 服务（在 goroutine 中 Serve），返回 grpcRun 以便 Shutdown 时 GracefulStop

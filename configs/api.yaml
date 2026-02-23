@@ -64,6 +64,21 @@ jobstore:
   dsn: "postgres://aetheris:aetheris@localhost:5432/aetheris?sslmode=disable"  # 可用环境变量 JOBSTORE_DSN 覆盖
   lease_duration: "30s"    # 租约时长；Heartbeat 间隔建议 < lease_duration/2
 
+# Runtime profile（prod 严格模式下强制要求 postgres 持久化依赖）
+runtime:
+  profile: "prod"   # dev | prod
+  strict: true
+
+# Effect Store（两步提交第一阶段：先写 effect，再写 command_committed）
+effect_store:
+  type: "postgres"   # memory | postgres
+  dsn: "postgres://aetheris:aetheris@localhost:5432/aetheris?sslmode=disable"
+
+# Checkpoint Store（恢复点存储）
+checkpoint_store:
+  type: "postgres"   # memory | postgres
+  dsn: "postgres://aetheris:aetheris@localhost:5432/aetheris?sslmode=disable"
+
 # v1 Agent 与 Job 调度（仅 jobstore.type=memory 时生效；postgres 时 API 不拉取，由 Worker 唯一执行）
 agent:
   job_scheduler:

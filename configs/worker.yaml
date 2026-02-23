@@ -24,6 +24,21 @@ jobstore:
   dsn: "postgres://aetheris:aetheris@localhost:5432/aetheris?sslmode=disable"
   lease_duration: "30s"
 
+# Runtime profile（prod 严格模式下强制要求 postgres 持久化依赖）
+runtime:
+  profile: "prod"   # dev | prod
+  strict: true
+
+# Effect Store（两步提交第一阶段：先写 effect，再写 command_committed）
+effect_store:
+  type: "postgres"   # memory | postgres
+  dsn: "postgres://aetheris:aetheris@localhost:5432/aetheris?sslmode=disable"
+
+# Checkpoint Store（恢复点存储）
+checkpoint_store:
+  type: "postgres"   # memory | postgres
+  dsn: "postgres://aetheris:aetheris@localhost:5432/aetheris?sslmode=disable"
+
 # 存储配置（当前元数据仅支持 memory；mysql 等需后续实现）
 storage:
   metadata:
