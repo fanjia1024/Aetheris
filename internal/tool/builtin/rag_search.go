@@ -60,11 +60,11 @@ func (t *RAGSearchTool) Schema() tool.Schema {
 // Execute 实现 tool.Tool
 func (t *RAGSearchTool) Execute(ctx context.Context, input map[string]any) (tool.ToolResult, error) {
 	if t.engine == nil {
-		return tool.ToolResult{Err: "engine 未配置"}, nil
+		return tool.ToolResult{Err: "engine not configured"}, nil
 	}
 	queryText, _ := input["query"].(string)
 	if queryText == "" {
-		return tool.ToolResult{Err: "query 不能为空"}, nil
+		return tool.ToolResult{Err: "query is required"}, nil
 	}
 	topK := 10
 	if k, ok := input["top_k"]; ok {

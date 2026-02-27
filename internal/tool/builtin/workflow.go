@@ -56,11 +56,11 @@ func (t *WorkflowTool) Schema() tool.Schema {
 // Execute 实现 tool.Tool
 func (t *WorkflowTool) Execute(ctx context.Context, input map[string]any) (tool.ToolResult, error) {
 	if t.engine == nil {
-		return tool.ToolResult{Err: "engine 未配置"}, nil
+		return tool.ToolResult{Err: "engine not configured"}, nil
 	}
 	name, _ := input["name"].(string)
 	if name == "" {
-		return tool.ToolResult{Err: "name 不能为空"}, nil
+		return tool.ToolResult{Err: "name is required"}, nil
 	}
 	var params map[string]interface{}
 	if p, ok := input["params"]; ok && p != nil {

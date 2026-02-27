@@ -58,11 +58,11 @@ func (t *LLMGenerateTool) Schema() tool.Schema {
 // Execute 实现 tool.Tool
 func (t *LLMGenerateTool) Execute(ctx context.Context, input map[string]any) (tool.ToolResult, error) {
 	if t.gen == nil {
-		return tool.ToolResult{Err: "生成器未配置"}, nil
+		return tool.ToolResult{Err: "generator not configured"}, nil
 	}
 	prompt, _ := input["prompt"].(string)
 	if prompt == "" {
-		return tool.ToolResult{Err: "prompt 不能为空"}, nil
+		return tool.ToolResult{Err: "prompt is required"}, nil
 	}
 	content, err := t.gen.Generate(ctx, prompt)
 	if err != nil {

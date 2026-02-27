@@ -104,12 +104,18 @@ type WorkflowExec interface {
 
 // LLMNodeAdapter 将 llm 型 TaskNode 转为 DAG 节点
 type LLMNodeAdapter struct {
-	LLM              LLMGen
-	CommandEventSink CommandEventSink // 可选；执行成功后立即写 command_committed，保证副作用安全
-	EffectStore      EffectStore      // 可选；非 nil 时写入完整 LLM effect（prompt+response）并 Replay 时从 store 注入不重调（design/effect-system LLM Effect Capture）
+	LLM                LLMGen
+	CommandEventSink   CommandEventSink // 可选；执行成功后立即写 command_committed，保证副作用安全
+	EffectStore        EffectStore      // 可选；非 nil 时写入完整 LLM effect（prompt+response）并 Replay 时从 store 注入不重调（design/effect-system LLM Effect Capture）
+	RequireEffectStore bool             // 生产模式下要求必须配置 EffectStore，否则返回错误
 }
 
 func (a *LLMNodeAdapter) runNode(ctx context.Context, taskID string, cfg map[string]any, agent *runtime.Agent, p *AgentDAGPayload) (*AgentDAGPayload, error) {
+	// 生产模式下要求必须配置 EffectStore
+	if a.RequireEffectStore && a.EffectStore == nil {
+		return nil, fmt.Errorf("LLM adapter requires EffectStore in production mode")
+	}
+
 	prompt := p.Goal
 	if cfg != nil {
 		if g, ok := cfg["goal"].(string); ok && g != "" {

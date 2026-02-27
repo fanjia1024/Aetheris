@@ -186,7 +186,7 @@ func (a *EffectsHTTPAdapter) Execute(ctx context.Context, input map[string]any) 
 	method, _ := input["method"].(string)
 	urlStr, _ := input["url"].(string)
 	if method == "" || urlStr == "" {
-		return tool.ToolResult{Err: "method 和 url 不能为空"}, nil
+		return tool.ToolResult{Err: "method and url are required"}, nil
 	}
 
 	headers := make(map[string]string)
@@ -305,7 +305,7 @@ func (a *EffectsLLMAdapter) Schema() tool.Schema {
 func (a *EffectsLLMAdapter) Execute(ctx context.Context, input map[string]any) (tool.ToolResult, error) {
 	prompt, _ := input["prompt"].(string)
 	if prompt == "" {
-		return tool.ToolResult{Err: "prompt 不能为空"}, nil
+		return tool.ToolResult{Err: "prompt is required"}, nil
 	}
 
 	req := effects.LLMRequest{

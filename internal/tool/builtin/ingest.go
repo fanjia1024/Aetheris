@@ -58,7 +58,7 @@ func (t *IngestTool) Schema() tool.Schema {
 // Execute 实现 tool.Tool
 func (t *IngestTool) Execute(ctx context.Context, input map[string]any) (tool.ToolResult, error) {
 	if t.engine == nil {
-		return tool.ToolResult{Err: "engine 未配置"}, nil
+		return tool.ToolResult{Err: "engine not configured"}, nil
 	}
 	var content []byte
 	if s, ok := input["content"].(string); ok && s != "" {
@@ -67,7 +67,7 @@ func (t *IngestTool) Execute(ctx context.Context, input map[string]any) (tool.To
 	if path, ok := input["path"].(string); ok && path != "" && len(content) == 0 {
 		data, err := readFile(path)
 		if err != nil {
-			return tool.ToolResult{Err: fmt.Sprintf("读取文件失败: %v", err)}, nil
+			return tool.ToolResult{Err: fmt.Sprintf("failed to read file: %v", err)}, nil
 		}
 		content = data
 	}

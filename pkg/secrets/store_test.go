@@ -15,8 +15,8 @@ func TestNewStore(t *testing.T) {
 	}{
 		{name: "memory", provider: "memory", wantErr: false},
 		{name: "env", provider: "env", wantErr: false},
-		{name: "vault not implemented", provider: "vault", wantErr: true, errContains: "not implemented"},
-		{name: "k8s not implemented", provider: "k8s", wantErr: true, errContains: "not implemented"},
+		{name: "vault with invalid address", provider: "vault", wantErr: true, errContains: "failed to connect"},
+		{name: "k8s with invalid path", provider: "k8s", wantErr: true, errContains: "not found"},
 		{name: "unknown provider", provider: "unknown", wantErr: true, errContains: "unsupported secret provider"},
 	}
 

@@ -37,10 +37,26 @@ func NewStore(config Config) (Store, error) {
 	case "env":
 		return NewEnvStore(), nil
 	case "vault":
-		return nil, fmt.Errorf("secret provider %q is not implemented", config.Provider)
+		return NewVaultStore(VaultConfig{
+			Address:    getConfigString(config.Config, "address", "http://localhost:8200"),
+			Token:      getConfigString(config.Config, "token", ""),
+			PathPrefix: getConfigString(config.Config, "path_prefix", "secret"),
+		})
 	case "k8s":
-		return nil, fmt.Errorf("secret provider %q is not implemented", config.Provider)
+		return NewK8sStore(K8sConfig{
+			ServiceAccountPath: getConfigString(config.Config, "service_account_path", ""),
+			Namespace:          getConfigString(config.Config, "namespace", "default"),
+			SecretsPath:        getConfigString(config.Config, "secrets_path", "/etc/secrets"),
+		})
 	default:
 		return nil, fmt.Errorf("unsupported secret provider: %q", config.Provider)
 	}
+}
+
+// getConfigString 从 config map 中获取字符串值
+func getConfigString(config map[string]string, key, defaultValue string) string {
+	if val, ok := config[key]; ok && val != "" {
+		return val
+	}
+	return defaultValue
 }
