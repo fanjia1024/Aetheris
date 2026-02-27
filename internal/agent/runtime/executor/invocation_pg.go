@@ -54,7 +54,7 @@ func (s *ToolInvocationStorePg) GetByJobAndIdempotencyKey(ctx context.Context, j
 	return &r, nil
 }
 
-// SetStarted 实现 ToolInvocationStore；若已存在且 committed 则不再覆盖
+// SetStarted 实现 ToolInvocationStore；若already exists且 committed 则不再覆盖
 func (s *ToolInvocationStorePg) SetStarted(ctx context.Context, r *ToolInvocationRecord) error {
 	if r == nil || r.IdempotencyKey == "" {
 		return nil

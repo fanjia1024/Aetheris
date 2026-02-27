@@ -87,7 +87,7 @@ func (s *FairQueueScheduler) resetRound() {
 	s.currentRound++
 }
 
-// SelectQueue 选择下一个应该执行的队列（weighted round-robin）
+// SelectQueue 选择下一个should执行的队列（weighted round-robin）
 func (s *FairQueueScheduler) SelectQueue(ctx context.Context, availableQueues []string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -132,7 +132,7 @@ func (s *FairQueueScheduler) TrackJobStart(jobID string) {
 	}
 }
 
-// CheckStarvation 检查 job 是否等待过久（需要临时提升优先级）
+// CheckStarvation 检查 job 是否等待过久（requires临时提升优先级）
 func (s *FairQueueScheduler) CheckStarvation(jobID string) bool {
 	s.mu.RLock()
 	startTime, exists := s.jobWaitStart[jobID]

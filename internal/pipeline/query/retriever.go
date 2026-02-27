@@ -88,7 +88,7 @@ func (r *Retriever) Validate(input interface{}) error {
 	}
 
 	if _, ok := input.(*common.Query); !ok {
-		return fmt.Errorf("unsupported input输入类型: %T", input)
+		return fmt.Errorf("unsupported input type输入类型: %T", input)
 	}
 
 	if r.vectorStore == nil {
@@ -130,7 +130,7 @@ func (r *Retriever) retrieve(query *common.Query) (*common.RetrievalResult, erro
 
 	searchResults, err := r.vectorStore.Search(ctx, r.indexName, query.Embedding, opts)
 	if err != nil {
-		return nil, fmt.Errorf("从向量存储检索failed: %w", err)
+		return nil, fmt.Errorf("retrieve from vector store failed: %w", err)
 	}
 
 	startTime := time.Now()

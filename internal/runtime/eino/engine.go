@@ -66,7 +66,7 @@ func NewEngine(cfg *config.Config, logger *log.Logger) (*Engine, error) {
 
 	// 启动引擎
 	if err := engine.start(); err != nil {
-		return nil, fmt.Errorf("启动 eino 引擎failed: %w", err)
+		return nil, fmt.Errorf("start eino engine failed: %w", err)
 	}
 
 	logger.Info("eino 引擎初始化成功")
@@ -216,7 +216,7 @@ func (e *Engine) createChatModel(ctx context.Context) (*openai.ChatModel, error)
 		APIKey: pc.APIKey,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("创建 OpenAI ChatModel failed: %w", err)
+		return nil, fmt.Errorf("create OpenAI ChatModel failed: %w", err)
 	}
 	return chatModel, nil
 }
@@ -256,7 +256,7 @@ func (e *Engine) RegisterRunner(name string, runner *adk.Runner) error {
 	defer e.mu.Unlock()
 
 	if _, exists := e.runners[name]; exists {
-		return fmt.Errorf("Runner %s 已存在", name)
+		return fmt.Errorf("Runner %s already exists", name)
 	}
 
 	e.runners[name] = runner

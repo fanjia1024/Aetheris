@@ -79,7 +79,7 @@ func (r *Reranker) Validate(input interface{}) error {
 	}
 
 	if _, ok := input.(*common.RetrievalResult); !ok {
-		return fmt.Errorf("unsupported input输入类型: %T", input)
+		return fmt.Errorf("unsupported input type输入类型: %T", input)
 	}
 
 	return nil

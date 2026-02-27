@@ -19,7 +19,7 @@ import (
 	"fmt"
 )
 
-// ReplayGuard 在 Replay 模式下对非确定性行为进行检测；若启用且检测到禁止操作则 panic。
+// ReplayGuard 在 Replay 模式下对非确定性行为进行检测；若启用且检测到forbidden操作则 panic。
 // 实现方式 A（推荐）：Step 仅能通过 runtime 注入的 Clock/UUID/HTTP 访问副作用，Runner 在 Replay 时注入只读实现；
 // 本 Guard 用于可选的「严格模式」：当 Replay 且 StrictReplay 为 true 时，若 step 触发了未记录的 effect 路径则 panic。
 type ReplayGuard struct {
@@ -27,8 +27,8 @@ type ReplayGuard struct {
 	StrictReplay bool
 }
 
-// CheckEffectAllowed 在 Replay 模式下检查是否允许执行某类 effect；若不允许则 panic。
-// jobID、stepID 用于error信息；op 为触发的禁止操作类型。
+// CheckEffectAllowed 在 Replay 模式下检查是否允许执行某类 effect；若not allowed则 panic。
+// jobID、stepID 用于error信息；op 为触发的forbidden操作类型。
 // 仅在 Replay 且 StrictReplay 时进行严格检查；否则 no-op。
 func (g *ReplayGuard) CheckEffectAllowed(ctx context.Context, jobID, stepID string, op ForbiddenOp) {
 	if ctx == nil {
@@ -40,7 +40,7 @@ func (g *ReplayGuard) CheckEffectAllowed(ctx context.Context, jobID, stepID stri
 	if !g.StrictReplay {
 		return
 	}
-	panic(fmt.Sprintf("determinism: replay 模式下禁止未记录的非确定性操作 job_id=%s step_id=%s op=%s: %s",
+	panic(fmt.Sprintf("determinism: replay 模式下forbidden未记录的非确定性操作 job_id=%s step_id=%s op=%s: %s",
 		jobID, stepID, op, op.Description()))
 }
 

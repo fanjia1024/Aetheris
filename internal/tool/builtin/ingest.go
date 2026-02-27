@@ -72,7 +72,7 @@ func (t *IngestTool) Execute(ctx context.Context, input map[string]any) (tool.To
 		content = data
 	}
 	if len(content) == 0 {
-		return tool.ToolResult{Err: "需要提供 content 或 path"}, nil
+		return tool.ToolResult{Err: "requires提供 content 或 path"}, nil
 	}
 	result, err := t.engine.ExecuteWorkflow(ctx, "ingest_pipeline", map[string]interface{}{
 		"content": content,

@@ -89,15 +89,15 @@ func (g *Generator) Validate(input interface{}) error {
 
 	inputData, ok := input.(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("unsupported input输入类型: %T", input)
+		return fmt.Errorf("unsupported input type输入类型: %T", input)
 	}
 
 	if _, ok := inputData["query"].(*common.Query); !ok {
-		return fmt.Errorf("query 不是 *common.Query 类型")
+		return fmt.Errorf("query is not *common.Query 类型")
 	}
 
 	if _, ok := inputData["retrieval_result"].(*common.RetrievalResult); !ok {
-		return fmt.Errorf("retrieval_result 不是 *common.RetrievalResult 类型")
+		return fmt.Errorf("retrieval_result is not *common.RetrievalResult 类型")
 	}
 
 	if g.llmClient == nil {
@@ -134,7 +134,7 @@ func (g *Generator) generate(query *common.Query, result *common.RetrievalResult
 		PresencePenalty:  0.0,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("调用 LLM failed: %w", err)
+		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}
 
 	// 提取引用

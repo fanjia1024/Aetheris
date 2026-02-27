@@ -226,7 +226,7 @@ func CreateIndexBuilderTool(engine *Engine) tool.BaseTool {
 	return createPlaceholderTool("index_builder", "构建索引")
 }
 
-// GetDefaultTools 获取默认工具列表（需要传入 engine 以支持注入组件）
+// GetDefaultTools 获取默认工具列表（requires传入 engine 以支持注入组件）
 func GetDefaultTools(engine *Engine) []tool.BaseTool {
 	return []tool.BaseTool{
 		CreateRetrieverTool(engine),

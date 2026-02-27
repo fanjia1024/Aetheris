@@ -63,7 +63,7 @@ func (e *ingestWorkflowExecutor) Execute(ctx context.Context, params map[string]
 	} else if file, ok := params["file"].(*multipart.FileHeader); ok {
 		loaderInput = file
 	} else {
-		return nil, fmt.Errorf("ingest_pipeline 需要 params[\"file\"] (*multipart.FileHeader) 或 params[\"content\"] ([]byte)")
+		return nil, fmt.Errorf("ingest_pipeline requires params[\"file\"] (*multipart.FileHeader) 或 params[\"content\"] ([]byte)")
 	}
 
 	pipeCtx := common.NewPipelineContext(ctx, ingestID)
@@ -244,7 +244,7 @@ func (e *queryWorkflowExecutor) Execute(ctx context.Context, params map[string]i
 		}, nil
 	}
 	if q == nil {
-		return nil, fmt.Errorf("query_pipeline 需要 params[\"query\"] 为 *common.Query")
+		return nil, fmt.Errorf("query_pipeline requires params[\"query\"] 为 *common.Query")
 	}
 
 	pipeCtx := common.NewPipelineContext(ctx, fmt.Sprintf("query-%d", time.Now().UnixNano()))

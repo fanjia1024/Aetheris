@@ -16,7 +16,7 @@ package executor
 
 import "errors"
 
-// SignalWaitRequired 表示节点需要等待外部 signal 后再继续；Runner 应写入 job_waiting 并返回 ErrJobWaiting。
+// SignalWaitRequired 表示节点requires等待外部 signal 后再继续；Runner 应写入 job_waiting 并返回 ErrJobWaiting。
 type SignalWaitRequired struct {
 	CorrelationKey string
 	Reason         string

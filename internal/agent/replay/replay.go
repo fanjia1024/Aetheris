@@ -45,7 +45,7 @@ type ReplayContext struct {
 	CompletedCommandIDs      map[string]struct{}            // 所有已出现 command_committed 的 command_id，已提交命令永不重放
 	CommandResults           map[string][]byte              // command_id -> 该命令的 result JSON，Replay 时注入 payload
 	CompletedToolInvocations map[string][]byte              // idempotency_key -> 成功完成的工具调用 result JSON，Replay 时跳过执行并注入
-	PendingToolInvocations   map[string]struct{}            // 事件流中「有 tool_invocation_started 无对应 tool_invocation_finished」的 idempotency_key，禁止再次执行（Activity Log Barrier）
+	PendingToolInvocations   map[string]struct{}            // 事件流中「有 tool_invocation_started 无对应 tool_invocation_finished」的 idempotency_key，forbidden再次执行（Activity Log Barrier）
 	StateChangesByStep       map[string][]StateChangeRecord // node_id -> 该步的 state_changed 列表，供 Confirmation Replay
 	ApprovedCorrelationKeys  map[string]struct{}            // wait_completed 中的 correlation_key 集合，供 CapabilityPolicyChecker 审批后放行（design/capability-policy.md）
 	// WorkingMemorySnapshot 最近一次 job_waiting 的 resumption_context.memory_snapshot.working_memory（AgentState JSON）；恢复时 Apply 到 Session（design/durable-memory-layer.md）

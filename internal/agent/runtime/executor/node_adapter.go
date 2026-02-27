@@ -253,7 +253,7 @@ type ToolNodeAdapter struct {
 	Tools            ToolExec
 	ToolEventSink    ToolEventSink    // 可选；Tool 执行前后写 ToolCalled/ToolReturned
 	CommandEventSink CommandEventSink // 可选；执行成功后立即写 command_committed，保证副作用安全
-	// InvocationLedger 执行许可账本；非 nil 时所有 tool 调用经 Acquire/Commit，禁止直接拥有执行权
+	// InvocationLedger 执行许可账本；非 nil 时所有 tool 调用经 Acquire/Commit，forbidden直接拥有执行权
 	InvocationLedger InvocationLedger
 	// InvocationStore 可选；当 InvocationLedger 为 nil 时用于兼容旧逻辑（先查再执行）
 	InvocationStore ToolInvocationStore
@@ -265,7 +265,7 @@ type ToolNodeAdapter struct {
 	ToolCapabilityFunc     func(toolName string) string
 	ResourceVerifier       ResourceVerifier       // 可选；Confirmation Replay 时校验外部资源仍存在，不通过则按 ReplayVerificationMode 处理
 	ReplayVerificationMode ReplayVerificationMode // 校验failed时的策略：Strict（默认failed）、Warn（记风险继续）、HumanInLoop（返回 ErrReplayVerificationHumanRequired 供 park）
-	// RetryPolicy 可选；Tool 执行failed时按策略重试（2.0 Tool Contract），同一 idempotency_key 下为同步重试
+	// RetryPolicy 可选；Tool execution failed时按策略重试（2.0 Tool Contract），同一 idempotency_key 下为同步重试
 	RetryPolicy *RetryPolicy
 	// RateLimiter 可选；Tool 执行前限流，防止打爆外部 API（2.0 Operational）
 	RateLimiter *ToolRateLimiter
@@ -348,7 +348,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 		stepChanges = StateChangesByStepFromContext(ctx)[taskID]
 	}
 
-	// Activity Log Barrier：事件流中已 started 无 finished 时禁止再次执行，仅恢复或failed（design/effect-system.md）
+	// Activity Log Barrier：事件流中已 started 无 finished 时forbidden再次执行，仅恢复或failed（design/effect-system.md）
 	if pending := PendingToolInvocationsFromContext(ctx); pending != nil {
 		if _, isPending := pending[idempotencyKey]; isPending {
 			var resultBytes []byte
@@ -394,7 +394,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 		}
 	}
 
-	// Ledger 为仲裁：先申请执行许可，禁止在 ReturnRecordedResult 时调用 tool
+	// Ledger 为仲裁：先申请执行许可，forbidden在 ReturnRecordedResult 时调用 tool
 	if a.InvocationLedger != nil && jobID != "" {
 		var replayResult []byte
 		if completed := CompletedToolInvocationsFromContext(ctx); completed != nil {

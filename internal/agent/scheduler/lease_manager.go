@@ -32,7 +32,7 @@ type LeaseManager interface {
 	Heartbeat(ctx context.Context, workerID string, jobID string) error
 	// ListJobIDsWithExpiredClaim 返回租约已过期的 job_id 列表，供 Reclaim 回收
 	ListJobIDsWithExpiredClaim(ctx context.Context) ([]string, error)
-	// GetCurrentAttemptID 返回该 job 当前持有租约的 attempt_id；无租约或已过期返回空
+	// GetCurrentAttemptID 返回该 job 当前持有租约的 attempt_id；无租约或已过期returned empty
 	GetCurrentAttemptID(ctx context.Context, jobID string) (string, error)
 }
 

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Package effects 定义 Effect 类型与 EffectLog 接口，将「会对外部世界产生影响的」操作统一记录到事件流。
-// 参见 design/effect-system.md：Replay 时禁止真实调用 LLM/Tool/IO，只读已记录效应注入结果。
+// 参见 design/effect-system.md：Replay 时forbidden真实调用 LLM/Tool/IO，只读已记录效应注入结果。
 package effects
 
 import (

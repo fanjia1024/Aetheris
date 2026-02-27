@@ -49,7 +49,7 @@ const (
 
 	// 以上事件中参与 Replay 的 Effect 事件（见 design/effect-system.md）：
 	// PlanGenerated, CommandCommitted, ToolInvocationFinished, NodeFinished 用于重建 ReplayContext；
-	// Replay 时禁止真实调用 LLM/Tool，只读这些事件注入结果。
+	// Replay 时forbidden真实调用 LLM/Tool，只读这些事件注入结果。
 	// TimerFired、RandomRecorded、UUIDRecorded：Replay 时仅从事件注入时间/随机/UID，不重新执行（2.0 确定性）
 	TimerFired     EventType = "timer_fired"
 	RandomRecorded EventType = "random_recorded"
@@ -106,7 +106,7 @@ type JobWaitingPayload struct {
 	ResumptionContext json.RawMessage `json:"resumption_context,omitempty"` // 恢复上下文：payload_results snapshot + plan_decision_id，保证等待后"同一思维"继续（design/agent-process-model.md § Continuation）
 }
 
-// ParseJobWaitingPayload 解析 job_waiting 事件的 payload；若缺少 correlation_key 返回空字符串
+// ParseJobWaitingPayload 解析 job_waiting 事件的 payload；若缺少 correlation_key returned empty字符串
 func ParseJobWaitingPayload(payload []byte) (p JobWaitingPayload, err error) {
 	if len(payload) == 0 {
 		return p, nil

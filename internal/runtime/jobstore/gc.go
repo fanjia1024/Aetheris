@@ -18,7 +18,7 @@ type GCConfig struct {
 	BatchSize      int           `yaml:"batch_size"`
 }
 
-// ToolInvocationRef 需要归档/删除的调用记录引用（复合主键：job_id + idempotency_key）
+// ToolInvocationRef requires归档/删除的调用记录引用（复合主键：job_id + idempotency_key）
 type ToolInvocationRef struct {
 	JobID          string
 	IdempotencyKey string

@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package determinism 定义 Replay 时的确定性边界：禁止在 step 内使用的操作列表，
+// Package determinism 定义 Replay 时的确定性边界：forbidden在 step 内使用的操作列表，
 // 以及 Replay 模式下对非确定性行为的检测与阻断（replay_guard）。参见 design/replay-sandbox.md。
 package determinism
 
-// ForbiddenOp 表示在 step 内禁止直接使用的操作类型；Replay 时若检测到应 panic。
+// ForbiddenOp 表示在 step 内forbidden直接使用的操作类型；Replay 时若检测到应 panic。
 type ForbiddenOp string
 
 const (
@@ -34,7 +34,7 @@ const (
 	OpSleep ForbiddenOp = "sleep"
 )
 
-// ForbiddenOps 返回 Replay 时禁止在 step 内使用的操作列表（用于文档与 replay_guard 检查）。
+// ForbiddenOps 返回 Replay 时forbidden在 step 内使用的操作列表（用于文档与 replay_guard 检查）。
 func ForbiddenOps() []ForbiddenOp {
 	return []ForbiddenOp{
 		OpWallClock,
@@ -46,21 +46,21 @@ func ForbiddenOps() []ForbiddenOp {
 	}
 }
 
-// Description 返回禁止操作的说明，供 panic 消息与文档使用。
+// Description 返回forbidden操作的说明，供 panic 消息与文档使用。
 func (o ForbiddenOp) Description() string {
 	switch o {
 	case OpWallClock:
-		return "读取系统时间（time.Now）在 Replay 时禁止；请使用 runtime.Now(ctx)"
+		return "读取系统时间（time.Now）在 Replay 时forbidden；请使用 runtime.Now(ctx)"
 	case OpRandom:
-		return "使用随机数/uuid 在 Replay 时禁止；请使用 runtime.UUID(ctx) 或 runtime.Random(ctx)"
+		return "使用随机数/uuid 在 Replay 时forbidden；请使用 runtime.UUID(ctx) 或 runtime.Random(ctx)"
 	case OpUnrecordedIO:
-		return "未记录的外部 IO（http、db）在 Replay 时禁止；请通过 Tool 或 runtime.HTTP(ctx)"
+		return "未记录的外部 IO（http、db）在 Replay 时forbidden；请通过 Tool 或 runtime.HTTP(ctx)"
 	case OpGoroutine:
-		return "在 step 内启动 goroutine 禁止；会破坏确定性"
+		return "在 step 内启动 goroutine forbidden；会破坏确定性"
 	case OpChannel:
-		return "在 step 内使用 channel 禁止；请使用纯计算或 Tool"
+		return "在 step 内使用 channel forbidden；请使用纯计算或 Tool"
 	case OpSleep:
-		return "time.Sleep 在 step 内禁止；会引入非确定性"
+		return "time.Sleep 在 step 内forbidden；会引入非确定性"
 	default:
 		return "未记录的非确定性操作"
 	}

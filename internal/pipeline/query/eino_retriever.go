@@ -43,7 +43,7 @@ type MemoryRetrieverConfig struct {
 // NewMemoryRetriever 创建基于 vector.Store 的 Eino Retriever
 func NewMemoryRetriever(cfg *MemoryRetrieverConfig) (*MemoryRetriever, error) {
 	if cfg == nil || cfg.VectorStore == nil {
-		return nil, fmt.Errorf("MemoryRetriever 需要 VectorStore")
+		return nil, fmt.Errorf("MemoryRetriever requires VectorStore")
 	}
 	idx := cfg.DefaultIndex
 	if idx == "" {
@@ -85,14 +85,14 @@ func (m *MemoryRetriever) Retrieve(ctx context.Context, query string, opts ...ei
 	}
 
 	if options.Embedding == nil {
-		return nil, fmt.Errorf("Retriever 需要 WithEmbedding 选项以对 query 做向量化")
+		return nil, fmt.Errorf("Retriever requires WithEmbedding 选项以对 query 做向量化")
 	}
 	vecs, err := options.Embedding.EmbedStrings(ctx, []string{query})
 	if err != nil {
 		return nil, fmt.Errorf("retriever embedding: %w", err)
 	}
 	if len(vecs) == 0 {
-		return nil, fmt.Errorf("embedding 返回空")
+		return nil, fmt.Errorf("embedding returned empty")
 	}
 	queryVector := vecs[0]
 

@@ -22,7 +22,7 @@ type InvocationDecision int
 const (
 	// InvocationDecisionAllowExecute 允许执行；无已提交记录，可调用 tool 后 Commit
 	InvocationDecisionAllowExecute InvocationDecision = iota
-	// InvocationDecisionReturnRecordedResult 恢复已记录结果；已有 committed 成功记录，禁止再执行，直接注入结果
+	// InvocationDecisionReturnRecordedResult 恢复已记录结果；已有 committed 成功记录，forbidden再执行，直接注入结果
 	InvocationDecisionReturnRecordedResult
 	// InvocationDecisionWaitOtherWorker 记录存在但未提交，可能其他 worker 正在执行；可等待或重试
 	InvocationDecisionWaitOtherWorker

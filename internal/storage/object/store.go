@@ -26,6 +26,6 @@ func NewStore(cfg config.ObjectConfig) (Store, error) {
 	case "", "memory":
 		return NewMemoryStore(), nil
 	default:
-		return nil, fmt.Errorf("unsupported input对象存储类型: %s", cfg.Type)
+		return nil, fmt.Errorf("unsupported input type对象存储类型: %s", cfg.Type)
 	}
 }

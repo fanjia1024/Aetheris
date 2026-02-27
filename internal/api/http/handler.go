@@ -101,7 +101,7 @@ type Handler struct {
 	agentStateStore    agentruntime.AgentStateStore
 	agentInstanceStore instance.AgentInstanceStore
 	agentMessagingBus  messaging.AgentMessagingBus
-	// planAtJobCreation 在 Job 创建时生成并持久化 Plan（1.0：执行阶段只读，禁止再调 Planner）
+	// planAtJobCreation 在 Job 创建时生成并持久化 Plan（1.0：执行阶段只读，forbidden再调 Planner）
 	planAtJobCreation func(ctx context.Context, agentID, goal string) (*planner.TaskGraph, error)
 	// wakeupQueue 可选；非 nil 时 JobSignal/JobMessage 在 UpdateStatus(Pending) 后调用 NotifyReady，供 Worker 事件驱动唤醒（design/wakeup-index）
 	wakeupQueue job.WakeupQueue
@@ -266,7 +266,7 @@ func (h *Handler) UploadDocument(ctx context.Context, c *app.RequestContext) {
 func (h *Handler) UploadDocumentAsync(ctx context.Context, c *app.RequestContext) {
 	if h.ingestQueue == nil {
 		c.JSON(consts.StatusNotImplemented, map[string]string{
-			"error": "异步入库需要配置 jobstore.type=postgres",
+			"error": "异步入库requires配置 jobstore.type=postgres",
 		})
 		return
 	}
@@ -320,7 +320,7 @@ func (h *Handler) UploadDocumentAsync(ctx context.Context, c *app.RequestContext
 func (h *Handler) UploadStatus(ctx context.Context, c *app.RequestContext) {
 	if h.ingestQueue == nil {
 		c.JSON(consts.StatusNotImplemented, map[string]string{
-			"error": "任务状态查询需要配置 jobstore.type=postgres",
+			"error": "任务状态查询requires配置 jobstore.type=postgres",
 		})
 		return
 	}
@@ -672,7 +672,7 @@ func runADK(ctx context.Context, c *app.RequestContext, runner *adk.Runner, sess
 		if event.Err != nil {
 			hlog.CtxErrorf(ctx, "ADK Run 事件error: %v", event.Err)
 			c.JSON(consts.StatusInternalServerError, map[string]interface{}{
-				"error":   "Agent 执行failed",
+				"error":   "Agent execution failed",
 				"details": event.Err.Error(),
 			})
 			return
@@ -724,7 +724,7 @@ func (h *Handler) AgentResumeCheckpoint(ctx context.Context, c *app.RequestConte
 	var req AgentResumeCheckpointRequest
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(consts.StatusBadRequest, map[string]string{
-			"error": "请求参数error，需要 checkpoint_id",
+			"error": "请求参数error，requires checkpoint_id",
 		})
 		return
 	}
@@ -747,7 +747,7 @@ func (h *Handler) AgentResumeCheckpoint(ctx context.Context, c *app.RequestConte
 		if event.Err != nil {
 			hlog.CtxErrorf(ctx, "ADK Resume 事件error: %v", event.Err)
 			c.JSON(consts.StatusInternalServerError, map[string]interface{}{
-				"error":   "Agent 执行failed",
+				"error":   "Agent execution failed",
 				"details": event.Err.Error(),
 			})
 			return
@@ -818,7 +818,7 @@ func jsonString(v interface{}) string {
 func marshalJSON(ctx context.Context, v interface{}, scene string) ([]byte, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
-		hlog.CtxErrorf(ctx, "JSON 序列化failed (%s): %v", scene, err)
+		hlog.CtxErrorf(ctx, "JSON serialize failed (%s): %v", scene, err)
 		return nil, err
 	}
 	return b, nil
@@ -862,7 +862,7 @@ func (h *Handler) AgentRun(ctx context.Context, c *app.RequestContext) {
 	if err != nil {
 		hlog.CtxErrorf(ctx, "Agent Run failed: %v", err)
 		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
-			"error":   "Agent 执行failed",
+			"error":   "Agent execution failed",
 			"details": err.Error(),
 		})
 		return
@@ -1027,7 +1027,7 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 					}, "plan_generated_payload")
 					if errMarshal != nil {
 						c.JSON(consts.StatusInternalServerError, map[string]string{
-							"error": "计划事件序列化failed",
+							"error": "计划事件serialize failed",
 						})
 						return
 					}
@@ -1051,7 +1051,7 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 						"plan_hash":          planHash,
 					}, "decision_snapshot_payload")
 					if errMarshal != nil {
-						hlog.CtxErrorf(ctx, "DecisionSnapshot 序列化failed: %v", errMarshal)
+						hlog.CtxErrorf(ctx, "DecisionSnapshot serialize failed: %v", errMarshal)
 					} else {
 						if _, err := h.jobEventStore.Append(ctx, jobIDOut, verPlan, jobstore.JobEvent{
 							JobID: jobIDOut, Type: jobstore.DecisionSnapshot, Payload: dsPayload,
@@ -1464,7 +1464,7 @@ func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
 			}
 		}
 		hlog.CtxErrorf(ctx, "Append WaitCompleted: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "写入事件failed"})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "write event failed"})
 		return
 	}
 	if err := h.jobStore.UpdateStatus(ctx, jobID, job.StatusPending); err != nil {

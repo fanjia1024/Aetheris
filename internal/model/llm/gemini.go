@@ -88,7 +88,7 @@ func (c *GeminiClient) GenerateWithContext(ctx context.Context, prompt string, o
 		Post(c.baseURL + "/models/" + c.model + ":generateContent?key=" + c.apiKey)
 
 	if err != nil {
-		return "", fmt.Errorf("调用 Gemini API failed: %w", err)
+		return "", fmt.Errorf("Gemini API call failed: %w", err)
 	}
 
 	// 检查响应状态
@@ -108,15 +108,15 @@ func (c *GeminiClient) GenerateWithContext(ctx context.Context, prompt string, o
 	}
 
 	if err := json.Unmarshal(response.Body(), &result); err != nil {
-		return "", fmt.Errorf("解析 Gemini 响应failed: %w", err)
+		return "", fmt.Errorf("parse Gemini response failed: %w", err)
 	}
 
 	if len(result.Candidates) == 0 {
-		return "", fmt.Errorf("Gemini API 没有返回结果")
+		return "", fmt.Errorf("Gemini API did not return结果")
 	}
 
 	if len(result.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("Gemini API 没有返回文本")
+		return "", fmt.Errorf("Gemini API did not return文本")
 	}
 
 	return result.Candidates[0].Content.Parts[0].Text, nil
@@ -157,7 +157,7 @@ func (c *GeminiClient) ChatWithContext(ctx context.Context, messages []Message, 
 		Post(c.baseURL + "/models/" + c.model + ":generateContent?key=" + c.apiKey)
 
 	if err != nil {
-		return "", fmt.Errorf("调用 Gemini API failed: %w", err)
+		return "", fmt.Errorf("Gemini API call failed: %w", err)
 	}
 
 	// 检查响应状态
@@ -177,15 +177,15 @@ func (c *GeminiClient) ChatWithContext(ctx context.Context, messages []Message, 
 	}
 
 	if err := json.Unmarshal(response.Body(), &result); err != nil {
-		return "", fmt.Errorf("解析 Gemini 响应failed: %w", err)
+		return "", fmt.Errorf("parse Gemini response failed: %w", err)
 	}
 
 	if len(result.Candidates) == 0 {
-		return "", fmt.Errorf("Gemini API 没有返回结果")
+		return "", fmt.Errorf("Gemini API did not return结果")
 	}
 
 	if len(result.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("Gemini API 没有返回文本")
+		return "", fmt.Errorf("Gemini API did not return文本")
 	}
 
 	return result.Candidates[0].Content.Parts[0].Text, nil

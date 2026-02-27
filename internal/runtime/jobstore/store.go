@@ -39,7 +39,7 @@ func WithAttemptID(ctx context.Context, attemptID string) context.Context {
 	return context.WithValue(ctx, attemptIDContextKey, attemptID)
 }
 
-// AttemptIDFromContext 从 context 读取 attempt_id；无则返回空字符串
+// AttemptIDFromContext 从 context 读取 attempt_id；无则returned empty字符串
 func AttemptIDFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""
@@ -69,7 +69,7 @@ type JobStore interface {
 	Watch(ctx context.Context, jobID string) (<-chan JobEvent, error)
 	// ListJobIDsWithExpiredClaim 返回租约已过期的 job_id 列表，供 Scheduler 在 metadata 侧回收孤儿（design/job-state-machine.md）
 	ListJobIDsWithExpiredClaim(ctx context.Context) ([]string, error)
-	// GetCurrentAttemptID 返回该 job 当前持有租约的 attempt_id；无租约或已过期返回空字符串（供 Lease fencing：Ledger Commit 等写操作校验）
+	// GetCurrentAttemptID 返回该 job 当前持有租约的 attempt_id；无租约或已过期returned empty字符串（供 Lease fencing：Ledger Commit 等写操作校验）
 	GetCurrentAttemptID(ctx context.Context, jobID string) (string, error)
 
 	// Snapshot methods (2.0 performance optimization for long-running jobs)

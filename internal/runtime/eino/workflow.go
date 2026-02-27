@@ -73,13 +73,13 @@ func (w *Workflow) AddNode(name, nodeType string, config *NodeConfig) error {
 			return &Output{Result: input.Query}, nil
 		}))
 	case "generate":
-		return fmt.Errorf("generate 节点需要 chatModel 实例")
+		return fmt.Errorf("generate 节点requires chatModel 实例")
 	case "format":
 		w.graph.AddLambdaNode(name, compose.InvokableLambda(func(ctx context.Context, input *Input) (*Output, error) {
 			return &Output{Result: fmt.Sprintf("格式化结果: %s", input.Query)}, nil
 		}))
 	default:
-		return fmt.Errorf("unsupported input节点类型: %s", nodeType)
+		return fmt.Errorf("unsupported input type节点类型: %s", nodeType)
 	}
 
 	return nil
@@ -100,7 +100,7 @@ func (w *Workflow) Compile(ctx context.Context) (compose.Runnable[*Input, *Outpu
 func (w *Workflow) Execute(ctx context.Context, input *Input) (*Output, error) {
 	runnable, err := w.Compile(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("编译工作流failed: %w", err)
+		return nil, fmt.Errorf("compile workflow failed: %w", err)
 	}
 
 	return runnable.Invoke(ctx, input)
@@ -184,7 +184,7 @@ func CreateQueryWorkflow(ctx context.Context) (*Workflow, error) {
 func CreateToolFromWorkflow(workflow *Workflow, toolName, toolDescription string) (tool.BaseTool, error) {
 	runnable, err := workflow.Compile(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("编译工作流failed: %w", err)
+		return nil, fmt.Errorf("compile workflow failed: %w", err)
 	}
 
 	return utils.InferTool(toolName, toolDescription, func(ctx context.Context, input string) (string, error) {

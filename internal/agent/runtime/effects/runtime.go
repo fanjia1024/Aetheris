@@ -22,7 +22,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Now 返回当前时间；Replay 时从事件流注入，否则经 Recorder 记录后返回。Step 内禁止直接使用 time.Now()。
+// Now 返回当前时间；Replay 时从事件流注入，否则经 Recorder 记录后返回。Step 内forbidden直接使用 time.Now()。
 func Now(ctx context.Context) time.Time {
 	ec := getEffectsCtx(ctx)
 	if ec == nil {
@@ -45,7 +45,7 @@ func Now(ctx context.Context) time.Time {
 	return t
 }
 
-// UUID 返回新的 UUID 字符串；Replay 时从事件流注入。Step 内禁止直接使用 uuid.New()。
+// UUID 返回新的 UUID 字符串；Replay 时从事件流注入。Step 内forbidden直接使用 uuid.New()。
 func UUID(ctx context.Context) string {
 	ec := getEffectsCtx(ctx)
 	if ec == nil {

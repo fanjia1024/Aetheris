@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Package sandbox 定义 Replay 时的可执行边界：哪些操作在 replay 时允许重算（Deterministic）、
-// 哪些禁止执行仅从 event 注入（SideEffect/External），用于 execution reconstruction 而非 debug playback。
+// 哪些forbidden执行仅从 event 注入（SideEffect/External），用于 execution reconstruction 而非 debug playback。
 package sandbox
 
 import (
@@ -27,9 +27,9 @@ type OperationKind string
 const (
 	// Deterministic replay 时允许重新执行（纯计算、无副作用）
 	Deterministic OperationKind = "deterministic"
-	// SideEffect 有副作用，replay 时禁止执行，仅从 event 注入结果
+	// SideEffect 有副作用，replay 时forbidden执行，仅从 event 注入结果
 	SideEffect OperationKind = "side_effect"
-	// External 依赖外部世界，replay 时禁止执行，仅从 event 恢复
+	// External 依赖外部世界，replay 时forbidden执行，仅从 event 恢复
 	External OperationKind = "external"
 )
 

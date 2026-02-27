@@ -50,7 +50,7 @@ func (g *GitHubVerifier) Verify(ctx context.Context, jobID, stepID, resourceType
 	url := strings.TrimSpace(externalRef)
 	if url == "" {
 		// 无 external_ref 时可根据 resource_id 构造；简单实现要求 external_ref 必填
-		return false, fmt.Errorf("verifier/github: resource_type=%s 需要 external_ref（API URL）", resourceType)
+		return false, fmt.Errorf("verifier/github: resource_type=%s requires external_ref（API URL）", resourceType)
 	}
 	// 若非完整 URL，可拼接 BaseURL；这里假定 external_ref 为完整 URL 或 path
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {

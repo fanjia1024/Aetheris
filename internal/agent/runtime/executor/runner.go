@@ -127,7 +127,7 @@ func ClassifyError(runErr error) (StepResultType, string) {
 func marshalJSONForRunner(v any, scene string) ([]byte, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
-		return nil, fmt.Errorf("executor: 序列化failed(%s): %w", scene, err)
+		return nil, fmt.Errorf("executor: serialize failed(%s): %w", scene, err)
 	}
 	return b, nil
 }
@@ -446,7 +446,7 @@ func (r *Runner) runParallelLevel(
 			_ = r.nodeEventSink.AppendNodeFinished(ctx, j.ID, step.NodeID, []byte("{}"), 0, string(resultType), 1, resultType, reason, effectiveStepID, "")
 		}
 		_ = r.jobStore.UpdateStatus(ctx, j.ID, 3)
-		return fmt.Errorf("executor: 节点 %s 并行执行failed: %w", step.NodeID, firstErr)
+		return fmt.Errorf("executor: 节点 %s parallel execution failed: %w", step.NodeID, firstErr)
 	}
 	// Merge results (deterministic order by node ID)
 	nodeIDs := make([]string, 0, len(batch))
@@ -506,7 +506,7 @@ func (r *Runner) runParallelLevel(
 	cpID, saveErr := r.checkpointStore.Save(ctx, cp)
 	if saveErr != nil {
 		_ = r.jobStore.UpdateStatus(ctx, j.ID, 3)
-		return fmt.Errorf("executor: 保存 checkpoint failed: %w", saveErr)
+		return fmt.Errorf("executor: save checkpoint failed: %w", saveErr)
 	}
 	if agent.Session != nil {
 		agent.Session.SetLastCheckpoint(cpID)
@@ -549,7 +549,7 @@ func (r *Runner) Run(ctx context.Context, agent *runtime.Agent, goal string) err
 	runnable, err := graph.Compile(ctx)
 	if err != nil {
 		agent.SetStatus(runtime.StatusFailed)
-		return fmt.Errorf("executor: 图编译failed: %w", err)
+		return fmt.Errorf("executor: graph compile failed: %w", err)
 	}
 
 	sessionID := ""
@@ -660,7 +660,7 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 				cpID, saveErr := r.checkpointStore.Save(ctx, cp)
 				if saveErr != nil {
 					_ = r.jobStore.UpdateStatus(ctx, jobID, statusFailed)
-					return false, fmt.Errorf("executor: 保存 checkpoint failed: %w", saveErr)
+					return false, fmt.Errorf("executor: save checkpoint failed: %w", saveErr)
 				}
 				if agent.Session != nil {
 					agent.Session.SetLastCheckpoint(cpID)
@@ -670,7 +670,7 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 			}
 			if !decision.Inject && (decision.Kind == replaysandbox.SideEffect || decision.Kind == replaysandbox.External) {
 				_ = r.jobStore.UpdateStatus(ctx, jobID, statusFailed)
-				return false, fmt.Errorf("executor: replay 时副作用节点 %s 无已记录结果，禁止执行", step.NodeID)
+				return false, fmt.Errorf("executor: replay 时副作用节点 %s 无已记录结果，forbidden执行", step.NodeID)
 			}
 		} else {
 			if _, committed := replayCtx.CompletedCommandIDs[commandID]; committed {
@@ -700,7 +700,7 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 				cpID, saveErr := r.checkpointStore.Save(ctx, cp)
 				if saveErr != nil {
 					_ = r.jobStore.UpdateStatus(ctx, jobID, statusFailed)
-					return false, fmt.Errorf("executor: 保存 checkpoint failed: %w", saveErr)
+					return false, fmt.Errorf("executor: save checkpoint failed: %w", saveErr)
 				}
 				if agent.Session != nil {
 					agent.Session.SetLastCheckpoint(cpID)
@@ -845,7 +845,7 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 		}
 		_ = r.jobStore.UpdateStatus(ctx, jobID, statusFailed)
 		sf := &StepFailure{Type: resultType, Inner: runErr, NodeID: step.NodeID}
-		return false, fmt.Errorf("executor: 节点 %s 执行failed (%s): %w", step.NodeID, resultType, sf)
+		return false, fmt.Errorf("executor: 节点 %s execution failed (%s): %w", step.NodeID, resultType, sf)
 	}
 	if r.nodeEventSink != nil {
 		opts := &StateCheckpointOpts{ChangedKeys: ChangedKeysFromState(stateBefore, payloadResults)}
@@ -855,7 +855,7 @@ func (r *Runner) Advance(ctx context.Context, jobID string, state *replay.Execut
 	cpID, saveErr := r.checkpointStore.Save(ctx, cp)
 	if saveErr != nil {
 		_ = r.jobStore.UpdateStatus(ctx, jobID, statusFailed)
-		return false, fmt.Errorf("executor: 保存 checkpoint failed: %w", saveErr)
+		return false, fmt.Errorf("executor: save checkpoint failed: %w", saveErr)
 	}
 	if agent.Session != nil {
 		agent.Session.SetLastCheckpoint(cpID)
@@ -907,12 +907,12 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 		cp, loadErr := r.checkpointStore.Load(ctx, j.Cursor)
 		if loadErr != nil || cp == nil {
 			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
-			return fmt.Errorf("executor: 恢复 checkpoint %s failed: %w", j.Cursor, loadErr)
+			return fmt.Errorf("executor: recover checkpoint %s failed: %w", j.Cursor, loadErr)
 		}
 		taskGraph = &planner.TaskGraph{}
 		if err := taskGraph.Unmarshal(cp.TaskGraphState); err != nil {
 			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
-			return fmt.Errorf("executor: 反序列化 TaskGraph failed: %w", err)
+			return fmt.Errorf("executor: deserialize TaskGraph failed: %w", err)
 		}
 		var compErr error
 		steps, compErr = r.compiler.CompileSteppable(ctx, taskGraph, agent)
@@ -939,7 +939,7 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 		if len(cp.PayloadResults) > 0 {
 			if err := json.Unmarshal(cp.PayloadResults, &payload.Results); err != nil {
 				_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
-				return fmt.Errorf("executor: 反序列化 PayloadResults failed: %w", err)
+				return fmt.Errorf("executor: deserialize PayloadResults failed: %w", err)
 			}
 		}
 		// 有 replayBuilder 时从 checkpoint 构建 state，走事件驱动循环
@@ -975,7 +975,7 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 		}
 	} else {
 		// 无 Cursor 时优先从事件流重建状态，走事件驱动循环：state → Advance → 再 state（plan 3.2）。
-		// Replay 协议（design/effect-system.md）：禁止真实调用 LLM/Tool/IO，只读 PlanGenerated、CommandCommitted、ToolInvocationFinished 注入结果。
+		// Replay 协议（design/effect-system.md）：forbidden真实调用 LLM/Tool/IO，只读 PlanGenerated、CommandCommitted、ToolInvocationFinished 注入结果。
 		if r.replayBuilder != nil {
 			rctx, rerr := r.replayBuilder.BuildFromSnapshot(ctx, j.ID)
 			if rerr == nil && rctx != nil {
@@ -1023,7 +1023,7 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 					if len(rctx.PayloadResults) > 0 {
 						if err := json.Unmarshal(rctx.PayloadResults, &payload.Results); err != nil {
 							_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
-							return fmt.Errorf("executor: 反序列化 PayloadResults failed: %w", err)
+							return fmt.Errorf("executor: deserialize PayloadResults failed: %w", err)
 						}
 					}
 					completedSet = make(map[string]struct{})
@@ -1036,9 +1036,9 @@ func (r *Runner) RunForJob(ctx context.Context, agent *runtime.Agent, j *JobForR
 				}
 			}
 		}
-		// design/runtime-contract.md §4：决策来源可追溯 — 事件流中必须存在 PlanGenerated 才执行；禁止无记录时重新规划
+		// design/runtime-contract.md §4：决策来源可追溯 — 事件流中必须存在 PlanGenerated 才执行；forbidden无记录时重新规划
 		_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
-		return fmt.Errorf("executor: 事件流中无 PlanGenerated，禁止执行（design/runtime-contract.md）")
+		return fmt.Errorf("executor: 事件流中无 PlanGenerated，forbidden执行（design/runtime-contract.md）")
 	}
 
 runLoop:
@@ -1112,7 +1112,7 @@ runLoop:
 					cpID, saveErr := r.checkpointStore.Save(ctx, cp)
 					if saveErr != nil {
 						_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
-						return fmt.Errorf("executor: 保存 checkpoint failed: %w", saveErr)
+						return fmt.Errorf("executor: save checkpoint failed: %w", saveErr)
 					}
 					if agent.Session != nil {
 						agent.Session.SetLastCheckpoint(cpID)
@@ -1122,7 +1122,7 @@ runLoop:
 				}
 				if !decision.Inject && (decision.Kind == replaysandbox.SideEffect || decision.Kind == replaysandbox.External) {
 					_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
-					return fmt.Errorf("executor: replay 时副作用节点 %s 无已记录结果，禁止执行", step.NodeID)
+					return fmt.Errorf("executor: replay 时副作用节点 %s 无已记录结果，forbidden执行", step.NodeID)
 				}
 			} else {
 				if _, committed := replayCtx.CompletedCommandIDs[commandID]; committed {
@@ -1157,7 +1157,7 @@ runLoop:
 					cpID, saveErr := r.checkpointStore.Save(ctx, cp)
 					if saveErr != nil {
 						_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
-						return fmt.Errorf("executor: 保存 checkpoint failed: %w", saveErr)
+						return fmt.Errorf("executor: save checkpoint failed: %w", saveErr)
 					}
 					if agent.Session != nil {
 						agent.Session.SetLastCheckpoint(cpID)
@@ -1398,7 +1398,7 @@ runLoop:
 			}
 			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
 			sf := &StepFailure{Type: resultType, Inner: runErr, NodeID: step.NodeID}
-			return fmt.Errorf("executor: 节点 %s 执行failed (%s): %w", step.NodeID, resultType, sf)
+			return fmt.Errorf("executor: 节点 %s execution failed (%s): %w", step.NodeID, resultType, sf)
 		}
 		if r.nodeEventSink != nil {
 			opts := &StateCheckpointOpts{ChangedKeys: ChangedKeysFromState(stateBefore, payloadResults)}
@@ -1451,7 +1451,7 @@ runLoop:
 		cpID, saveErr := r.checkpointStore.Save(ctx, cp)
 		if saveErr != nil {
 			_ = r.jobStore.UpdateStatus(ctx, j.ID, statusFailed)
-			return fmt.Errorf("executor: 保存 checkpoint failed: %w", saveErr)
+			return fmt.Errorf("executor: save checkpoint failed: %w", saveErr)
 		}
 		if agent.Session != nil {
 			agent.Session.SetLastCheckpoint(cpID)

@@ -38,7 +38,7 @@ type replayContextKey struct{}
 // stateChangesByStepContextKey 用于在 context 中传递 Replay 的「按 step 的 state_changed」列表，供 Confirmation Replay 校验
 type stateChangesByStepContextKey struct{}
 
-// pendingToolInvocationsContextKey 用于在 context 中传递事件流「已 started 无 finished」的 idempotency_key 集合（Activity Log Barrier），禁止再次执行
+// pendingToolInvocationsContextKey 用于在 context 中传递事件流「已 started 无 finished」的 idempotency_key 集合（Activity Log Barrier），forbidden再次执行
 type pendingToolInvocationsContextKey struct{}
 
 // approvedCorrelationKeysContextKey 用于在 context 中传递已批准的 correlation_key 集合（wait_completed），供 CapabilityPolicyChecker 审批后放行（design/capability-policy.md）
@@ -108,7 +108,7 @@ func CompletedToolInvocationsFromContext(ctx context.Context) map[string][]byte 
 	return m
 }
 
-// WithPendingToolInvocations 将 Replay 得到的「已 started 无 finished」的 idempotency_key 集合放入 ctx（Activity Log Barrier），供 Tool 节点禁止再次执行
+// WithPendingToolInvocations 将 Replay 得到的「已 started 无 finished」的 idempotency_key 集合放入 ctx（Activity Log Barrier），供 Tool 节点forbidden再次执行
 func WithPendingToolInvocations(ctx context.Context, pending map[string]struct{}) context.Context {
 	return context.WithValue(ctx, thePendingToolInvocationsContextKey, pending)
 }

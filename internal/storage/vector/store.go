@@ -28,6 +28,6 @@ func NewStore(cfg config.VectorConfig) (Store, error) {
 	case "", "memory":
 		return NewMemoryStore(), nil
 	default:
-		return nil, fmt.Errorf("unsupported input向量存储类型: %s（当前支持: memory）", cfg.Type)
+		return nil, fmt.Errorf("unsupported input type向量存储类型: %s（当前支持: memory）", cfg.Type)
 	}
 }

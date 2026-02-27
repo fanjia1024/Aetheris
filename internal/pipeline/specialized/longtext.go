@@ -164,7 +164,7 @@ func (p *LongTextPipeline) normalizeInput(input interface{}) (content string, ba
 		return content, baseMeta, nil
 
 	default:
-		return "", nil, fmt.Errorf("unsupported input输入类型: %T，支持 *common.Document、string（路径）、[]byte", input)
+		return "", nil, fmt.Errorf("unsupported input type输入类型: %T，支持 *common.Document、string（路径）、[]byte", input)
 	}
 }
 

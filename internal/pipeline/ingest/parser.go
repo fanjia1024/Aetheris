@@ -80,7 +80,7 @@ func (p *DocumentParser) Validate(input interface{}) error {
 	}
 
 	if _, ok := input.(*common.Document); !ok {
-		return fmt.Errorf("unsupported input输入类型: %T", input)
+		return fmt.Errorf("unsupported input type输入类型: %T", input)
 	}
 
 	return nil
@@ -146,7 +146,7 @@ func (p *DocumentParser) selectParser(contentType string) (Parser, error) {
 		return parser, nil
 	}
 
-	return nil, fmt.Errorf("找不到合适的解析器: %s", contentType)
+	return nil, fmt.Errorf("cannot find合适的解析器: %s", contentType)
 }
 
 // AddParser 添加自定义解析器

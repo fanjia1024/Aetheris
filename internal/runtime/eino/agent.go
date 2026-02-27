@@ -45,7 +45,7 @@ type AgentConfig struct {
 func NewChatModelAgent(ctx context.Context, config *adk.ChatModelAgentConfig) (adk.Agent, error) {
 	agent, err := adk.NewChatModelAgent(ctx, config)
 	if err != nil {
-		return nil, fmt.Errorf("创建 ChatModelAgent failed: %w", err)
+		return nil, fmt.Errorf("create ChatModelAgent failed: %w", err)
 	}
 
 	return agent, nil
@@ -60,6 +60,6 @@ func CreateAgent(ctx context.Context, agentType string, config *AgentConfig) (ad
 
 		return NewChatModelAgent(ctx, chatModelConfig)
 	default:
-		return nil, fmt.Errorf("unsupported input Agent 类型: %s", agentType)
+		return nil, fmt.Errorf("unsupported input type Agent 类型: %s", agentType)
 	}
 }

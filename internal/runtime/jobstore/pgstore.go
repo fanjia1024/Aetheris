@@ -252,7 +252,7 @@ func (s *pgStore) Heartbeat(ctx context.Context, workerID string, jobID string) 
 	return nil
 }
 
-// GetCurrentAttemptID 返回该 job 当前持有租约的 attempt_id；无租约或已过期返回空字符串
+// GetCurrentAttemptID 返回该 job 当前持有租约的 attempt_id；无租约或已过期returned empty字符串
 func (s *pgStore) GetCurrentAttemptID(ctx context.Context, jobID string) (string, error) {
 	var attemptID string
 	err := s.pool.QueryRow(ctx, `SELECT attempt_id FROM job_claims WHERE job_id = $1 AND expires_at > now()`, jobID).Scan(&attemptID)

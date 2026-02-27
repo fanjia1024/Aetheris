@@ -118,7 +118,7 @@ func (i *DocumentIndexer) Validate(input interface{}) error {
 	}
 
 	if _, ok := input.(*common.Document); !ok {
-		return fmt.Errorf("unsupported input输入类型: %T", input)
+		return fmt.Errorf("unsupported input type输入类型: %T", input)
 	}
 
 	if i.einoIndexer == nil && i.vectorStore == nil {
@@ -218,7 +218,7 @@ func (i *DocumentIndexer) storeDocumentMetadata(ctx context.Context, doc *common
 		UpdatedAt: updatedAt,
 	}
 	if err := i.metadataStore.Create(ctx, documentRecord); err != nil {
-		return fmt.Errorf("创建文档记录failed: %w", err)
+		return fmt.Errorf("create document record failed: %w", err)
 	}
 	return nil
 }
@@ -239,7 +239,7 @@ func (i *DocumentIndexer) indexChunks(doc *common.Document) error {
 
 		batch := chunks[start:end]
 		if err := i.indexBatch(batch, doc.ID); err != nil {
-			return fmt.Errorf("索引批次failed: %w", err)
+			return fmt.Errorf("index batch failed: %w", err)
 		}
 	}
 
@@ -270,7 +270,7 @@ func (i *DocumentIndexer) indexBatch(chunks []common.Chunk, documentID string) e
 	}
 	ctx := context.Background()
 	if err := i.vectorStore.Add(ctx, indexName, vecs); err != nil {
-		return fmt.Errorf("索引向量failed: %w", err)
+		return fmt.Errorf("index vector failed: %w", err)
 	}
 	return nil
 }

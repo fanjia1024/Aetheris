@@ -64,7 +64,7 @@ func (e *DocumentEmbedding) Execute(ctx *common.PipelineContext, input interface
 	// 处理文档
 	embeddedDoc, err := e.ProcessDocument(doc)
 	if err != nil {
-		return nil, common.NewPipelineError(e.name, "向量化文档failed", err)
+		return nil, common.NewPipelineError(e.name, "vectorize document failed", err)
 	}
 
 	return embeddedDoc, nil
@@ -77,7 +77,7 @@ func (e *DocumentEmbedding) Validate(input interface{}) error {
 	}
 
 	if _, ok := input.(*common.Document); !ok {
-		return fmt.Errorf("unsupported input输入类型: %T", input)
+		return fmt.Errorf("unsupported input type输入类型: %T", input)
 	}
 
 	if e.embedder == nil {
@@ -134,7 +134,7 @@ func (e *DocumentEmbedding) embedChunks(doc *common.Document) error {
 				// 向量化：Embed(ctx, []string) ([][]float64, error)
 				vecs, err := e.embedder.Embed(context.Background(), []string{chunk.Content})
 				if err != nil {
-					errChan <- fmt.Errorf("向量化切片 %d failed: %w", idx, err)
+					errChan <- fmt.Errorf("vectorize chunk %d failed: %w", idx, err)
 					return
 				}
 				if len(vecs) > 0 {
@@ -172,7 +172,7 @@ func (e *DocumentEmbedding) embedDocument(doc *common.Document) error {
 	// 向量化文档内容
 	vecs, err := e.embedder.Embed(context.Background(), []string{doc.Content})
 	if err != nil {
-		return fmt.Errorf("向量化文档failed: %w", err)
+		return fmt.Errorf("vectorize document failed: %w", err)
 	}
 	if len(vecs) > 0 {
 		doc.Embedding = vecs[0]

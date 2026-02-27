@@ -42,7 +42,7 @@ type MemoryIndexerConfig struct {
 // NewMemoryIndexer 创建基于 vector.Store 的 Eino Indexer
 func NewMemoryIndexer(cfg *MemoryIndexerConfig) (*MemoryIndexer, error) {
 	if cfg == nil || cfg.VectorStore == nil {
-		return nil, fmt.Errorf("MemoryIndexer 需要 VectorStore")
+		return nil, fmt.Errorf("MemoryIndexer requires VectorStore")
 	}
 	batchSize := cfg.BatchSize
 	if batchSize <= 0 {
