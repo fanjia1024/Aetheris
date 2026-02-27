@@ -44,7 +44,7 @@ func GetLLM(name string) (llm.Client, error) {
 	defer registryMu.RUnlock()
 	c, ok := llmRegistry[name]
 	if !ok {
-		return nil, fmt.Errorf("LLM 未注册: %s", name)
+		return nil, fmt.Errorf("LLM not registered: %s", name)
 	}
 	return c, nil
 }
@@ -62,7 +62,7 @@ func GetEmbedding(name string) (*embedding.Embedder, error) {
 	defer registryMu.RUnlock()
 	e, ok := embeddingRegistry[name]
 	if !ok {
-		return nil, fmt.Errorf("Embedding 未注册: %s", name)
+		return nil, fmt.Errorf("Embedding not registered: %s", name)
 	}
 	return e, nil
 }
@@ -80,7 +80,7 @@ func GetVision(name string) (vision.Client, error) {
 	defer registryMu.RUnlock()
 	c, ok := visionRegistry[name]
 	if !ok {
-		return nil, fmt.Errorf("Vision 未注册: %s", name)
+		return nil, fmt.Errorf("Vision not registered: %s", name)
 	}
 	return c, nil
 }
