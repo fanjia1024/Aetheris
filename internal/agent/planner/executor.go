@@ -68,7 +68,7 @@ func (e *TaskGraphExecutor) executeNode(ctx context.Context, node TaskNode) Task
 	switch node.Type {
 	case NodeTool:
 		if e.Tools == nil {
-			out.Err = "ToolRunner 未配置"
+			out.Err = "ToolRunner not configured"
 			return out
 		}
 		input := node.Config
@@ -83,11 +83,11 @@ func (e *TaskGraphExecutor) executeNode(ctx context.Context, node TaskNode) Task
 			}
 			out.Output = output
 		} else {
-			out.Err = "节点缺少 tool_name"
+			out.Err = "node missing tool_name"
 		}
 	case NodeWorkflow:
 		if e.Workflow == nil {
-			out.Err = "WorkflowRunner 未配置"
+			out.Err = "WorkflowRunner not configured"
 			return out
 		}
 		params := node.Config
@@ -102,7 +102,7 @@ func (e *TaskGraphExecutor) executeNode(ctx context.Context, node TaskNode) Task
 		out.Output = fmt.Sprint(result)
 	case NodeLLM:
 		if e.LLM == nil {
-			out.Err = "LLMRunner 未配置"
+			out.Err = "LLMRunner not configured"
 			return out
 		}
 		prompt := ""
@@ -118,7 +118,7 @@ func (e *TaskGraphExecutor) executeNode(ctx context.Context, node TaskNode) Task
 		}
 		out.Output = text
 	default:
-		out.Err = "未知节点类型: " + node.Type
+		out.Err = "Unknown node type: " + node.Type
 	}
 	return out
 }

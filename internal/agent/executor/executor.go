@@ -44,11 +44,11 @@ func NewRegistryExecutor(reg *registry.Registry) *RegistryExecutor {
 // ExecuteStep 实现 Executor（忽略 session）
 func (e *RegistryExecutor) ExecuteStep(ctx context.Context, _ *session.Session, step planner.PlanStep) (tool.ToolResult, error) {
 	if e.reg == nil {
-		return tool.ToolResult{Err: "Registry 未配置"}, nil
+		return tool.ToolResult{Err: "Registry not configured"}, nil
 	}
 	t, ok := e.reg.Get(step.Tool)
 	if !ok {
-		return tool.ToolResult{Err: "未知工具: " + step.Tool}, nil
+		return tool.ToolResult{Err: "Unknown tool: " + step.Tool}, nil
 	}
 	input := step.Input
 	if input == nil {
@@ -71,14 +71,14 @@ func NewSessionRegistryExecutor(reg *tools.Registry) *SessionRegistryExecutor {
 // ExecuteStep 实现 Executor
 func (e *SessionRegistryExecutor) ExecuteStep(ctx context.Context, sess *session.Session, step planner.PlanStep) (tool.ToolResult, error) {
 	if e.reg == nil {
-		return tool.ToolResult{Err: "Registry 未配置"}, nil
+		return tool.ToolResult{Err: "Registry not configured"}, nil
 	}
 	if sess == nil {
-		return tool.ToolResult{Err: "Session 未提供"}, nil
+		return tool.ToolResult{Err: "Session not provided"}, nil
 	}
 	t, ok := e.reg.Get(step.Tool)
 	if !ok {
-		return tool.ToolResult{Err: "未知工具: " + step.Tool}, nil
+		return tool.ToolResult{Err: "Unknown tool: " + step.Tool}, nil
 	}
 	input := step.Input
 	if input == nil {

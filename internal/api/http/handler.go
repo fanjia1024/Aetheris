@@ -166,7 +166,7 @@ func (h *Handler) SetAgentStateStore(store agentruntime.AgentStateStore) {
 	h.agentStateStore = store
 }
 
-// SetAgentInstanceStore 设置 Agent Instance 存储；设置后 POST message 时若 Instance 不存在则 Create（design/agent-instance-model.md）
+// SetAgentInstanceStore 设置 Agent Instance 存储；设置后 POST message 时若 Instance not found则 Create（design/agent-instance-model.md）
 func (h *Handler) SetAgentInstanceStore(store instance.AgentInstanceStore) {
 	h.agentInstanceStore = store
 }
@@ -204,7 +204,7 @@ func (h *Handler) getJobAndCheckTenant(ctx context.Context, c *app.RequestContex
 	}
 	j, err := h.jobStore.Get(ctx, jobID)
 	if err != nil || j == nil {
-		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务not found"})
 		return nil, false
 	}
 	tid := auth.GetTenantID(ctx)
@@ -212,7 +212,7 @@ func (h *Handler) getJobAndCheckTenant(ctx context.Context, c *app.RequestContex
 		tid = "default"
 	}
 	if j.TenantID != tid {
-		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务not found"})
 		return nil, false
 	}
 	return j, true
@@ -335,7 +335,7 @@ func (h *Handler) UploadStatus(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	if status == "" {
-		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务not found"})
 		return
 	}
 	c.JSON(consts.StatusOK, map[string]interface{}{
@@ -371,7 +371,7 @@ func (h *Handler) GetDocument(ctx context.Context, c *app.RequestContext) {
 	document, err := h.docService.GetDocument(ctx, id)
 	if err != nil {
 		c.JSON(consts.StatusNotFound, map[string]string{
-			"error": "文档不存在",
+			"error": "文档not found",
 		})
 		return
 	}
@@ -717,7 +717,7 @@ type AgentResumeCheckpointRequest struct {
 func (h *Handler) AgentResumeCheckpoint(ctx context.Context, c *app.RequestContext) {
 	if h.adkRunner == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{
-			"error": "ADK Runner 未配置，无法 Resume",
+			"error": "ADK Runner not configured，无法 Resume",
 		})
 		return
 	}
@@ -778,13 +778,13 @@ func (h *Handler) AgentResumeCheckpoint(ctx context.Context, c *app.RequestConte
 func (h *Handler) AgentStream(ctx context.Context, c *app.RequestContext) {
 	if h.adkRunner == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{
-			"error": "ADK Runner 未配置",
+			"error": "ADK Runner not configured",
 		})
 		return
 	}
 	if h.sessionManager == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{
-			"error": "SessionManager 未配置",
+			"error": "SessionManager not configured",
 		})
 		return
 	}
@@ -828,7 +828,7 @@ func marshalJSON(ctx context.Context, v interface{}, scene string) ([]byte, erro
 func (h *Handler) AgentRun(ctx context.Context, c *app.RequestContext) {
 	if h.sessionManager == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{
-			"error": "SessionManager 未配置",
+			"error": "SessionManager not configured",
 		})
 		return
 	}
@@ -854,7 +854,7 @@ func (h *Handler) AgentRun(ctx context.Context, c *app.RequestContext) {
 	}
 	if h.agent == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{
-			"error": "Agent 未配置",
+			"error": "Agent not configured",
 		})
 		return
 	}
@@ -890,7 +890,7 @@ type CreateAgentRequest struct {
 func (h *Handler) CreateAgent(ctx context.Context, c *app.RequestContext) {
 	if h.agentManager == nil || h.agentCreator == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{
-			"error": "Agent Runtime 未配置",
+			"error": "Agent Runtime not configured",
 		})
 		return
 	}
@@ -925,7 +925,7 @@ type AgentMessageRequest struct {
 func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 	if h.agentManager == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{
-			"error": "Agent Runtime 未配置",
+			"error": "Agent Runtime not configured",
 		})
 		return
 	}
@@ -940,7 +940,7 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 	agent, err := h.agentManager.Get(ctx, id)
 	if err != nil || agent == nil {
 		c.JSON(consts.StatusNotFound, map[string]string{
-			"error": "Agent 不存在",
+			"error": "Agent not found",
 		})
 		return
 	}
@@ -1082,7 +1082,7 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 func (h *Handler) AgentState(ctx context.Context, c *app.RequestContext) {
 	if h.agentManager == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{
-			"error": "Agent Runtime 未配置",
+			"error": "Agent Runtime not configured",
 		})
 		return
 	}
@@ -1090,7 +1090,7 @@ func (h *Handler) AgentState(ctx context.Context, c *app.RequestContext) {
 	agent, err := h.agentManager.Get(ctx, id)
 	if err != nil || agent == nil {
 		c.JSON(consts.StatusNotFound, map[string]string{
-			"error": "Agent 不存在",
+			"error": "Agent not found",
 		})
 		return
 	}
@@ -1108,7 +1108,7 @@ func (h *Handler) AgentState(ctx context.Context, c *app.RequestContext) {
 func (h *Handler) AgentResume(ctx context.Context, c *app.RequestContext) {
 	if h.agentManager == nil || h.agentScheduler == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{
-			"error": "Agent Runtime 未配置",
+			"error": "Agent Runtime not configured",
 		})
 		return
 	}
@@ -1116,7 +1116,7 @@ func (h *Handler) AgentResume(ctx context.Context, c *app.RequestContext) {
 	agent, _ := h.agentManager.Get(ctx, id)
 	if agent == nil {
 		c.JSON(consts.StatusNotFound, map[string]string{
-			"error": "Agent 不存在",
+			"error": "Agent not found",
 		})
 		return
 	}
@@ -1131,7 +1131,7 @@ func (h *Handler) AgentResume(ctx context.Context, c *app.RequestContext) {
 func (h *Handler) AgentStop(ctx context.Context, c *app.RequestContext) {
 	if h.agentManager == nil || h.agentScheduler == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{
-			"error": "Agent Runtime 未配置",
+			"error": "Agent Runtime not configured",
 		})
 		return
 	}
@@ -1139,7 +1139,7 @@ func (h *Handler) AgentStop(ctx context.Context, c *app.RequestContext) {
 	agent, _ := h.agentManager.Get(ctx, id)
 	if agent == nil {
 		c.JSON(consts.StatusNotFound, map[string]string{
-			"error": "Agent 不存在",
+			"error": "Agent not found",
 		})
 		return
 	}
@@ -1154,7 +1154,7 @@ func (h *Handler) AgentStop(ctx context.Context, c *app.RequestContext) {
 func (h *Handler) ListAgentJobs(ctx context.Context, c *app.RequestContext) {
 	if h.agentManager == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{
-			"error": "Agent Runtime 未配置",
+			"error": "Agent Runtime not configured",
 		})
 		return
 	}
@@ -1166,7 +1166,7 @@ func (h *Handler) ListAgentJobs(ctx context.Context, c *app.RequestContext) {
 	}
 	id := c.Param("id")
 	if _, err := h.agentManager.Get(ctx, id); err != nil {
-		c.JSON(consts.StatusNotFound, map[string]string{"error": "Agent 不存在"})
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}
 	tenantID := auth.GetTenantID(ctx)
@@ -1226,11 +1226,11 @@ func (h *Handler) GetAgentJob(ctx context.Context, c *app.RequestContext) {
 	jobID := c.Param("job_id")
 	j, err := h.jobStore.Get(ctx, jobID)
 	if err != nil || j == nil {
-		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务not found"})
 		return
 	}
 	if j.AgentID != id {
-		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务not found"})
 		return
 	}
 	tid := auth.GetTenantID(ctx)
@@ -1238,7 +1238,7 @@ func (h *Handler) GetAgentJob(ctx context.Context, c *app.RequestContext) {
 		tid = "default"
 	}
 	if j.TenantID != tid {
-		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务不存在"})
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "任务not found"})
 		return
 	}
 	c.JSON(consts.StatusOK, map[string]interface{}{
@@ -1257,7 +1257,7 @@ func (h *Handler) GetAgentJob(ctx context.Context, c *app.RequestContext) {
 func (h *Handler) ListAgents(ctx context.Context, c *app.RequestContext) {
 	if h.agentManager == nil {
 		c.JSON(consts.StatusServiceUnavailable, map[string]string{
-			"error": "Agent Runtime 未配置",
+			"error": "Agent Runtime not configured",
 		})
 		return
 	}
@@ -2308,7 +2308,7 @@ func (h *Handler) GetObservabilityStuck(ctx context.Context, c *app.RequestConte
 // ListTools 返回所有工具的 Manifest 列表（GET /api/tools）
 func (h *Handler) ListTools(ctx context.Context, c *app.RequestContext) {
 	if h.toolsRegistry == nil {
-		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "工具注册表未配置"})
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "工具注册表not configured"})
 		return
 	}
 	manifests := h.toolsRegistry.Manifests()
@@ -2321,13 +2321,13 @@ func (h *Handler) ListTools(ctx context.Context, c *app.RequestContext) {
 // GetTool 返回指定名称工具的 Manifest（GET /api/tools/:name）
 func (h *Handler) GetTool(ctx context.Context, c *app.RequestContext) {
 	if h.toolsRegistry == nil {
-		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "工具注册表未配置"})
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{"error": "工具注册表not configured"})
 		return
 	}
 	name := c.Param("name")
 	m := h.toolsRegistry.Manifest(name)
 	if m == nil {
-		c.JSON(consts.StatusNotFound, map[string]string{"error": "工具不存在"})
+		c.JSON(consts.StatusNotFound, map[string]string{"error": "工具not found"})
 		return
 	}
 	c.JSON(consts.StatusOK, m)

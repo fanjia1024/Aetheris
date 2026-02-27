@@ -38,7 +38,7 @@ func NewIngestQueuePg(pool *pgxpool.Pool) IngestQueue {
 // Enqueue 实现 IngestQueue
 func (q *ingestQueuePg) Enqueue(ctx context.Context, payload map[string]interface{}) (taskID string, err error) {
 	if payload == nil {
-		return "", errors.New("payload 不能为空")
+		return "", errors.New("payload is required")
 	}
 	taskID = uuid.New().String()
 	payloadJSON, err := json.Marshal(payload)

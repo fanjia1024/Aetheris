@@ -34,15 +34,15 @@ func NewLLMClientFromConfig(cfg *config.Config) (llm.Client, error) {
 	}
 	pc, ok := cfg.Model.LLM.Providers[provider]
 	if !ok {
-		return nil, fmt.Errorf("LLM provider %q 未配置", provider)
+		return nil, fmt.Errorf("LLM provider %q not configured", provider)
 	}
 	mi, ok := pc.Models[modelKey]
 	if !ok {
-		return nil, fmt.Errorf("LLM model %q 未在 provider %q 中配置", modelKey, provider)
+		return nil, fmt.Errorf("LLM model %q not configured in provider %q", modelKey, provider)
 	}
 	apiKey := pc.APIKey
 	if apiKey == "" {
-		return nil, fmt.Errorf("LLM provider %q 的 api_key 未配置", provider)
+		return nil, fmt.Errorf("LLM provider %q api_key not configured", provider)
 	}
 	baseURL := pc.BaseURL
 	return llm.NewClient(provider, mi.Name, apiKey, baseURL)
@@ -59,11 +59,11 @@ func NewQueryEmbedderFromConfig(cfg *config.Config) (*embedding.Embedder, error)
 	}
 	pc, ok := cfg.Model.Embedding.Providers[provider]
 	if !ok {
-		return nil, fmt.Errorf("Embedding provider %q 未配置", provider)
+		return nil, fmt.Errorf("Embedding provider %q not configured", provider)
 	}
 	mi, ok := pc.Models[modelKey]
 	if !ok {
-		return nil, fmt.Errorf("Embedding model %q 未在 provider %q 中配置", modelKey, provider)
+		return nil, fmt.Errorf("Embedding model %q not configured in provider %q", modelKey, provider)
 	}
 	dimension := mi.Dimension
 	if dimension <= 0 {

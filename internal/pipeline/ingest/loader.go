@@ -89,12 +89,12 @@ func (l *DocumentLoader) Validate(input interface{}) error {
 	case string:
 		// 检查文件是否存在
 		if _, err := os.Stat(v); os.IsNotExist(err) {
-			return fmt.Errorf("文件不存在: %s", v)
+			return fmt.Errorf("file not found: %s", v)
 		}
 	case *multipart.FileHeader:
 		// 检查文件大小
 		if v.Size > l.maxSize {
-			return fmt.Errorf("文件大小超过限制: %d > %d", v.Size, l.maxSize)
+			return fmt.Errorf("file size exceeds limit: %d > %d", v.Size, l.maxSize)
 		}
 	case []byte:
 		// 检查字节大小

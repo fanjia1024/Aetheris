@@ -229,7 +229,7 @@ func resolveLLMModelInfo(ctx context.Context, llm LLMGen) LLMModelInfo {
 // ToDAGNode 实现 NodeAdapter
 func (a *LLMNodeAdapter) ToDAGNode(task *planner.TaskNode, agent *runtime.Agent) (*compose.Lambda, error) {
 	if a.LLM == nil {
-		return nil, fmt.Errorf("LLMNodeAdapter: LLM 未配置")
+		return nil, fmt.Errorf("LLMNodeAdapter: LLM not configured")
 	}
 	taskID, cfg := task.ID, task.Config
 	return compose.InvokableLambda[*AgentDAGPayload, *AgentDAGPayload](func(ctx context.Context, p *AgentDAGPayload) (*AgentDAGPayload, error) {
@@ -240,7 +240,7 @@ func (a *LLMNodeAdapter) ToDAGNode(task *planner.TaskNode, agent *runtime.Agent)
 // ToNodeRunner 实现 NodeAdapter
 func (a *LLMNodeAdapter) ToNodeRunner(task *planner.TaskNode, agent *runtime.Agent) (NodeRunner, error) {
 	if a.LLM == nil {
-		return nil, fmt.Errorf("LLMNodeAdapter: LLM 未配置")
+		return nil, fmt.Errorf("LLMNodeAdapter: LLM not configured")
 	}
 	taskID, cfg := task.ID, task.Config
 	return func(ctx context.Context, p *AgentDAGPayload) (*AgentDAGPayload, error) {
@@ -754,7 +754,7 @@ func (a *ToolNodeAdapter) runNodeExecute(ctx context.Context, jobID, taskID, too
 // ToDAGNode 实现 NodeAdapter
 func (a *ToolNodeAdapter) ToDAGNode(task *planner.TaskNode, agent *runtime.Agent) (*compose.Lambda, error) {
 	if a.Tools == nil {
-		return nil, fmt.Errorf("ToolNodeAdapter: Tools 未配置")
+		return nil, fmt.Errorf("ToolNodeAdapter: Tools not configured")
 	}
 	if task.ToolName == "" {
 		return nil, fmt.Errorf("ToolNodeAdapter: 节点 %s 缺少 tool_name", task.ID)
@@ -771,7 +771,7 @@ func (a *ToolNodeAdapter) ToDAGNode(task *planner.TaskNode, agent *runtime.Agent
 // ToNodeRunner 实现 NodeAdapter
 func (a *ToolNodeAdapter) ToNodeRunner(task *planner.TaskNode, agent *runtime.Agent) (NodeRunner, error) {
 	if a.Tools == nil {
-		return nil, fmt.Errorf("ToolNodeAdapter: Tools 未配置")
+		return nil, fmt.Errorf("ToolNodeAdapter: Tools not configured")
 	}
 	if task.ToolName == "" {
 		return nil, fmt.Errorf("ToolNodeAdapter: 节点 %s 缺少 tool_name", task.ID)
@@ -822,7 +822,7 @@ func (a *WorkflowNodeAdapter) runNode(ctx context.Context, taskID, name string, 
 // ToDAGNode 实现 NodeAdapter
 func (a *WorkflowNodeAdapter) ToDAGNode(task *planner.TaskNode, agent *runtime.Agent) (*compose.Lambda, error) {
 	if a.Workflow == nil {
-		return nil, fmt.Errorf("WorkflowNodeAdapter: Workflow 未配置")
+		return nil, fmt.Errorf("WorkflowNodeAdapter: Workflow not configured")
 	}
 	if task.Workflow == "" {
 		return nil, fmt.Errorf("WorkflowNodeAdapter: 节点 %s 缺少 workflow", task.ID)
@@ -839,7 +839,7 @@ func (a *WorkflowNodeAdapter) ToDAGNode(task *planner.TaskNode, agent *runtime.A
 // ToNodeRunner 实现 NodeAdapter
 func (a *WorkflowNodeAdapter) ToNodeRunner(task *planner.TaskNode, agent *runtime.Agent) (NodeRunner, error) {
 	if a.Workflow == nil {
-		return nil, fmt.Errorf("WorkflowNodeAdapter: Workflow 未配置")
+		return nil, fmt.Errorf("WorkflowNodeAdapter: Workflow not configured")
 	}
 	if task.Workflow == "" {
 		return nil, fmt.Errorf("WorkflowNodeAdapter: 节点 %s 缺少 workflow", task.ID)

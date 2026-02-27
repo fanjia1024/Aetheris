@@ -261,7 +261,7 @@ func (e *queryWorkflowExecutor) Execute(ctx context.Context, params map[string]i
 	}
 
 	if len(q.Embedding) == 0 {
-		return nil, fmt.Errorf("query 无向量且未配置 queryEmbedder，无法检索")
+		return nil, fmt.Errorf("query has no embedding and queryEmbedder not configured, cannot retrieve")
 	}
 
 	// 可选：设置 retriever topK

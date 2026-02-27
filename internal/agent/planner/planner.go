@@ -83,7 +83,7 @@ func (p *LLMPlanner) Plan(ctx context.Context, query string, toolsSchemaJSON []b
 		return &PlanResult{
 			Steps:       nil,
 			Next:        "finish",
-			FinalAnswer: "Planner 未配置 LLM，无法生成计划。",
+			FinalAnswer: "Planner LLM not configured, cannot generate plan.",
 		}, nil
 	}
 	toolsDesc := string(toolsSchemaJSON)
@@ -129,7 +129,7 @@ func (p *LLMPlanner) Plan(ctx context.Context, query string, toolsSchemaJSON []b
 // Next 实现 Planner：基于 session 的对话与工具结果做单步决策
 func (p *LLMPlanner) Next(ctx context.Context, sess *session.Session, userQuery string, toolsSchemaJSON []byte) (*Step, error) {
 	if p.client == nil {
-		return &Step{Final: "Planner 未配置 LLM。"}, nil
+		return &Step{Final: "Planner LLM not configured."}, nil
 	}
 	toolsDesc := string(toolsSchemaJSON)
 	if toolsDesc == "" {

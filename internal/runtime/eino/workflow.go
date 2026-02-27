@@ -68,7 +68,7 @@ func (w *Workflow) AddNode(name, nodeType string, config *NodeConfig) error {
 	case "validate":
 		w.graph.AddLambdaNode(name, compose.InvokableLambda(func(ctx context.Context, input *Input) (*Output, error) {
 			if input.Query == "" {
-				return nil, fmt.Errorf("查询不能为空")
+				return nil, fmt.Errorf("query is required")
 			}
 			return &Output{Result: input.Query}, nil
 		}))

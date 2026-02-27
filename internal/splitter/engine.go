@@ -73,7 +73,7 @@ func (e *Engine) AddSplitter(name string, splitter Splitter) {
 func (e *Engine) GetSplitter(name string) (Splitter, error) {
 	splitter, exists := e.splitters[name]
 	if !exists {
-		return nil, fmt.Errorf("切片器不存在: %s", name)
+		return nil, fmt.Errorf("splitter not found: %s", name)
 	}
 	return splitter, nil
 }
@@ -89,7 +89,7 @@ func (e *Engine) Split(content string, splitterName string, options map[string]i
 	// 执行切片
 	chunks, err := splitter.Split(content, options)
 	if err != nil {
-		return nil, fmt.Errorf("执行切片失败: %w", err)
+		return nil, fmt.Errorf("split failed: %w", err)
 	}
 
 	return chunks, nil

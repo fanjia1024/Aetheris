@@ -42,19 +42,19 @@ func (r *Responder) Name() string {
 func (r *Responder) Execute(ctx *common.PipelineContext, input interface{}) (interface{}, error) {
 	// 验证输入
 	if err := r.Validate(input); err != nil {
-		return nil, common.NewPipelineError(r.name, "输入验证失败", err)
+		return nil, common.NewPipelineError(r.name, "input validation failed", err)
 	}
 
 	// 生成响应
 	generationResult, ok := input.(*common.GenerationResult)
 	if !ok {
-		return nil, common.NewPipelineError(r.name, "输入类型错误", fmt.Errorf("expected *common.GenerationResult, got %T", input))
+		return nil, common.NewPipelineError(r.name, "input type error", fmt.Errorf("expected *common.GenerationResult, got %T", input))
 	}
 
 	// 处理响应
 	response, err := r.buildResponse(generationResult)
 	if err != nil {
-		return nil, common.NewPipelineError(r.name, "构建响应失败", err)
+		return nil, common.NewPipelineError(r.name, "build response failed", err)
 	}
 
 	return response, nil

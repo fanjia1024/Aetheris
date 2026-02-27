@@ -518,10 +518,10 @@ func (r *Runner) runParallelLevel(
 // Run 执行单轮：通过 Agent 的 Planner 得到 TaskGraph，编译为 DAG 并执行
 func (r *Runner) Run(ctx context.Context, agent *runtime.Agent, goal string) error {
 	if agent == nil {
-		return fmt.Errorf("executor: agent 为空")
+		return fmt.Errorf("executor: agent is nil")
 	}
 	if agent.Planner == nil {
-		return fmt.Errorf("executor: agent.Planner 未配置")
+		return fmt.Errorf("executor: agent.Planner not configured")
 	}
 	agent.SetStatus(runtime.StatusRunning)
 	defer func() {

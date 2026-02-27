@@ -34,7 +34,7 @@ type llmGenAdapter struct {
 
 func (a *llmGenAdapter) Generate(ctx context.Context, prompt string) (string, error) {
 	if a.client == nil {
-		return "", fmt.Errorf("LLM 未配置")
+		return "", fmt.Errorf("LLM not configured")
 	}
 	return a.client.GenerateWithContext(ctx, prompt, llm.GenerateOptions{MaxTokens: 4096, Temperature: 0.1})
 }
@@ -46,7 +46,7 @@ type toolExecAdapter struct {
 
 func (a *toolExecAdapter) Execute(ctx context.Context, toolName string, input map[string]any, state interface{}) (agentexec.ToolResult, error) {
 	if a.reg == nil {
-		return agentexec.ToolResult{}, fmt.Errorf("Tools 未配置")
+		return agentexec.ToolResult{}, fmt.Errorf("Tools not configured")
 	}
 	agent := agentexec.AgentFromContext(ctx)
 	var sess *runtimesession.Session
@@ -90,7 +90,7 @@ type workflowExecAdapter struct {
 
 func (a *workflowExecAdapter) ExecuteWorkflow(ctx context.Context, name string, params map[string]any) (interface{}, error) {
 	if a.engine == nil {
-		return nil, fmt.Errorf("Workflow 引擎未配置")
+		return nil, fmt.Errorf("Workflow engine not configured")
 	}
 	pm := make(map[string]interface{}, len(params))
 	for k, v := range params {

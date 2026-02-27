@@ -122,7 +122,7 @@ func (e *Engine) ensureRunner(agentID string) (*adk.Runner, error) {
 	case "ingest_agent":
 		runner, err = e.createIngestRunner(ctx)
 	default:
-		return nil, fmt.Errorf("Runner %s 不存在", agentID)
+		return nil, fmt.Errorf("Runner %s not found", agentID)
 	}
 	if err != nil {
 		return nil, err
@@ -201,14 +201,14 @@ func (e *Engine) createChatModel(ctx context.Context) (*openai.ChatModel, error)
 	}
 	pc, ok := e.config.Model.LLM.Providers[provider]
 	if !ok {
-		return nil, fmt.Errorf("LLM provider %q 未配置", provider)
+		return nil, fmt.Errorf("LLM provider %q not configured", provider)
 	}
 	mi, ok := pc.Models[modelKey]
 	if !ok {
-		return nil, fmt.Errorf("LLM model %q 未在 provider %q 中配置", modelKey, provider)
+		return nil, fmt.Errorf("LLM model %q not configured in provider %q", modelKey, provider)
 	}
 	if pc.APIKey == "" {
-		return nil, fmt.Errorf("LLM provider %q 的 api_key 未配置", provider)
+		return nil, fmt.Errorf("LLM provider %q api_key not configured", provider)
 	}
 
 	chatModel, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
@@ -323,7 +323,7 @@ func (e *Engine) RegisterWorkflow(name string, wf WorkflowExecutor) error {
 	defer e.workflowsMu.Unlock()
 
 	if name == "" {
-		return fmt.Errorf("workflow name 不能为空")
+		return fmt.Errorf("workflow name is required")
 	}
 	e.workflows[name] = wf
 	e.logger.Info("Workflow 注册成功", "name", name)
@@ -337,7 +337,7 @@ func (e *Engine) ExecuteWorkflow(ctx context.Context, name string, params map[st
 	e.workflowsMu.RUnlock()
 
 	if !exists || wf == nil {
-		return nil, fmt.Errorf("workflow 不存在: %s", name)
+		return nil, fmt.Errorf("workflow not found: %s", name)
 	}
 	return wf.Execute(ctx, params)
 }

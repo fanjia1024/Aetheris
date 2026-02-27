@@ -21,23 +21,23 @@ import (
 
 // 定义 Pipeline 相关错误
 var (
-	ErrInvalidInput     = errors.New("无效的输入")
-	ErrDocumentNotFound = errors.New("文档不存在")
-	ErrChunkNotFound    = errors.New("切片不存在")
-	ErrQueryFailed      = errors.New("查询失败")
-	ErrRetrievalFailed  = errors.New("检索失败")
-	ErrGenerationFailed = errors.New("生成失败")
-	ErrEmbeddingFailed  = errors.New("向量化失败")
-	ErrIndexingFailed   = errors.New("索引失败")
-	ErrSplittingFailed  = errors.New("切片失败")
-	ErrParsingFailed    = errors.New("解析失败")
-	ErrLoadingFailed    = errors.New("加载失败")
-	ErrValidationFailed = errors.New("验证失败")
-	ErrTimeout          = errors.New("超时")
-	ErrRateLimit        = errors.New("速率限制")
-	ErrUnauthorized     = errors.New("未授权")
-	ErrForbidden        = errors.New("禁止访问")
-	ErrInternal         = errors.New("内部错误")
+	ErrInvalidInput     = errors.New("invalid input")
+	ErrDocumentNotFound = errors.New("document not found")
+	ErrChunkNotFound    = errors.New("chunk not found")
+	ErrQueryFailed      = errors.New("query failed")
+	ErrRetrievalFailed  = errors.New("retrieval failed")
+	ErrGenerationFailed = errors.New("generation failed")
+	ErrEmbeddingFailed  = errors.New("embedding failed")
+	ErrIndexingFailed   = errors.New("indexing failed")
+	ErrSplittingFailed  = errors.New("splitting failed")
+	ErrParsingFailed    = errors.New("parsing failed")
+	ErrLoadingFailed    = errors.New("loading failed")
+	ErrValidationFailed = errors.New("validation failed")
+	ErrTimeout          = errors.New("timeout")
+	ErrRateLimit        = errors.New("rate limit")
+	ErrUnauthorized     = errors.New("unauthorized")
+	ErrForbidden        = errors.New("forbidden")
+	ErrInternal         = errors.New("internal error")
 )
 
 // PipelineError Pipeline 错误结构体
@@ -50,9 +50,9 @@ type PipelineError struct {
 // Error 实现 error 接口
 func (e *PipelineError) Error() string {
 	if e.Err != nil {
-		return fmt.Sprintf("[Pipeline] %s 阶段错误: %s: %v", e.Stage, e.Message, e.Err)
+		return fmt.Sprintf("[Pipeline] %s stage error: %s: %v", e.Stage, e.Message, e.Err)
 	}
-	return fmt.Sprintf("[Pipeline] %s 阶段错误: %s", e.Stage, e.Message)
+	return fmt.Sprintf("[Pipeline] %s stage error: %s", e.Stage, e.Message)
 }
 
 // Unwrap 实现 errors.Unwrap 接口
@@ -92,7 +92,7 @@ type ValidationError struct {
 
 // Error 实现 error 接口
 func (e *ValidationError) Error() string {
-	return fmt.Sprintf("验证错误: %s: %s", e.Field, e.Message)
+	return fmt.Sprintf("validation error: %s: %s", e.Field, e.Message)
 }
 
 // NewValidationError 创建新的验证错误

@@ -80,7 +80,7 @@ type LangGraphNodeAdapter struct {
 
 func (a *LangGraphNodeAdapter) runNode(ctx context.Context, taskID string, cfg map[string]any, p *AgentDAGPayload) (*AgentDAGPayload, error) {
 	if a.Client == nil {
-		return nil, fmt.Errorf("LangGraphNodeAdapter: Client 未配置")
+		return nil, fmt.Errorf("LangGraphNodeAdapter: Client not configured")
 	}
 	if p == nil {
 		p = &AgentDAGPayload{}
