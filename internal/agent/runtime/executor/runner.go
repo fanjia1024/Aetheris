@@ -536,7 +536,7 @@ func (r *Runner) Run(ctx context.Context, agent *runtime.Agent, goal string) err
 	taskGraph, ok := planOut.(*planner.TaskGraph)
 	if !ok || taskGraph == nil {
 		agent.SetStatus(runtime.StatusFailed)
-		return fmt.Errorf("executor: Planner 未返回 *TaskGraph")
+		return fmt.Errorf("executor: Planner did not return *TaskGraph")
 	}
 
 	graph, err := r.compiler.Compile(ctx, taskGraph, agent)

@@ -118,15 +118,15 @@ func (i *DocumentIndexer) Validate(input interface{}) error {
 	}
 
 	if _, ok := input.(*common.Document); !ok {
-		return fmt.Errorf("不支持的输入类型: %T", input)
+		return fmt.Errorf("unsupported input输入类型: %T", input)
 	}
 
 	if i.einoIndexer == nil && i.vectorStore == nil {
-		return fmt.Errorf("未初始化向量存储或 Eino Indexer")
+		return fmt.Errorf("not initialized向量存储或 Eino Indexer")
 	}
 
 	if i.metadataStore == nil {
-		return fmt.Errorf("未初始化元数据存储")
+		return fmt.Errorf("not initialized元数据存储")
 	}
 
 	return nil

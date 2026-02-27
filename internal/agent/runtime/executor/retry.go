@@ -20,17 +20,17 @@ import (
 	"time"
 )
 
-// RetryPolicy Tool 或节点级重试策略（2.0 Tool Contract）；可选配置，Runner/Adapter 失败时按此重试。
+// RetryPolicy Tool 或节点级重试策略（2.0 Tool Contract）；可选配置，Runner/Adapter failed时按此重试。
 type RetryPolicy struct {
 	// MaxRetries 最大重试次数（不含首次）
 	MaxRetries int
 	// Backoff 退避时间（固定或首次退避；后续可乘性递增由实现决定）
 	Backoff time.Duration
-	// RetryableErrors 可重试错误类型或消息子串匹配；空表示按 Step 失败类型（如 retryable_failure）决定
+	// RetryableErrors 可重试错误类型或消息子串匹配；空表示按 Step failed类型（如 retryable_failure）决定
 	RetryableErrors []string
 }
 
-// IsRetryable 判断错误是否可按 policy 重试；Adapter 在 Tool 执行失败时据此决定是否重试。
+// IsRetryable 判断错误是否可按 policy 重试；Adapter 在 Tool 执行failed时据此决定是否重试。
 func IsRetryable(err error, policy *RetryPolicy) bool {
 	if policy == nil || err == nil {
 		return false

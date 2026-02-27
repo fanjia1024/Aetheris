@@ -24,8 +24,8 @@ type IngestQueue interface {
 	ClaimOne(ctx context.Context, workerID string) (taskID string, payload map[string]interface{}, err error)
 	// MarkCompleted 标记任务完成
 	MarkCompleted(ctx context.Context, taskID string, result interface{}) error
-	// MarkFailed 标记任务失败
+	// MarkFailed 标记任务failed
 	MarkFailed(ctx context.Context, taskID string, errMsg string) error
-	// GetStatus 查询任务状态（供 API 状态查询）；返回 status, result, errMsg, completedAt；不存在返回 nil
+	// GetStatus 查询任务状态（供 API 状态查询）；返回 status, result, errMsg, completedAt；not found返回 nil
 	GetStatus(ctx context.Context, taskID string) (status string, result interface{}, errMsg string, completedAt interface{}, err error)
 }

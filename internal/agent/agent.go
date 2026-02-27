@@ -100,7 +100,7 @@ func (a *Agent) runInternal(ctx context.Context, sessionID string, userQuery str
 	}
 	schemas, err := a.schemaProvider.SchemasForLLM()
 	if err != nil {
-		return nil, fmt.Errorf("获取工具 Schema 失败: %w", err)
+		return nil, fmt.Errorf("获取工具 Schema failed: %w", err)
 	}
 	// 若无 Session 则创建临时 Session 并灌入 history
 	if sess == nil {
@@ -115,7 +115,7 @@ func (a *Agent) runInternal(ctx context.Context, sessionID string, userQuery str
 	for totalSteps < a.maxSteps {
 		step, err := a.planner.Next(ctx, sess, userQuery, schemas)
 		if err != nil {
-			return nil, fmt.Errorf("Planner Next 失败: %w", err)
+			return nil, fmt.Errorf("Planner Next failed: %w", err)
 		}
 		if step.Final != "" {
 			return &RunResult{Answer: step.Final, Steps: totalSteps, Duration: time.Since(start)}, nil

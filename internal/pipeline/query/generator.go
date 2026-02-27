@@ -89,7 +89,7 @@ func (g *Generator) Validate(input interface{}) error {
 
 	inputData, ok := input.(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("不支持的输入类型: %T", input)
+		return fmt.Errorf("unsupported input输入类型: %T", input)
 	}
 
 	if _, ok := inputData["query"].(*common.Query); !ok {
@@ -101,7 +101,7 @@ func (g *Generator) Validate(input interface{}) error {
 	}
 
 	if g.llmClient == nil {
-		return fmt.Errorf("未初始化 LLM 客户端")
+		return fmt.Errorf("not initialized LLM 客户端")
 	}
 
 	return nil

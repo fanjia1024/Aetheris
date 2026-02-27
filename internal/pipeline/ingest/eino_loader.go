@@ -44,9 +44,9 @@ func (u *URIDocumentLoader) Load(ctx context.Context, src einodoc.Source, opts .
 	if pathOrURI == "" {
 		return nil, fmt.Errorf("Source.URI 为空")
 	}
-	// 暂不支持 HTTP(S) URL
+	// 暂unsupported HTTP(S) URL
 	if strings.HasPrefix(strings.ToLower(pathOrURI), "http://") || strings.HasPrefix(strings.ToLower(pathOrURI), "https://") {
-		return nil, fmt.Errorf("暂不支持 HTTP(S) URL 加载，仅支持本地文件路径或 file://")
+		return nil, fmt.Errorf("暂unsupported HTTP(S) URL 加载，仅支持本地文件路径或 file://")
 	}
 	// file:// 前缀去掉得到本地路径（保留首字符以支持 /abs/path 或 Windows C:/）
 	path := pathOrURI
@@ -61,7 +61,7 @@ func (u *URIDocumentLoader) Load(ctx context.Context, src einodoc.Source, opts .
 	}
 	doc, ok := out.(*common.Document)
 	if !ok {
-		return nil, fmt.Errorf("loader 未返回 *common.Document，得到 %T", out)
+		return nil, fmt.Errorf("loader did not return *common.Document，得到 %T", out)
 	}
 	sd := CommonDocumentToSchema(doc, src.URI)
 	if sd == nil {

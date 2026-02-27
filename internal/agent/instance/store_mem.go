@@ -31,7 +31,7 @@ func NewStoreMem() *StoreMem {
 	return &StoreMem{byID: make(map[string]*AgentInstance)}
 }
 
-// Get 按 agentID 查询；不存在返回 nil, nil
+// Get 按 agentID 查询；not found返回 nil, nil
 func (s *StoreMem) Get(ctx context.Context, agentID string) (*AgentInstance, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

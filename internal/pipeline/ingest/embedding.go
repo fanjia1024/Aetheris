@@ -77,11 +77,11 @@ func (e *DocumentEmbedding) Validate(input interface{}) error {
 	}
 
 	if _, ok := input.(*common.Document); !ok {
-		return fmt.Errorf("不支持的输入类型: %T", input)
+		return fmt.Errorf("unsupported input输入类型: %T", input)
 	}
 
 	if e.embedder == nil {
-		return fmt.Errorf("未初始化嵌入器")
+		return fmt.Errorf("not initialized嵌入器")
 	}
 
 	return nil

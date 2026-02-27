@@ -102,7 +102,7 @@ func (e *SessionRegistryExecutor) ExecuteStep(ctx context.Context, sess *session
 	return tool.ToolResult{Content: content}, nil
 }
 
-// normalizeInput 将 map 中 JSON 反序列化得到的 float64 转为 int 等，避免工具层类型断言失败
+// normalizeInput 将 map 中 JSON 反序列化得到的 float64 转为 int 等，避免工具层类型断言failed
 func normalizeInput(m map[string]any) {
 	for k, v := range m {
 		if f, ok := v.(float64); ok && f == float64(int(f)) {

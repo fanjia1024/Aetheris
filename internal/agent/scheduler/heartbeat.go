@@ -30,7 +30,7 @@ type HeartbeatRunner struct {
 type HeartbeatRunnerConfig struct {
 	// Interval 心跳间隔；应小于租约 TTL（如 TTL/2）
 	Interval time.Duration
-	// OnError 心跳失败时的回调（如打日志）；可选
+	// OnError 心跳failed时的回调（如打日志）；可选
 	OnError func(jobID string, err error)
 }
 

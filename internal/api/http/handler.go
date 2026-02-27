@@ -590,7 +590,7 @@ func (h *Handler) SystemWorkers(ctx context.Context, c *app.RequestContext) {
 	}
 	wl, ok := h.jobEventStore.(workersLister)
 	if !ok {
-		c.JSON(consts.StatusOK, map[string]interface{}{"workers": []string{}, "total": 0, "message": "事件存储不支持列出 Worker"})
+		c.JSON(consts.StatusOK, map[string]interface{}{"workers": []string{}, "total": 0, "message": "事件存储unsupported列出 Worker"})
 		return
 	}
 	ids, err := wl.ListActiveWorkerIDs(ctx)

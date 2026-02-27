@@ -159,7 +159,7 @@ func (c *Compiler) CompileSteppable(ctx context.Context, g *planner.TaskGraph, a
 		}
 		run, err := adapter.ToNodeRunner(node, agent)
 		if err != nil {
-			return nil, fmt.Errorf("executor: 节点 %s ToNodeRunner 失败: %w", id, err)
+			return nil, fmt.Errorf("executor: 节点 %s ToNodeRunner failed: %w", id, err)
 		}
 		steps = append(steps, SteppableStep{NodeID: id, NodeType: node.Type, Run: run})
 	}

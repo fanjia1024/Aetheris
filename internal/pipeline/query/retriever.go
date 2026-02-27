@@ -88,11 +88,11 @@ func (r *Retriever) Validate(input interface{}) error {
 	}
 
 	if _, ok := input.(*common.Query); !ok {
-		return fmt.Errorf("不支持的输入类型: %T", input)
+		return fmt.Errorf("unsupported input输入类型: %T", input)
 	}
 
 	if r.vectorStore == nil {
-		return fmt.Errorf("未初始化向量存储")
+		return fmt.Errorf("not initialized向量存储")
 	}
 
 	return nil

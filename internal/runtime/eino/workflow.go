@@ -79,7 +79,7 @@ func (w *Workflow) AddNode(name, nodeType string, config *NodeConfig) error {
 			return &Output{Result: fmt.Sprintf("格式化结果: %s", input.Query)}, nil
 		}))
 	default:
-		return fmt.Errorf("不支持的节点类型: %s", nodeType)
+		return fmt.Errorf("unsupported input节点类型: %s", nodeType)
 	}
 
 	return nil

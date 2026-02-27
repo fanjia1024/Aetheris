@@ -145,7 +145,7 @@ func (t *ToolRateLimiter) Allow(toolName string) bool {
 	t.mu.RUnlock()
 
 	if !exists {
-		// 未配置限流，允许执行
+		// not configured限流，允许执行
 		return true
 	}
 

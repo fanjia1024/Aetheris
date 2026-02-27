@@ -26,14 +26,14 @@ type IndexInfo struct {
 	Distance  string
 }
 
-// EnsureIndex 若索引不存在则创建，存在则跳过（与 Store 配合的辅助）
+// EnsureIndex 若索引not found则创建，存在则跳过（与 Store 配合的辅助）
 func EnsureIndex(ctx context.Context, s Store, name string, dimension int, distance string) error {
 	if distance == "" {
 		distance = "cosine"
 	}
 	list, err := s.ListIndexes(ctx)
 	if err != nil {
-		return fmt.Errorf("列出索引失败: %w", err)
+		return fmt.Errorf("列出索引failed: %w", err)
 	}
 	for _, n := range list {
 		if n == name {

@@ -92,7 +92,7 @@ func (c *OpenAIClient) GenerateWithContext(ctx context.Context, prompt string, o
 		Post(c.baseURL + "/chat/completions")
 
 	if err != nil {
-		return "", fmt.Errorf("调用 OpenAI API 失败: %w", err)
+		return "", fmt.Errorf("调用 OpenAI API failed: %w", err)
 	}
 
 	// 检查响应状态
@@ -110,7 +110,7 @@ func (c *OpenAIClient) GenerateWithContext(ctx context.Context, prompt string, o
 	}
 
 	if err := json.Unmarshal(response.Body(), &result); err != nil {
-		return "", fmt.Errorf("解析 OpenAI 响应失败: %w", err)
+		return "", fmt.Errorf("解析 OpenAI 响应failed: %w", err)
 	}
 
 	if len(result.Choices) == 0 {
@@ -155,7 +155,7 @@ func (c *OpenAIClient) ChatWithContext(ctx context.Context, messages []Message, 
 		Post(c.baseURL + "/chat/completions")
 
 	if err != nil {
-		return "", fmt.Errorf("调用 OpenAI API 失败: %w", err)
+		return "", fmt.Errorf("调用 OpenAI API failed: %w", err)
 	}
 
 	// 检查响应状态
@@ -173,7 +173,7 @@ func (c *OpenAIClient) ChatWithContext(ctx context.Context, messages []Message, 
 	}
 
 	if err := json.Unmarshal(response.Body(), &result); err != nil {
-		return "", fmt.Errorf("解析 OpenAI 响应失败: %w", err)
+		return "", fmt.Errorf("解析 OpenAI 响应failed: %w", err)
 	}
 
 	if len(result.Choices) == 0 {

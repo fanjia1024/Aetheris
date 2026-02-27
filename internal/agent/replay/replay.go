@@ -354,7 +354,7 @@ func (b *replayBuilder) BuildFromSnapshot(ctx context.Context, jobID string) (*R
 	// 尝试获取最新快照
 	snapshot, err := b.store.GetLatestSnapshot(ctx, jobID)
 	if err != nil {
-		// 快照读取失败，降级到全事件重放
+		// 快照读取failed，降级到全事件重放
 		return b.BuildFromEvents(ctx, jobID)
 	}
 	if snapshot == nil {

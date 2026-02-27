@@ -57,7 +57,7 @@ func (m *Manager) Get(ctx context.Context, id string) (*Session, error) {
 	return m.store.Get(ctx, id)
 }
 
-// GetOrCreate 若 id 为空则 Create，否则 Get；若 Get 不存在则创建新 Session 并使用该 id
+// GetOrCreate 若 id 为空则 Create，否则 Get；若 Get not found则创建新 Session 并使用该 id
 func (m *Manager) GetOrCreate(ctx context.Context, id string) (*Session, error) {
 	if id == "" {
 		return m.Create(ctx)

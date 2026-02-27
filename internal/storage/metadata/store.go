@@ -26,6 +26,6 @@ func NewStore(cfg config.MetadataConfig) (Store, error) {
 	case "", "memory":
 		return NewMemoryStore(), nil
 	default:
-		return nil, fmt.Errorf("不支持的元数据存储类型: %s", cfg.Type)
+		return nil, fmt.Errorf("unsupported input元数据存储类型: %s", cfg.Type)
 	}
 }

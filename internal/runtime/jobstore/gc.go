@@ -60,7 +60,7 @@ func GC(ctx context.Context, store JobStore, config GCConfig) error {
 
 	lifecycleStore, ok := store.(EffectLifecycleStore)
 	if !ok {
-		// 兼容不支持 effect lifecycle 的 JobStore（memory/legacy）
+		// 兼容unsupported effect lifecycle 的 JobStore（memory/legacy）
 		return nil
 	}
 

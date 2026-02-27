@@ -27,7 +27,7 @@ import (
 // RunJobFunc 执行单条 Job 的回调（由应用层注入，如 Runner.RunForJob）
 type RunJobFunc func(ctx context.Context, j *Job) error
 
-// CompensateFunc 在 CompensatableFailure 时调用（jobID、失败节点 nodeID）；Week 1 可为 stub，Phase B 接真实回滚
+// CompensateFunc 在 CompensatableFailure 时调用（jobID、failed节点 nodeID）；Week 1 可为 stub，Phase B 接真实回滚
 type CompensateFunc func(ctx context.Context, jobID, nodeID string) error
 
 // SchedulerConfig 调度器配置：并发上限、重试、backoff、队列优先级与能力派发
@@ -72,7 +72,7 @@ func (s *Scheduler) SetCompensate(fn CompensateFunc) {
 	s.compensate = fn
 }
 
-// Start 启动调度循环：最多 MaxConcurrency 个 worker 拉取 Pending、执行、成功则 UpdateStatus(Completed)，失败则按 RetryMax/Backoff 重试或 UpdateStatus(Failed)
+// Start 启动调度循环：最多 MaxConcurrency 个 worker 拉取 Pending、执行、成功则 UpdateStatus(Completed)，failed则按 RetryMax/Backoff 重试或 UpdateStatus(Failed)
 func (s *Scheduler) Start(ctx context.Context) {
 	s.wg.Add(1)
 	go func() {
@@ -140,7 +140,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 								}
 								_ = s.store.UpdateStatus(runCtx, job.ID, StatusFailed)
 							case agentexec.StepResultSideEffectCommitted, agentexec.StepResultCompensated:
-								// 不应以错误返回；若出现则不再重试，直接失败
+								// 不应以错误返回；若出现则不再重试，直接failed
 								_ = s.store.UpdateStatus(runCtx, job.ID, StatusFailed)
 							default:
 								_ = s.store.UpdateStatus(runCtx, job.ID, StatusFailed)

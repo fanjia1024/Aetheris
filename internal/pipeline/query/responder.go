@@ -67,7 +67,7 @@ func (r *Responder) Validate(input interface{}) error {
 	}
 
 	if _, ok := input.(*common.GenerationResult); !ok {
-		return fmt.Errorf("不支持的输入类型: %T", input)
+		return fmt.Errorf("unsupported input输入类型: %T", input)
 	}
 
 	return nil

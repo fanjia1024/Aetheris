@@ -60,7 +60,7 @@ func (s *SplitterTransformer) Transform(ctx context.Context, src []*schema.Docum
 		}
 		doc, ok := parsed.(*common.Document)
 		if !ok {
-			return nil, fmt.Errorf("parser 未返回 *common.Document，得到 %T", parsed)
+			return nil, fmt.Errorf("parser did not return *common.Document，得到 %T", parsed)
 		}
 		// splitter
 		split, err := s.splitter.Execute(pipeCtx, doc)
@@ -69,7 +69,7 @@ func (s *SplitterTransformer) Transform(ctx context.Context, src []*schema.Docum
 		}
 		doc, ok = split.(*common.Document)
 		if !ok {
-			return nil, fmt.Errorf("splitter 未返回 *common.Document，得到 %T", split)
+			return nil, fmt.Errorf("splitter did not return *common.Document，得到 %T", split)
 		}
 		chunks := ChunksToSchemaDocuments(doc)
 		out = append(out, chunks...)

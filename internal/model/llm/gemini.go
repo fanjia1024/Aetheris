@@ -88,7 +88,7 @@ func (c *GeminiClient) GenerateWithContext(ctx context.Context, prompt string, o
 		Post(c.baseURL + "/models/" + c.model + ":generateContent?key=" + c.apiKey)
 
 	if err != nil {
-		return "", fmt.Errorf("调用 Gemini API 失败: %w", err)
+		return "", fmt.Errorf("调用 Gemini API failed: %w", err)
 	}
 
 	// 检查响应状态
@@ -108,7 +108,7 @@ func (c *GeminiClient) GenerateWithContext(ctx context.Context, prompt string, o
 	}
 
 	if err := json.Unmarshal(response.Body(), &result); err != nil {
-		return "", fmt.Errorf("解析 Gemini 响应失败: %w", err)
+		return "", fmt.Errorf("解析 Gemini 响应failed: %w", err)
 	}
 
 	if len(result.Candidates) == 0 {
@@ -157,7 +157,7 @@ func (c *GeminiClient) ChatWithContext(ctx context.Context, messages []Message, 
 		Post(c.baseURL + "/models/" + c.model + ":generateContent?key=" + c.apiKey)
 
 	if err != nil {
-		return "", fmt.Errorf("调用 Gemini API 失败: %w", err)
+		return "", fmt.Errorf("调用 Gemini API failed: %w", err)
 	}
 
 	// 检查响应状态
@@ -177,7 +177,7 @@ func (c *GeminiClient) ChatWithContext(ctx context.Context, messages []Message, 
 	}
 
 	if err := json.Unmarshal(response.Body(), &result); err != nil {
-		return "", fmt.Errorf("解析 Gemini 响应失败: %w", err)
+		return "", fmt.Errorf("解析 Gemini 响应failed: %w", err)
 	}
 
 	if len(result.Candidates) == 0 {

@@ -91,7 +91,7 @@ func (e *ingestWorkflowExecutor) Execute(ctx context.Context, params map[string]
 	}
 	doc, ok := out.(*common.Document)
 	if !ok {
-		return nil, fmt.Errorf("ingest loader 未返回 *common.Document")
+		return nil, fmt.Errorf("ingest loader did not return *common.Document")
 	}
 	if e.logger != nil {
 		e.logger.Info("ingest 阶段完成", "ingest_id", ingestID, "ingest_step", "loader", "doc_id", doc.ID, "chunks", len(doc.Chunks), "duration_ms", time.Since(loaderStart).Milliseconds())
@@ -111,7 +111,7 @@ func (e *ingestWorkflowExecutor) Execute(ctx context.Context, params map[string]
 	}
 	doc, ok = out.(*common.Document)
 	if !ok {
-		return nil, fmt.Errorf("ingest parser 未返回 *common.Document")
+		return nil, fmt.Errorf("ingest parser did not return *common.Document")
 	}
 	if e.logger != nil {
 		e.logger.Info("ingest 阶段完成", "ingest_id", ingestID, "ingest_step", "parser", "doc_id", doc.ID, "chunks", len(doc.Chunks), "duration_ms", time.Since(parserStart).Milliseconds())
@@ -131,7 +131,7 @@ func (e *ingestWorkflowExecutor) Execute(ctx context.Context, params map[string]
 	}
 	doc, ok = out.(*common.Document)
 	if !ok {
-		return nil, fmt.Errorf("ingest splitter 未返回 *common.Document")
+		return nil, fmt.Errorf("ingest splitter did not return *common.Document")
 	}
 	if e.logger != nil {
 		e.logger.Info("ingest 阶段完成", "ingest_id", ingestID, "ingest_step", "splitter", "doc_id", doc.ID, "chunks", len(doc.Chunks), "duration_ms", time.Since(splitterStart).Milliseconds())
@@ -152,7 +152,7 @@ func (e *ingestWorkflowExecutor) Execute(ctx context.Context, params map[string]
 		}
 		doc, ok = out.(*common.Document)
 		if !ok {
-			return nil, fmt.Errorf("ingest embedding 未返回 *common.Document")
+			return nil, fmt.Errorf("ingest embedding did not return *common.Document")
 		}
 		if e.logger != nil {
 			e.logger.Info("ingest 阶段完成", "ingest_id", ingestID, "ingest_step", "embedding", "doc_id", doc.ID, "chunks", len(doc.Chunks), "duration_ms", time.Since(embedStart).Milliseconds())
@@ -174,7 +174,7 @@ func (e *ingestWorkflowExecutor) Execute(ctx context.Context, params map[string]
 		}
 		doc, ok = out.(*common.Document)
 		if !ok {
-			return nil, fmt.Errorf("ingest indexer 未返回 *common.Document")
+			return nil, fmt.Errorf("ingest indexer did not return *common.Document")
 		}
 		if e.logger != nil {
 			e.logger.Info("ingest 阶段完成", "ingest_id", ingestID, "ingest_step", "indexer", "doc_id", doc.ID, "chunks", len(doc.Chunks), "duration_ms", time.Since(indexerStart).Milliseconds())
@@ -274,7 +274,7 @@ func (e *queryWorkflowExecutor) Execute(ctx context.Context, params map[string]i
 	}
 	retrievalResult, ok := out.(*common.RetrievalResult)
 	if !ok {
-		return nil, fmt.Errorf("retriever 未返回 *common.RetrievalResult")
+		return nil, fmt.Errorf("retriever did not return *common.RetrievalResult")
 	}
 
 	// Generator
@@ -288,7 +288,7 @@ func (e *queryWorkflowExecutor) Execute(ctx context.Context, params map[string]i
 	}
 	genResult, ok := out.(*common.GenerationResult)
 	if !ok {
-		return nil, fmt.Errorf("generator 未返回 *common.GenerationResult")
+		return nil, fmt.Errorf("generator did not return *common.GenerationResult")
 	}
 
 	return map[string]interface{}{

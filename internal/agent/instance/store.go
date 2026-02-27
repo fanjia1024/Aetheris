@@ -22,7 +22,7 @@ type AgentInstanceStore interface {
 	Create(ctx context.Context, instance *AgentInstance) error
 	UpdateStatus(ctx context.Context, agentID, status string) error
 	Update(ctx context.Context, instance *AgentInstance) error
-	// UpdateCurrentJob 更新 Instance 的 current_job_id；Job 认领时设 jobID，完成/失败/挂起时清空（design/plan.md Phase B）
+	// UpdateCurrentJob 更新 Instance 的 current_job_id；Job 认领时设 jobID，完成/failed/挂起时清空（design/plan.md Phase B）
 	UpdateCurrentJob(ctx context.Context, agentID, currentJobID string) error
 	ListByTenant(ctx context.Context, tenantID string, limit int) ([]*AgentInstance, error)
 }

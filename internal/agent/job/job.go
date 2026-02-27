@@ -29,7 +29,7 @@ const (
 	StatusWaiting
 	// StatusParked 长时间等待（>1 min），scheduler 跳过；仅由 signal 通过 WakeupQueue 唤醒（见 design/agent-process-model.md）
 	StatusParked
-	// StatusRetrying 失败后等待重试（可选显式状态）
+	// StatusRetrying failed后等待重试（可选显式状态）
 	StatusRetrying
 )
 

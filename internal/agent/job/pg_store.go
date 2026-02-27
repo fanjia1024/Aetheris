@@ -318,7 +318,7 @@ func (s *JobStorePg) UpdateStatus(ctx context.Context, jobID string, status JobS
 		return err
 	}
 	if cmd.RowsAffected() == 0 {
-		return nil // 不存在则静默
+		return nil // not found则静默
 	}
 	return nil
 }

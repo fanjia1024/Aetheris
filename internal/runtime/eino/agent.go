@@ -60,6 +60,6 @@ func CreateAgent(ctx context.Context, agentType string, config *AgentConfig) (ad
 
 		return NewChatModelAgent(ctx, chatModelConfig)
 	default:
-		return nil, fmt.Errorf("不支持的 Agent 类型: %s", agentType)
+		return nil, fmt.Errorf("unsupported input Agent 类型: %s", agentType)
 	}
 }

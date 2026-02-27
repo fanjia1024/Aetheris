@@ -75,7 +75,7 @@ func (l *DocumentLoader) Execute(ctx *common.PipelineContext, input interface{})
 		// 字节数据
 		return l.loadFromBytes(ctx, v)
 	default:
-		return nil, common.NewPipelineError(l.name, "不支持的输入类型", fmt.Errorf("expected string, *multipart.FileHeader, or []byte, got %T", input))
+		return nil, common.NewPipelineError(l.name, "unsupported input输入类型", fmt.Errorf("expected string, *multipart.FileHeader, or []byte, got %T", input))
 	}
 }
 
@@ -102,7 +102,7 @@ func (l *DocumentLoader) Validate(input interface{}) error {
 			return fmt.Errorf("数据大小超过限制: %d > %d", len(v), l.maxSize)
 		}
 	default:
-		return fmt.Errorf("不支持的输入类型: %T", input)
+		return fmt.Errorf("unsupported input输入类型: %T", input)
 	}
 
 	return nil

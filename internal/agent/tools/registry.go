@@ -120,7 +120,7 @@ func (r *Registry) Manifests() []ToolManifest {
 	return list
 }
 
-// Manifest 返回指定名称工具的 Manifest，不存在返回 nil
+// Manifest 返回指定名称工具的 Manifest，not found返回 nil
 func (r *Registry) Manifest(name string) *ToolManifest {
 	t, ok := r.Get(name)
 	if !ok {
