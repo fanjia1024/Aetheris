@@ -33,7 +33,7 @@ type LangGraphClient interface {
 	State(ctx context.Context, threadID string) (map[string]any, error)
 }
 
-// LangGraphErrorCode LangGraph 错误分类。
+// LangGraphErrorCode LangGraph error分类。
 type LangGraphErrorCode string
 
 const (
@@ -42,7 +42,7 @@ const (
 	LangGraphErrorWait      LangGraphErrorCode = "wait"
 )
 
-// LangGraphError LangGraph 适配层错误；Runner/Adapter 可据此映射到 StepResultType 或等待 signal。
+// LangGraphError LangGraph 适配层error；Runner/Adapter 可据此映射到 StepResultType 或等待 signal。
 type LangGraphError struct {
 	Code           LangGraphErrorCode
 	Message        string
@@ -71,7 +71,7 @@ func (e *LangGraphError) Unwrap() error {
 	return e.Err
 }
 
-// LangGraphNodeAdapter 将 langgraph 型 TaskNode 转为 DAG 节点；支持 command 事件、effect 存储与错误分类映射。
+// LangGraphNodeAdapter 将 langgraph 型 TaskNode 转为 DAG 节点；支持 command 事件、effect 存储与error分类映射。
 type LangGraphNodeAdapter struct {
 	Client           LangGraphClient
 	CommandEventSink CommandEventSink

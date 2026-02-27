@@ -36,12 +36,12 @@ func extractPDFText(data []byte) (string, error) {
 
 	reader, err := model.NewPdfReader(bytes.NewReader(data))
 	if err != nil {
-		return "", fmt.Errorf("打开 PDF 失败: %w", err)
+		return "", fmt.Errorf("打开 PDF failed: %w", err)
 	}
 
 	numPages, err := reader.GetNumPages()
 	if err != nil {
-		return "", fmt.Errorf("获取页数失败: %w", err)
+		return "", fmt.Errorf("获取页数failed: %w", err)
 	}
 	if numPages == 0 {
 		return "", nil
@@ -51,15 +51,15 @@ func extractPDFText(data []byte) (string, error) {
 	for i := 1; i <= numPages; i++ {
 		page, err := reader.GetPage(i)
 		if err != nil {
-			return buf.String(), fmt.Errorf("获取第 %d 页失败: %w", i, err)
+			return buf.String(), fmt.Errorf("获取第 %d 页failed: %w", i, err)
 		}
 		ex, err := extractor.New(page)
 		if err != nil {
-			return buf.String(), fmt.Errorf("创建第 %d 页提取器失败: %w", i, err)
+			return buf.String(), fmt.Errorf("创建第 %d 页提取器failed: %w", i, err)
 		}
 		text, err := ex.ExtractText()
 		if err != nil {
-			return buf.String(), fmt.Errorf("提取第 %d 页文本失败: %w", i, err)
+			return buf.String(), fmt.Errorf("提取第 %d 页文本failed: %w", i, err)
 		}
 		if text != "" {
 			buf.WriteString(text)

@@ -45,7 +45,7 @@ type AgentConfig struct {
 func NewChatModelAgent(ctx context.Context, config *adk.ChatModelAgentConfig) (adk.Agent, error) {
 	agent, err := adk.NewChatModelAgent(ctx, config)
 	if err != nil {
-		return nil, fmt.Errorf("创建 ChatModelAgent 失败: %w", err)
+		return nil, fmt.Errorf("创建 ChatModelAgent failed: %w", err)
 	}
 
 	return agent, nil

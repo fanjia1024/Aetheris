@@ -144,7 +144,7 @@ func (r *AgentJobRunner) Start(ctx context.Context) {
 						_ = r.jobStore.Requeue(ctx, j)
 						<-r.limiter
 						if errEvent != jobstore.ErrNoJob && errEvent != jobstore.ErrClaimNotFound {
-							r.logger.Error("ClaimJob 失败", "job_id", j.ID, "error", errEvent)
+							r.logger.Error("ClaimJob failed", "job_id", j.ID, "error", errEvent)
 						}
 						time.Sleep(r.pollInterval)
 						continue
@@ -176,7 +176,7 @@ func (r *AgentJobRunner) Start(ctx context.Context) {
 							}
 							continue
 						}
-						r.logger.Error("Claim 失败", "error", err)
+						r.logger.Error("Claim failed", "error", err)
 						time.Sleep(r.pollInterval)
 						continue
 					}
@@ -227,7 +227,7 @@ const cancelPollInterval = 500 * time.Millisecond
 func (r *AgentJobRunner) executeJob(ctx context.Context, jobID string, attemptID string) {
 	j, err := r.jobStore.Get(ctx, jobID)
 	if err != nil || j == nil {
-		r.logger.Warn("Get Job 失败或不存在，跳过", "job_id", jobID, "error", err)
+		r.logger.Warn("Get Job failed or not found, skipping", "job_id", jobID, "error", err)
 		return
 	}
 	metrics.WorkerBusy.WithLabelValues(r.workerID).Inc()
@@ -259,7 +259,7 @@ func (r *AgentJobRunner) executeJob(ctx context.Context, jobID string, attemptID
 				return
 			case <-ticker.C:
 				if err := r.jobEventStore.Heartbeat(runCtx, r.workerID, jobID); err != nil {
-					r.logger.Warn("Heartbeat 失败", "job_id", jobID, "error", err)
+					r.logger.Warn("Heartbeat failed", "job_id", jobID, "error", err)
 				}
 			}
 		}
@@ -304,7 +304,7 @@ func (r *AgentJobRunner) executeJob(ctx context.Context, jobID string, attemptID
 		return
 	}
 	if err != nil {
-		r.logger.Info("Job 执行失败", "job_id", jobID, "error", err)
+		r.logger.Info("Job 执行failed", "job_id", jobID, "error", err)
 		dur := time.Since(start).Seconds()
 		metrics.JobTotal.WithLabelValues("failed").Inc()
 		metrics.JobFailTotal.WithLabelValues("failed").Inc()

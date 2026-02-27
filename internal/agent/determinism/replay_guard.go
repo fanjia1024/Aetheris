@@ -28,7 +28,7 @@ type ReplayGuard struct {
 }
 
 // CheckEffectAllowed 在 Replay 模式下检查是否允许执行某类 effect；若不允许则 panic。
-// jobID、stepID 用于错误信息；op 为触发的禁止操作类型。
+// jobID、stepID 用于error信息；op 为触发的禁止操作类型。
 // 仅在 Replay 且 StrictReplay 时进行严格检查；否则 no-op。
 func (g *ReplayGuard) CheckEffectAllowed(ctx context.Context, jobID, stepID string, op ForbiddenOp) {
 	if ctx == nil {

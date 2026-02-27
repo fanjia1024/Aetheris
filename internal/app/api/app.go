@@ -116,7 +116,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	}
 	engine, err := eino.NewEngine(bootstrap.Config, bootstrap.Logger)
 	if err != nil {
-		return nil, fmt.Errorf("初始化 eino 引擎失败: %w", err)
+		return nil, fmt.Errorf("初始化 eino 引擎failed: %w", err)
 	}
 
 	var llmClientForAgent llm.Client
@@ -139,7 +139,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 			einoEmbedder := NewEinoEmbedderAdapter(queryEmbedder)
 			einoRetriever, errRet := einoext.NewRetriever(context.Background(), vecCfg, bootstrap.VectorStore, einoEmbedder)
 			if errRet != nil {
-				bootstrap.Logger.Info("einoext NewRetriever 失败，回退 memory", "error", errRet)
+				bootstrap.Logger.Info("einoext NewRetriever failed，回退 memory", "error", errRet)
 				if bootstrap.VectorStore != nil {
 					einoRetriever, errRet = query.NewMemoryRetriever(&query.MemoryRetrieverConfig{
 						VectorStore: bootstrap.VectorStore, DefaultIndex: defaultCollection, DefaultTopK: 10, DefaultThreshold: 0.3,
@@ -158,7 +158,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 				retrieverForWorkflow := &EinoRetrieverQueryAdapter{EinoRetriever: einoRetriever, Embedder: queryEmbedder, TopK: 10}
 				qwf := eino.NewQueryWorkflowExecutor(retrieverForWorkflow, generator, queryEmbedder, bootstrap.Logger)
 				if err := engine.RegisterWorkflow("query_pipeline", qwf); err != nil {
-					bootstrap.Logger.Info("注册 query_pipeline 失败，将使用占位实现", "error", err)
+					bootstrap.Logger.Info("注册 query_pipeline failed，将使用占位实现", "error", err)
 				}
 				retrieverAdapter := NewRetrieverAdapter(queryEmbedder, einoRetriever, 0.3)
 				ragGen := NewRAGGeneratorAdapter(retrieverAdapter, generator, queryEmbedder, defaultCollection)
@@ -217,7 +217,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 			einoIndexer, errIdx := einoext.NewIndexer(context.Background(), vecCfg, bootstrap.VectorStore, einoEmbedder)
 			var docIndexer *ingest.DocumentIndexer
 			if errIdx != nil {
-				bootstrap.Logger.Info("einoext NewIndexer 失败，回退 memory", "error", errIdx)
+				bootstrap.Logger.Info("einoext NewIndexer failed，回退 memory", "error", errIdx)
 				if bootstrap.VectorStore != nil {
 					if memoryIndexer, errM := ingest.NewMemoryIndexer(&ingest.MemoryIndexerConfig{
 						VectorStore: bootstrap.VectorStore, DefaultCollection: defaultCollection, BatchSize: ingestBatchSize,
@@ -233,7 +233,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 			if docIndexer != nil {
 				if bootstrap.VectorStore != nil {
 					if err := vector.EnsureIndex(context.Background(), bootstrap.VectorStore, defaultCollection, ingestEmbedder.Dimension(), "cosine"); err != nil {
-						bootstrap.Logger.Info("创建向量索引失败（首次写入时可能再创建）", "collection", defaultCollection, "error", err)
+						bootstrap.Logger.Info("创建向量索引failed（首次写入时可能再创建）", "collection", defaultCollection, "error", err)
 					}
 				}
 				loader := ingest.NewDocumentLoader()
@@ -243,7 +243,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 				docSplitter.SetEngine(splitterEngine, "structural")
 				iwf := eino.NewIngestWorkflowExecutor(loader, parser, docSplitter, docEmbedding, docIndexer, bootstrap.Logger)
 				if err := engine.RegisterWorkflow("ingest_pipeline", iwf); err != nil {
-					bootstrap.Logger.Info("注册 ingest_pipeline 失败，将使用占位实现", "error", err)
+					bootstrap.Logger.Info("注册 ingest_pipeline failed，将使用占位实现", "error", err)
 				}
 				engine.SetIngestComponents(
 					NewLoaderAdapter(loader),
@@ -284,7 +284,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 			if errADK == nil && adkRunner != nil {
 				handler.SetADKRunner(adkRunner)
 			} else if errADK != nil {
-				bootstrap.Logger.Info("创建主 ADK Runner 失败，将使用原 Agent", "error", errADK)
+				bootstrap.Logger.Info("创建主 ADK Runner failed，将使用原 Agent", "error", errADK)
 			}
 		}
 	}
@@ -326,12 +326,12 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		}
 		pgEventStore, err := jobstore.NewPostgresStore(context.Background(), dsn, leaseDur)
 		if err != nil {
-			return nil, fmt.Errorf("初始化 JobStore 事件(postgres) 失败: %w", err)
+			return nil, fmt.Errorf("初始化 JobStore 事件(postgres) failed: %w", err)
 		}
 		jobEventStore = pgEventStore
 		pgJobStore, err := job.NewJobStorePg(context.Background(), dsn)
 		if err != nil {
-			return nil, fmt.Errorf("初始化 Job 元数据(postgres) 失败: %w", err)
+			return nil, fmt.Errorf("初始化 Job 元数据(postgres) failed: %w", err)
 		}
 		jobStore = pgJobStore
 		bootstrap.Logger.Info("JobStore 使用 PostgreSQL 后端", "dsn", dsn)
@@ -343,11 +343,11 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	if bootstrap.Config != nil && bootstrap.Config.JobStore.Type == "postgres" && bootstrap.Config.JobStore.DSN != "" {
 		invPoolConfig, errPool := pgxpool.ParseConfig(bootstrap.Config.JobStore.DSN)
 		if errPool != nil {
-			return nil, fmt.Errorf("解析 ToolInvocationStore DSN 失败: %w", errPool)
+			return nil, fmt.Errorf("解析 ToolInvocationStore DSN failed: %w", errPool)
 		}
 		invPool, errPool := pgxpool.NewWithConfig(context.Background(), invPoolConfig)
 		if errPool != nil {
-			return nil, fmt.Errorf("创建 ToolInvocationStore 连接池失败: %w", errPool)
+			return nil, fmt.Errorf("创建 ToolInvocationStore 连接池failed: %w", errPool)
 		}
 		invocationStore = agentexec.NewToolInvocationStorePg(invPool)
 	} else {
@@ -357,11 +357,11 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	if bootstrap.Config != nil && bootstrap.Config.EffectStore.Type == "postgres" && bootstrap.Config.EffectStore.DSN != "" {
 		effPoolConfig, errPool := pgxpool.ParseConfig(bootstrap.Config.EffectStore.DSN)
 		if errPool != nil {
-			return nil, fmt.Errorf("解析 EffectStore DSN 失败: %w", errPool)
+			return nil, fmt.Errorf("解析 EffectStore DSN failed: %w", errPool)
 		}
 		effPool, errPool := pgxpool.NewWithConfig(context.Background(), effPoolConfig)
 		if errPool != nil {
-			return nil, fmt.Errorf("创建 EffectStore 连接池失败: %w", errPool)
+			return nil, fmt.Errorf("创建 EffectStore 连接池failed: %w", errPool)
 		}
 		effectStore = agentexec.NewEffectStorePg(effPool)
 	} else {
@@ -399,7 +399,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	if bootstrap.Config != nil && bootstrap.Config.JobStore.Type == "postgres" && bootstrap.Config.JobStore.DSN != "" {
 		pgState, errState := runtime.NewAgentStateStorePg(context.Background(), bootstrap.Config.JobStore.DSN)
 		if errState != nil {
-			return nil, fmt.Errorf("初始化 AgentStateStore(postgres) 失败: %w", errState)
+			return nil, fmt.Errorf("初始化 AgentStateStore(postgres) failed: %w", errState)
 		}
 		agentStateStore = pgState
 	} else {
@@ -409,7 +409,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	if bootstrap.Config != nil && bootstrap.Config.JobStore.Type == "postgres" && bootstrap.Config.JobStore.DSN != "" {
 		pgInst, errInst := instance.NewStorePg(context.Background(), bootstrap.Config.JobStore.DSN)
 		if errInst != nil {
-			return nil, fmt.Errorf("初始化 AgentInstanceStore(postgres) 失败: %w", errInst)
+			return nil, fmt.Errorf("初始化 AgentInstanceStore(postgres) failed: %w", errInst)
 		}
 		agentInstanceStore = pgInst
 	} else {
@@ -420,7 +420,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	if bootstrap.Config != nil && bootstrap.Config.JobStore.Type == "postgres" && bootstrap.Config.JobStore.DSN != "" {
 		pgBus, errBus := messaging.NewStorePg(context.Background(), bootstrap.Config.JobStore.DSN)
 		if errBus != nil {
-			return nil, fmt.Errorf("初始化 AgentMessagingBus(postgres) 失败: %w", errBus)
+			return nil, fmt.Errorf("初始化 AgentMessagingBus(postgres) failed: %w", errBus)
 		}
 		agentMessagingBus = pgBus
 	} else {
@@ -439,11 +439,11 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	if bootstrap.Config != nil && bootstrap.Config.CheckpointStore.Type == "postgres" && bootstrap.Config.CheckpointStore.DSN != "" {
 		cpPoolConfig, errPool := pgxpool.ParseConfig(bootstrap.Config.CheckpointStore.DSN)
 		if errPool != nil {
-			return nil, fmt.Errorf("解析 CheckpointStore DSN 失败: %w", errPool)
+			return nil, fmt.Errorf("解析 CheckpointStore DSN failed: %w", errPool)
 		}
 		cpPool, errPool := pgxpool.NewWithConfig(context.Background(), cpPoolConfig)
 		if errPool != nil {
-			return nil, fmt.Errorf("创建 CheckpointStore 连接池失败: %w", errPool)
+			return nil, fmt.Errorf("创建 CheckpointStore 连接池failed: %w", errPool)
 		}
 		checkpointStore = runtime.NewCheckpointStorePg(cpPool)
 	}
@@ -564,7 +564,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 		maxRefresh := parseDuration(bootstrap.Config.API.Middleware.JWTMaxRefresh, time.Hour)
 		jwtAuth, err := middleware.NewJWTAuth([]byte(bootstrap.Config.API.Middleware.JWTKey), timeout, maxRefresh)
 		if err != nil {
-			bootstrap.Logger.Warn("JWT 初始化失败，将跳过认证", "error", err)
+			bootstrap.Logger.Warn("JWT 初始化failed，将跳过认证", "error", err)
 		} else {
 			router.SetJWT(jwtAuth)
 			bootstrap.Logger.Info("JWT 认证已启用")
@@ -595,7 +595,7 @@ func NewApp(bootstrap *app.Bootstrap) (*App, error) {
 	if bootstrap.Config != nil && bootstrap.Config.API.Grpc.Enable && bootstrap.Config.API.Grpc.Port > 0 {
 		gs, err := startGRPC(engine, docService, bootstrap.Config.API.Grpc.Port)
 		if err != nil {
-			bootstrap.Logger.Warn("gRPC 服务启动失败", "error", err)
+			bootstrap.Logger.Warn("gRPC 服务启动failed", "error", err)
 		} else {
 			appObj.grpcServer = gs
 			bootstrap.Logger.Info("gRPC 服务已启动", "port", bootstrap.Config.API.Grpc.Port)
@@ -613,7 +613,7 @@ func (a *App) Run(addr string) error {
 	if a.config.Config != nil && a.config.Config.Log.File != "" {
 		f, err := os.OpenFile(a.config.Config.Log.File, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err != nil {
-			return fmt.Errorf("打开日志文件失败: %w", err)
+			return fmt.Errorf("打开日志文件failed: %w", err)
 		}
 		output = f
 	}

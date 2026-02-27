@@ -19,7 +19,7 @@ import (
 	"fmt"
 )
 
-// 定义 Pipeline 相关错误
+// 定义 Pipeline 相关error
 var (
 	ErrInvalidInput     = errors.New("invalid input")
 	ErrDocumentNotFound = errors.New("document not found")
@@ -40,7 +40,7 @@ var (
 	ErrInternal         = errors.New("internal error")
 )
 
-// PipelineError Pipeline 错误结构体
+// PipelineError Pipeline error结构体
 type PipelineError struct {
 	Stage   string
 	Message string
@@ -60,7 +60,7 @@ func (e *PipelineError) Unwrap() error {
 	return e.Err
 }
 
-// NewPipelineError 创建新的 Pipeline 错误
+// NewPipelineError 创建新的 Pipeline error
 func NewPipelineError(stage string, message string, err error) *PipelineError {
 	return &PipelineError{
 		Stage:   stage,
@@ -69,13 +69,13 @@ func NewPipelineError(stage string, message string, err error) *PipelineError {
 	}
 }
 
-// IsPipelineError 检查是否为 Pipeline 错误
+// IsPipelineError 检查是否为 Pipeline error
 func IsPipelineError(err error) bool {
 	var pipelineErr *PipelineError
 	return errors.As(err, &pipelineErr)
 }
 
-// GetPipelineError 获取 Pipeline 错误
+// GetPipelineError 获取 Pipeline error
 func GetPipelineError(err error) (*PipelineError, bool) {
 	var pipelineErr *PipelineError
 	if errors.As(err, &pipelineErr) {
@@ -84,7 +84,7 @@ func GetPipelineError(err error) (*PipelineError, bool) {
 	return nil, false
 }
 
-// ValidationError 验证错误
+// ValidationError 验证error
 type ValidationError struct {
 	Field   string
 	Message string
@@ -95,7 +95,7 @@ func (e *ValidationError) Error() string {
 	return fmt.Sprintf("validation error: %s: %s", e.Field, e.Message)
 }
 
-// NewValidationError 创建新的验证错误
+// NewValidationError 创建新的验证error
 func NewValidationError(field string, message string) *ValidationError {
 	return &ValidationError{
 		Field:   field,
@@ -103,13 +103,13 @@ func NewValidationError(field string, message string) *ValidationError {
 	}
 }
 
-// IsValidationError 检查是否为验证错误
+// IsValidationError 检查是否为验证error
 func IsValidationError(err error) bool {
 	var valErr *ValidationError
 	return errors.As(err, &valErr)
 }
 
-// GetValidationError 获取验证错误
+// GetValidationError 获取验证error
 func GetValidationError(err error) (*ValidationError, bool) {
 	var valErr *ValidationError
 	if errors.As(err, &valErr) {

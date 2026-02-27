@@ -57,25 +57,25 @@ func (g *Generator) Name() string {
 func (g *Generator) Execute(ctx *common.PipelineContext, input interface{}) (interface{}, error) {
 	// 验证输入
 	if err := g.Validate(input); err != nil {
-		return nil, common.NewPipelineError(g.name, "输入验证失败", err)
+		return nil, common.NewPipelineError(g.name, "输入验证failed", err)
 	}
 
 	// 生成回答
 	inputData := input.(map[string]interface{})
 	query, ok := inputData["query"].(*common.Query)
 	if !ok {
-		return nil, common.NewPipelineError(g.name, "输入类型错误", fmt.Errorf("expected query to be *common.Query"))
+		return nil, common.NewPipelineError(g.name, "输入类型error", fmt.Errorf("expected query to be *common.Query"))
 	}
 
 	result, ok := inputData["retrieval_result"].(*common.RetrievalResult)
 	if !ok {
-		return nil, common.NewPipelineError(g.name, "输入类型错误", fmt.Errorf("expected retrieval_result to be *common.RetrievalResult"))
+		return nil, common.NewPipelineError(g.name, "输入类型error", fmt.Errorf("expected retrieval_result to be *common.RetrievalResult"))
 	}
 
 	// 处理生成
 	generationResult, err := g.generate(query, result)
 	if err != nil {
-		return nil, common.NewPipelineError(g.name, "生成回答失败", err)
+		return nil, common.NewPipelineError(g.name, "生成回答failed", err)
 	}
 
 	return generationResult, nil
@@ -134,7 +134,7 @@ func (g *Generator) generate(query *common.Query, result *common.RetrievalResult
 		PresencePenalty:  0.0,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("调用 LLM 失败: %w", err)
+		return nil, fmt.Errorf("调用 LLM failed: %w", err)
 	}
 
 	// 提取引用

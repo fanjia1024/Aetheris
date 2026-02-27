@@ -50,19 +50,19 @@ type ResourceVerifier interface {
 	Verify(ctx context.Context, jobID, stepID, resourceType, resourceID, operation, externalRef string) (ok bool, err error)
 }
 
-// ReplayVerificationMode Confirmation Replay 时校验失败的处理策略。见 design/provable-semantics-table.md § 回放策略分级。
+// ReplayVerificationMode Confirmation Replay 时校验failed的处理策略。见 design/provable-semantics-table.md § 回放策略分级。
 type ReplayVerificationMode int
 
 const (
-	// ReplayVerificationStrict 校验失败则 job 永久失败（默认）
+	// ReplayVerificationStrict 校验failed则 job 永久failed（默认）
 	ReplayVerificationStrict ReplayVerificationMode = iota
-	// ReplayVerificationWarn 校验失败时记录风险并继续注入结果，不失败 job
+	// ReplayVerificationWarn 校验failed时记录风险并继续注入结果，不failed job
 	ReplayVerificationWarn
-	// ReplayVerificationHumanInLoop 校验失败时返回 ErrReplayVerificationHumanRequired，由调用方 park job 并等待人工确认
+	// ReplayVerificationHumanInLoop 校验failed时返回 ErrReplayVerificationHumanRequired，由调用方 park job 并等待人工确认
 	ReplayVerificationHumanInLoop
 )
 
-// ErrReplayVerificationHumanRequired 当 ReplayVerificationMode == HumanInLoop 且校验失败时返回，调用方应 park job 并等待人工确认后恢复
+// ErrReplayVerificationHumanRequired 当 ReplayVerificationMode == HumanInLoop 且校验failed时返回，调用方应 park job 并等待人工确认后恢复
 var ErrReplayVerificationHumanRequired = errors.New("replay verification failed: human-in-loop required")
 
 // NoOpResourceVerifier 默认 ResourceVerifier：不做实际校验，始终返回 (true, nil)。

@@ -61,7 +61,7 @@ type JobStore interface {
 	Append(ctx context.Context, jobID string, expectedVersion int, event JobEvent) (newVersion int, err error)
 	// Claim 尝试占用一个可执行的 job，成功返回 jobID、当前 version 与 attemptID；无可用 job 返回 ErrNoJob（design/runtime-contract.md §3.2）
 	Claim(ctx context.Context, workerID string) (jobID string, version int, attemptID string, err error)
-	// ClaimJob 占用指定 jobID（用于能力调度）；成功返回 version 与 attemptID；若该 job 已终止或已被占用则返回错误
+	// ClaimJob 占用指定 jobID（用于能力调度）；成功返回 version 与 attemptID；若该 job 已终止或已被占用则返回error
 	ClaimJob(ctx context.Context, workerID string, jobID string) (version int, attemptID string, err error)
 	// Heartbeat 续租；仅当该 job 被同一 workerID 占用时延长过期时间
 	Heartbeat(ctx context.Context, workerID string, jobID string) error

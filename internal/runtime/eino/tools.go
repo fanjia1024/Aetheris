@@ -50,7 +50,7 @@ func (u *unavailableTool) InvokableRun(ctx context.Context, argumentsInJSON stri
 }
 
 func makeUnavailableTool(name, desc string, err error) tool.InvokableTool {
-	slog.Error("创建工具失败，降级为不可用占位工具", "tool", name, "error", err)
+	slog.Error("创建工具failed，降级为不可用占位工具", "tool", name, "error", err)
 	return &unavailableTool{
 		info: &schema.ToolInfo{
 			Name: name,

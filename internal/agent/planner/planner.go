@@ -107,7 +107,7 @@ func (p *LLMPlanner) Plan(ctx context.Context, query string, toolsSchemaJSON []b
 	opts := llm.GenerateOptions{MaxTokens: 2048, Temperature: 0.2}
 	reply, err := p.client.ChatWithContext(ctx, messages, opts)
 	if err != nil {
-		return nil, fmt.Errorf("Planner LLM 调用失败: %w", err)
+		return nil, fmt.Errorf("Planner LLM 调用failed: %w", err)
 	}
 	reply = strings.TrimSpace(reply)
 	// 尝试从回复中提取 JSON（可能被 markdown 包裹）
@@ -118,7 +118,7 @@ func (p *LLMPlanner) Plan(ctx context.Context, query string, toolsSchemaJSON []b
 	}
 	var result PlanResult
 	if err := json.Unmarshal([]byte(reply), &result); err != nil {
-		return nil, fmt.Errorf("解析 Planner 输出 JSON 失败: %w", err)
+		return nil, fmt.Errorf("解析 Planner 输出 JSON failed: %w", err)
 	}
 	if result.Next == "" {
 		result.Next = "finish"
@@ -159,7 +159,7 @@ func (p *LLMPlanner) Next(ctx context.Context, sess *session.Session, userQuery 
 	opts := llm.GenerateOptions{MaxTokens: 1024, Temperature: 0.2}
 	reply, err := p.client.ChatWithContext(ctx, messages, opts)
 	if err != nil {
-		return nil, fmt.Errorf("Planner Next LLM 调用失败: %w", err)
+		return nil, fmt.Errorf("Planner Next LLM 调用failed: %w", err)
 	}
 	reply = strings.TrimSpace(reply)
 	if idx := strings.Index(reply, "{"); idx >= 0 {
@@ -169,7 +169,7 @@ func (p *LLMPlanner) Next(ctx context.Context, sess *session.Session, userQuery 
 	}
 	var step Step
 	if err := json.Unmarshal([]byte(reply), &step); err != nil {
-		return nil, fmt.Errorf("解析 Planner Next JSON 失败: %w", err)
+		return nil, fmt.Errorf("解析 Planner Next JSON failed: %w", err)
 	}
 	return &step, nil
 }
@@ -213,7 +213,7 @@ func (p *LLMPlanner) PlanGoal(ctx context.Context, goal string, mem memory.Memor
 	opts := llm.GenerateOptions{MaxTokens: 1024, Temperature: 0.2}
 	reply, err := p.client.ChatWithContext(ctx, messages, opts)
 	if err != nil {
-		return nil, fmt.Errorf("PlanGoal LLM 调用失败: %w", err)
+		return nil, fmt.Errorf("PlanGoal LLM 调用failed: %w", err)
 	}
 	reply = strings.TrimSpace(reply)
 	if idx := strings.Index(reply, "{"); idx >= 0 {

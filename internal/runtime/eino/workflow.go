@@ -100,7 +100,7 @@ func (w *Workflow) Compile(ctx context.Context) (compose.Runnable[*Input, *Outpu
 func (w *Workflow) Execute(ctx context.Context, input *Input) (*Output, error) {
 	runnable, err := w.Compile(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("编译工作流失败: %w", err)
+		return nil, fmt.Errorf("编译工作流failed: %w", err)
 	}
 
 	return runnable.Invoke(ctx, input)
@@ -184,7 +184,7 @@ func CreateQueryWorkflow(ctx context.Context) (*Workflow, error) {
 func CreateToolFromWorkflow(workflow *Workflow, toolName, toolDescription string) (tool.BaseTool, error) {
 	runnable, err := workflow.Compile(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("编译工作流失败: %w", err)
+		return nil, fmt.Errorf("编译工作流failed: %w", err)
 	}
 
 	return utils.InferTool(toolName, toolDescription, func(ctx context.Context, input string) (string, error) {

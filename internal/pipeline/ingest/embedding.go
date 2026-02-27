@@ -52,19 +52,19 @@ func (e *DocumentEmbedding) Name() string {
 func (e *DocumentEmbedding) Execute(ctx *common.PipelineContext, input interface{}) (interface{}, error) {
 	// 验证输入
 	if err := e.Validate(input); err != nil {
-		return nil, common.NewPipelineError(e.name, "输入验证失败", err)
+		return nil, common.NewPipelineError(e.name, "输入验证failed", err)
 	}
 
 	// 向量化文档
 	doc, ok := input.(*common.Document)
 	if !ok {
-		return nil, common.NewPipelineError(e.name, "输入类型错误", fmt.Errorf("expected *common.Document, got %T", input))
+		return nil, common.NewPipelineError(e.name, "输入类型error", fmt.Errorf("expected *common.Document, got %T", input))
 	}
 
 	// 处理文档
 	embeddedDoc, err := e.ProcessDocument(doc)
 	if err != nil {
-		return nil, common.NewPipelineError(e.name, "向量化文档失败", err)
+		return nil, common.NewPipelineError(e.name, "向量化文档failed", err)
 	}
 
 	return embeddedDoc, nil
@@ -96,7 +96,7 @@ func (e *DocumentEmbedding) ProcessDocument(doc *common.Document) (*common.Docum
 
 	// 批量向量化切片
 	if err := e.embedChunks(doc); err != nil {
-		return nil, common.NewPipelineError(e.name, "向量化切片失败", err)
+		return nil, common.NewPipelineError(e.name, "向量化切片failed", err)
 	}
 
 	// 更新文档元数据
@@ -134,7 +134,7 @@ func (e *DocumentEmbedding) embedChunks(doc *common.Document) error {
 				// 向量化：Embed(ctx, []string) ([][]float64, error)
 				vecs, err := e.embedder.Embed(context.Background(), []string{chunk.Content})
 				if err != nil {
-					errChan <- fmt.Errorf("向量化切片 %d 失败: %w", idx, err)
+					errChan <- fmt.Errorf("向量化切片 %d failed: %w", idx, err)
 					return
 				}
 				if len(vecs) > 0 {
@@ -155,7 +155,7 @@ func (e *DocumentEmbedding) embedChunks(doc *common.Document) error {
 	wg.Wait()
 	close(errChan)
 
-	// 检查错误
+	// 检查error
 	for err := range errChan {
 		return err
 	}
@@ -172,7 +172,7 @@ func (e *DocumentEmbedding) embedDocument(doc *common.Document) error {
 	// 向量化文档内容
 	vecs, err := e.embedder.Embed(context.Background(), []string{doc.Content})
 	if err != nil {
-		return fmt.Errorf("向量化文档失败: %w", err)
+		return fmt.Errorf("向量化文档failed: %w", err)
 	}
 	if len(vecs) > 0 {
 		doc.Embedding = vecs[0]

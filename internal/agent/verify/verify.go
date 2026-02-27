@@ -34,7 +34,7 @@ type Result struct {
 	ReplayProofResult         ReplayProofResult `json:"replay_proof_result"`
 }
 
-// LedgerProofResult Tool invocation ledger 证明：每条 started 均有匹配的 finished 或确定性失败。
+// LedgerProofResult Tool invocation ledger 证明：每条 started 均有匹配的 finished 或确定性failed。
 type LedgerProofResult struct {
 	OK                     bool     `json:"ok"`
 	PendingIdempotencyKeys []string `json:"pending_idempotency_keys,omitempty"`

@@ -24,7 +24,7 @@ import (
 const (
 	ToolInvocationStatusStarted   = "started"   // 执行前创建，等价 INFLIGHT
 	ToolInvocationStatusSuccess   = "success"   // 执行成功并已持久化，等价 COMMITTED
-	ToolInvocationStatusFailure   = "failure"   // 执行失败，等价 failed
+	ToolInvocationStatusFailure   = "failure"   // 执行failed，等价 failed
 	ToolInvocationStatusTimeout   = "timeout"   // 执行超时
 	ToolInvocationStatusConfirmed = "confirmed" // 已通过 ResourceVerifier 校验，等价 COMMITTED
 )

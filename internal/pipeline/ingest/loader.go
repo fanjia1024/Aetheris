@@ -60,7 +60,7 @@ func (l *DocumentLoader) Name() string {
 func (l *DocumentLoader) Execute(ctx *common.PipelineContext, input interface{}) (interface{}, error) {
 	// 验证输入
 	if err := l.Validate(input); err != nil {
-		return nil, common.NewPipelineError(l.name, "输入验证失败", err)
+		return nil, common.NewPipelineError(l.name, "输入验证failed", err)
 	}
 
 	// 根据输入类型执行加载
@@ -118,12 +118,12 @@ func (l *DocumentLoader) ProcessDocument(doc *common.Document) (*common.Document
 func (l *DocumentLoader) loadFromPath(ctx *common.PipelineContext, path string) (*common.Document, error) {
 	content, err := ioutil.ReadFile(path)
 	if err != nil {
-		return nil, common.NewPipelineError(l.name, "读取文件失败", err)
+		return nil, common.NewPipelineError(l.name, "读取文件failed", err)
 	}
 
 	fileInfo, err := os.Stat(path)
 	if err != nil {
-		return nil, common.NewPipelineError(l.name, "获取文件信息失败", err)
+		return nil, common.NewPipelineError(l.name, "获取文件信息failed", err)
 	}
 
 	contentType := l.getContentType(path)
@@ -131,7 +131,7 @@ func (l *DocumentLoader) loadFromPath(ctx *common.PipelineContext, path string) 
 	if contentType == "application/pdf" {
 		extracted, err := extractPDFText(content)
 		if err != nil {
-			return nil, common.NewPipelineError(l.name, "PDF 文本提取失败", err)
+			return nil, common.NewPipelineError(l.name, "PDF 文本提取failed", err)
 		}
 		docContent = extracted
 	}
@@ -161,13 +161,13 @@ func (l *DocumentLoader) loadFromPath(ctx *common.PipelineContext, path string) 
 func (l *DocumentLoader) loadFromFile(ctx *common.PipelineContext, fileHeader *multipart.FileHeader) (*common.Document, error) {
 	file, err := fileHeader.Open()
 	if err != nil {
-		return nil, common.NewPipelineError(l.name, "打开文件失败", err)
+		return nil, common.NewPipelineError(l.name, "打开文件failed", err)
 	}
 	defer file.Close()
 
 	content, err := ioutil.ReadAll(file)
 	if err != nil {
-		return nil, common.NewPipelineError(l.name, "读取文件失败", err)
+		return nil, common.NewPipelineError(l.name, "读取文件failed", err)
 	}
 
 	contentType := fileHeader.Header.Get("Content-Type")
@@ -178,7 +178,7 @@ func (l *DocumentLoader) loadFromFile(ctx *common.PipelineContext, fileHeader *m
 	if contentType == "application/pdf" || strings.ToLower(filepath.Ext(fileHeader.Filename)) == ".pdf" {
 		extracted, err := extractPDFText(content)
 		if err != nil {
-			return nil, common.NewPipelineError(l.name, "PDF 文本提取失败", err)
+			return nil, common.NewPipelineError(l.name, "PDF 文本提取failed", err)
 		}
 		docContent = extracted
 	}

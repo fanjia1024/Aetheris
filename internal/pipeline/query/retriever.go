@@ -63,19 +63,19 @@ func (r *Retriever) Name() string {
 func (r *Retriever) Execute(ctx *common.PipelineContext, input interface{}) (interface{}, error) {
 	// 验证输入
 	if err := r.Validate(input); err != nil {
-		return nil, common.NewPipelineError(r.name, "输入验证失败", err)
+		return nil, common.NewPipelineError(r.name, "输入验证failed", err)
 	}
 
 	// 检索查询
 	query, ok := input.(*common.Query)
 	if !ok {
-		return nil, common.NewPipelineError(r.name, "输入类型错误", fmt.Errorf("expected *common.Query, got %T", input))
+		return nil, common.NewPipelineError(r.name, "输入类型error", fmt.Errorf("expected *common.Query, got %T", input))
 	}
 
 	// 处理查询
 	result, err := r.ProcessQuery(query)
 	if err != nil {
-		return nil, common.NewPipelineError(r.name, "检索查询失败", err)
+		return nil, common.NewPipelineError(r.name, "检索查询failed", err)
 	}
 
 	return result, nil
@@ -107,7 +107,7 @@ func (r *Retriever) ProcessQuery(query *common.Query) (*common.RetrievalResult, 
 
 	results, err := r.retrieve(query)
 	if err != nil {
-		return nil, common.NewPipelineError(r.name, "执行检索失败", err)
+		return nil, common.NewPipelineError(r.name, "执行检索failed", err)
 	}
 	return results, nil
 }
@@ -130,7 +130,7 @@ func (r *Retriever) retrieve(query *common.Query) (*common.RetrievalResult, erro
 
 	searchResults, err := r.vectorStore.Search(ctx, r.indexName, query.Embedding, opts)
 	if err != nil {
-		return nil, fmt.Errorf("从向量存储检索失败: %w", err)
+		return nil, fmt.Errorf("从向量存储检索failed: %w", err)
 	}
 
 	startTime := time.Now()

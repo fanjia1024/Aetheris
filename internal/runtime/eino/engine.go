@@ -66,7 +66,7 @@ func NewEngine(cfg *config.Config, logger *log.Logger) (*Engine, error) {
 
 	// 启动引擎
 	if err := engine.start(); err != nil {
-		return nil, fmt.Errorf("启动 eino 引擎失败: %w", err)
+		return nil, fmt.Errorf("启动 eino 引擎failed: %w", err)
 	}
 
 	logger.Info("eino 引擎初始化成功")
@@ -216,7 +216,7 @@ func (e *Engine) createChatModel(ctx context.Context) (*openai.ChatModel, error)
 		APIKey: pc.APIKey,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("创建 OpenAI ChatModel 失败: %w", err)
+		return nil, fmt.Errorf("创建 OpenAI ChatModel failed: %w", err)
 	}
 	return chatModel, nil
 }

@@ -103,7 +103,7 @@ func (a *EinoRetrieverQueryAdapter) SetTopK(topK int) {
 func (a *EinoRetrieverQueryAdapter) Execute(ctx *common.PipelineContext, input interface{}) (interface{}, error) {
 	q, ok := input.(*common.Query)
 	if !ok {
-		return nil, common.NewPipelineError("eino_retriever", "输入类型错误", fmt.Errorf("expected *common.Query, got %T", input))
+		return nil, common.NewPipelineError("eino_retriever", "输入类型error", fmt.Errorf("expected *common.Query, got %T", input))
 	}
 	if q == nil {
 		return nil, common.ErrInvalidInput
@@ -120,7 +120,7 @@ func (a *EinoRetrieverQueryAdapter) Execute(ctx *common.PipelineContext, input i
 	}
 	docs, err := a.EinoRetriever.Retrieve(reqCtx, q.Text, opts...)
 	if err != nil {
-		return nil, common.NewPipelineError("eino_retriever", "检索失败", err)
+		return nil, common.NewPipelineError("eino_retriever", "检索failed", err)
 	}
 	chunks := make([]common.Chunk, len(docs))
 	scores := make([]float64, len(docs))

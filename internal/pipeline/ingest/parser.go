@@ -55,19 +55,19 @@ func (p *DocumentParser) Name() string {
 func (p *DocumentParser) Execute(ctx *common.PipelineContext, input interface{}) (interface{}, error) {
 	// 验证输入
 	if err := p.Validate(input); err != nil {
-		return nil, common.NewPipelineError(p.name, "输入验证失败", err)
+		return nil, common.NewPipelineError(p.name, "输入验证failed", err)
 	}
 
 	// 解析文档
 	doc, ok := input.(*common.Document)
 	if !ok {
-		return nil, common.NewPipelineError(p.name, "输入类型错误", fmt.Errorf("expected *common.Document, got %T", input))
+		return nil, common.NewPipelineError(p.name, "输入类型error", fmt.Errorf("expected *common.Document, got %T", input))
 	}
 
 	// 处理文档
 	parsedDoc, err := p.ProcessDocument(doc)
 	if err != nil {
-		return nil, common.NewPipelineError(p.name, "解析文档失败", err)
+		return nil, common.NewPipelineError(p.name, "解析文档failed", err)
 	}
 
 	return parsedDoc, nil
@@ -97,13 +97,13 @@ func (p *DocumentParser) ProcessDocument(doc *common.Document) (*common.Document
 	// 选择合适的解析器
 	parser, err := p.selectParser(contentType)
 	if err != nil {
-		return nil, common.NewPipelineError(p.name, "选择解析器失败", err)
+		return nil, common.NewPipelineError(p.name, "选择解析器failed", err)
 	}
 
 	// 执行解析
 	parsedContent, err := parser.Parse(doc.Content, doc.Metadata)
 	if err != nil {
-		return nil, common.NewPipelineError(p.name, "解析内容失败", err)
+		return nil, common.NewPipelineError(p.name, "解析内容failed", err)
 	}
 
 	// 更新文档内容

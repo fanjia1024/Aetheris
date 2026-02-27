@@ -41,14 +41,14 @@ func NewBootstrap(cfg *config.Config) (*Bootstrap, error) {
 	}
 	logger, err := log.NewLogger(logCfg)
 	if err != nil {
-		return nil, fmt.Errorf("初始化日志失败: %w", err)
+		return nil, fmt.Errorf("初始化日志failed: %w", err)
 	}
 
 	var metaStore metadata.Store
 	if cfg != nil {
 		metaStore, err = metadata.NewStore(cfg.Storage.Metadata)
 		if err != nil {
-			return nil, fmt.Errorf("初始化元数据存储失败: %w", err)
+			return nil, fmt.Errorf("初始化元数据存储failed: %w", err)
 		}
 	}
 
@@ -59,7 +59,7 @@ func NewBootstrap(cfg *config.Config) (*Bootstrap, error) {
 		if t == "" || t == "memory" {
 			vecStore, err = vector.NewStore(cfg.Storage.Vector)
 			if err != nil {
-				return nil, fmt.Errorf("初始化向量存储失败: %w", err)
+				return nil, fmt.Errorf("初始化向量存储failed: %w", err)
 			}
 		}
 	}

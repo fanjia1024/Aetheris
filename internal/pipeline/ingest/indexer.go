@@ -93,19 +93,19 @@ func (i *DocumentIndexer) Name() string {
 func (i *DocumentIndexer) Execute(ctx *common.PipelineContext, input interface{}) (interface{}, error) {
 	// 验证输入
 	if err := i.Validate(input); err != nil {
-		return nil, common.NewPipelineError(i.name, "输入验证失败", err)
+		return nil, common.NewPipelineError(i.name, "输入验证failed", err)
 	}
 
 	// 索引文档
 	doc, ok := input.(*common.Document)
 	if !ok {
-		return nil, common.NewPipelineError(i.name, "输入类型错误", fmt.Errorf("expected *common.Document, got %T", input))
+		return nil, common.NewPipelineError(i.name, "输入类型error", fmt.Errorf("expected *common.Document, got %T", input))
 	}
 
 	// 处理文档
 	indexedDoc, err := i.ProcessDocument(ctx, doc)
 	if err != nil {
-		return nil, common.NewPipelineError(i.name, "索引文档失败", err)
+		return nil, common.NewPipelineError(i.name, "索引文档failed", err)
 	}
 
 	return indexedDoc, nil
@@ -148,7 +148,7 @@ func (i *DocumentIndexer) ProcessDocument(ctx *common.PipelineContext, doc *comm
 
 	// 存储文档元数据
 	if err := i.storeDocumentMetadata(ctx.Context, doc); err != nil {
-		return nil, common.NewPipelineError(i.name, "存储文档元数据失败", err)
+		return nil, common.NewPipelineError(i.name, "存储文档元数据failed", err)
 	}
 
 	if i.einoIndexer != nil {
@@ -170,12 +170,12 @@ func (i *DocumentIndexer) ProcessDocument(ctx *common.PipelineContext, doc *comm
 		}
 		_, err := i.einoIndexer.Store(ctx.Context, einoDocs, einoindexer.WithSubIndexes([]string{i.defaultIndexName}))
 		if err != nil {
-			return nil, common.NewPipelineError(i.name, "Eino Indexer Store 失败", err)
+			return nil, common.NewPipelineError(i.name, "Eino Indexer Store failed", err)
 		}
 	} else {
 		// 批量索引切片（原有 vector.Store 路径）
 		if err := i.indexChunks(doc); err != nil {
-			return nil, common.NewPipelineError(i.name, "索引切片失败", err)
+			return nil, common.NewPipelineError(i.name, "索引切片failed", err)
 		}
 	}
 
@@ -218,7 +218,7 @@ func (i *DocumentIndexer) storeDocumentMetadata(ctx context.Context, doc *common
 		UpdatedAt: updatedAt,
 	}
 	if err := i.metadataStore.Create(ctx, documentRecord); err != nil {
-		return fmt.Errorf("创建文档记录失败: %w", err)
+		return fmt.Errorf("创建文档记录failed: %w", err)
 	}
 	return nil
 }
@@ -239,7 +239,7 @@ func (i *DocumentIndexer) indexChunks(doc *common.Document) error {
 
 		batch := chunks[start:end]
 		if err := i.indexBatch(batch, doc.ID); err != nil {
-			return fmt.Errorf("索引批次失败: %w", err)
+			return fmt.Errorf("索引批次failed: %w", err)
 		}
 	}
 
@@ -270,7 +270,7 @@ func (i *DocumentIndexer) indexBatch(chunks []common.Chunk, documentID string) e
 	}
 	ctx := context.Background()
 	if err := i.vectorStore.Add(ctx, indexName, vecs); err != nil {
-		return fmt.Errorf("索引向量失败: %w", err)
+		return fmt.Errorf("索引向量failed: %w", err)
 	}
 	return nil
 }

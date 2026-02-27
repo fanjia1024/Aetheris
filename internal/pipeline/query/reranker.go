@@ -54,19 +54,19 @@ func (r *Reranker) Name() string {
 func (r *Reranker) Execute(ctx *common.PipelineContext, input interface{}) (interface{}, error) {
 	// 验证输入
 	if err := r.Validate(input); err != nil {
-		return nil, common.NewPipelineError(r.name, "输入验证失败", err)
+		return nil, common.NewPipelineError(r.name, "输入验证failed", err)
 	}
 
 	// 重排检索结果
 	result, ok := input.(*common.RetrievalResult)
 	if !ok {
-		return nil, common.NewPipelineError(r.name, "输入类型错误", fmt.Errorf("expected *common.RetrievalResult, got %T", input))
+		return nil, common.NewPipelineError(r.name, "输入类型error", fmt.Errorf("expected *common.RetrievalResult, got %T", input))
 	}
 
 	// 处理重排
 	rerankedResult, err := r.rerank(result)
 	if err != nil {
-		return nil, common.NewPipelineError(r.name, "重排结果失败", err)
+		return nil, common.NewPipelineError(r.name, "重排结果failed", err)
 	}
 
 	return rerankedResult, nil

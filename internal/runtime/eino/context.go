@@ -42,7 +42,7 @@ func (cm *ContextManager) RegisterRunner(name string, runner *adk.Runner) {
 func (cm *ContextManager) GetRunner(name string) (*adk.Runner, error) {
 	runner, exists := cm.runners[name]
 	if !exists {
-		return nil, fmt.Errorf("Runner %s 不存在", name)
+		return nil, fmt.Errorf("Runner %s not found", name)
 	}
 	return runner, nil
 }

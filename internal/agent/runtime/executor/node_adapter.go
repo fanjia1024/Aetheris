@@ -107,7 +107,7 @@ type LLMNodeAdapter struct {
 	LLM                LLMGen
 	CommandEventSink   CommandEventSink // 可选；执行成功后立即写 command_committed，保证副作用安全
 	EffectStore        EffectStore      // 可选；非 nil 时写入完整 LLM effect（prompt+response）并 Replay 时从 store 注入不重调（design/effect-system LLM Effect Capture）
-	RequireEffectStore bool             // 生产模式下要求必须配置 EffectStore，否则返回错误
+	RequireEffectStore bool             // 生产模式下要求必须配置 EffectStore，否则返回error
 }
 
 func (a *LLMNodeAdapter) runNode(ctx context.Context, taskID string, cfg map[string]any, agent *runtime.Agent, p *AgentDAGPayload) (*AgentDAGPayload, error) {
@@ -259,19 +259,19 @@ type ToolNodeAdapter struct {
 	InvocationStore ToolInvocationStore
 	// EffectStore 副作用存储；非 nil 时两步提交：Execute 后先 PutEffect，再 Append；Replay/catch-up 时先查此处（强 Replay）
 	EffectStore EffectStore
-	// CapabilityPolicyChecker 执行前校验；非 nil 时在 Tools.Execute 前按能力/策略 Check，deny 则失败该步，require_approval 则返回 CapabilityRequiresApproval（design/capability-policy.md）
+	// CapabilityPolicyChecker 执行前校验；非 nil 时在 Tools.Execute 前按能力/策略 Check，deny 则failed该步，require_approval 则返回 CapabilityRequiresApproval（design/capability-policy.md）
 	CapabilityPolicyChecker CapabilityPolicyChecker
 	// ToolCapabilityFunc 可选；按工具名解析其声明的 capability，供 Check 使用；未设置时用 toolName
 	ToolCapabilityFunc     func(toolName string) string
 	ResourceVerifier       ResourceVerifier       // 可选；Confirmation Replay 时校验外部资源仍存在，不通过则按 ReplayVerificationMode 处理
-	ReplayVerificationMode ReplayVerificationMode // 校验失败时的策略：Strict（默认失败）、Warn（记风险继续）、HumanInLoop（返回 ErrReplayVerificationHumanRequired 供 park）
-	// RetryPolicy 可选；Tool 执行失败时按策略重试（2.0 Tool Contract），同一 idempotency_key 下为同步重试
+	ReplayVerificationMode ReplayVerificationMode // 校验failed时的策略：Strict（默认failed）、Warn（记风险继续）、HumanInLoop（返回 ErrReplayVerificationHumanRequired 供 park）
+	// RetryPolicy 可选；Tool 执行failed时按策略重试（2.0 Tool Contract），同一 idempotency_key 下为同步重试
 	RetryPolicy *RetryPolicy
 	// RateLimiter 可选；Tool 执行前限流，防止打爆外部 API（2.0 Operational）
 	RateLimiter *ToolRateLimiter
 }
 
-// runConfirmation 在注入前校验本步的 StateChanged；若 verifier 存在且有待校验项且任一项失败则按 ReplayVerificationMode 处理
+// runConfirmation 在注入前校验本步的 StateChanged；若 verifier 存在且有待校验项且任一项failed则按 ReplayVerificationMode 处理
 func (a *ToolNodeAdapter) runConfirmation(ctx context.Context, jobID, taskID string, stepChanges []StateChangeForVerify) error {
 	if a.ResourceVerifier == nil || len(stepChanges) == 0 {
 		return nil
@@ -348,7 +348,7 @@ func (a *ToolNodeAdapter) runNode(ctx context.Context, taskID, toolName string, 
 		stepChanges = StateChangesByStepFromContext(ctx)[taskID]
 	}
 
-	// Activity Log Barrier：事件流中已 started 无 finished 时禁止再次执行，仅恢复或失败（design/effect-system.md）
+	// Activity Log Barrier：事件流中已 started 无 finished 时禁止再次执行，仅恢复或failed（design/effect-system.md）
 	if pending := PendingToolInvocationsFromContext(ctx); pending != nil {
 		if _, isPending := pending[idempotencyKey]; isPending {
 			var resultBytes []byte

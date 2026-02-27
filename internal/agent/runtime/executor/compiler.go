@@ -70,16 +70,16 @@ func (c *Compiler) Compile(ctx context.Context, g *planner.TaskGraph, agent *run
 		}
 		lambda, err := adapter.ToDAGNode(node, agent)
 		if err != nil {
-			return nil, fmt.Errorf("executor: 节点 %s 适配失败: %w", node.ID, err)
+			return nil, fmt.Errorf("executor: 节点 %s 适配failed: %w", node.ID, err)
 		}
 		if err := graph.AddLambdaNode(node.ID, lambda); err != nil {
-			return nil, fmt.Errorf("executor: 添加节点 %s 失败: %w", node.ID, err)
+			return nil, fmt.Errorf("executor: 添加节点 %s failed: %w", node.ID, err)
 		}
 	}
 
 	for _, edge := range g.Edges {
 		if err := graph.AddEdge(edge.From, edge.To); err != nil {
-			return nil, fmt.Errorf("executor: 添加边 %s->%s 失败: %w", edge.From, edge.To, err)
+			return nil, fmt.Errorf("executor: 添加边 %s->%s failed: %w", edge.From, edge.To, err)
 		}
 	}
 
@@ -92,12 +92,12 @@ func (c *Compiler) Compile(ctx context.Context, g *planner.TaskGraph, agent *run
 	for id := range nodeIDs {
 		if !hasIncoming[id] {
 			if err := graph.AddEdge(compose.START, id); err != nil {
-				return nil, fmt.Errorf("executor: 连接 START->%s 失败: %w", id, err)
+				return nil, fmt.Errorf("executor: 连接 START->%s failed: %w", id, err)
 			}
 		}
 		if !hasOutgoing[id] {
 			if err := graph.AddEdge(id, compose.END); err != nil {
-				return nil, fmt.Errorf("executor: 连接 %s->END 失败: %w", id, err)
+				return nil, fmt.Errorf("executor: 连接 %s->END failed: %w", id, err)
 			}
 		}
 	}

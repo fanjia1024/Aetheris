@@ -85,7 +85,7 @@ func (e *ingestWorkflowExecutor) Execute(ctx context.Context, params map[string]
 	out, err := e.loader.Execute(pipeCtx, loaderInput)
 	if err != nil {
 		if e.logger != nil {
-			e.logger.Error("ingest 阶段失败", "ingest_id", ingestID, "ingest_step", "loader", "error", err)
+			e.logger.Error("ingest 阶段failed", "ingest_id", ingestID, "ingest_step", "loader", "error", err)
 		}
 		return nil, fmt.Errorf("ingest loader: %w", err)
 	}
@@ -105,7 +105,7 @@ func (e *ingestWorkflowExecutor) Execute(ctx context.Context, params map[string]
 	out, err = e.parser.Execute(pipeCtx, doc)
 	if err != nil {
 		if e.logger != nil {
-			e.logger.Error("ingest 阶段失败", "ingest_id", ingestID, "ingest_step", "parser", "doc_id", doc.ID, "error", err)
+			e.logger.Error("ingest 阶段failed", "ingest_id", ingestID, "ingest_step", "parser", "doc_id", doc.ID, "error", err)
 		}
 		return nil, fmt.Errorf("ingest parser: %w", err)
 	}
@@ -125,7 +125,7 @@ func (e *ingestWorkflowExecutor) Execute(ctx context.Context, params map[string]
 	out, err = e.splitter.Execute(pipeCtx, doc)
 	if err != nil {
 		if e.logger != nil {
-			e.logger.Error("ingest 阶段失败", "ingest_id", ingestID, "ingest_step", "splitter", "doc_id", doc.ID, "error", err)
+			e.logger.Error("ingest 阶段failed", "ingest_id", ingestID, "ingest_step", "splitter", "doc_id", doc.ID, "error", err)
 		}
 		return nil, fmt.Errorf("ingest splitter: %w", err)
 	}
@@ -146,7 +146,7 @@ func (e *ingestWorkflowExecutor) Execute(ctx context.Context, params map[string]
 		out, err = e.embedding.Execute(pipeCtx, doc)
 		if err != nil {
 			if e.logger != nil {
-				e.logger.Error("ingest 阶段失败", "ingest_id", ingestID, "ingest_step", "embedding", "doc_id", doc.ID, "error", err)
+				e.logger.Error("ingest 阶段failed", "ingest_id", ingestID, "ingest_step", "embedding", "doc_id", doc.ID, "error", err)
 			}
 			return nil, fmt.Errorf("ingest embedding: %w", err)
 		}
@@ -168,7 +168,7 @@ func (e *ingestWorkflowExecutor) Execute(ctx context.Context, params map[string]
 		out, err = e.indexer.Execute(pipeCtx, doc)
 		if err != nil {
 			if e.logger != nil {
-				e.logger.Error("ingest 阶段失败", "ingest_id", ingestID, "ingest_step", "indexer", "doc_id", doc.ID, "error", err)
+				e.logger.Error("ingest 阶段failed", "ingest_id", ingestID, "ingest_step", "indexer", "doc_id", doc.ID, "error", err)
 			}
 			return nil, fmt.Errorf("ingest indexer: %w", err)
 		}

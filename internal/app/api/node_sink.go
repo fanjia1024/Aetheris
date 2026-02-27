@@ -71,7 +71,7 @@ func (s *nodeEventSinkImpl) AppendNodeStarted(ctx context.Context, jobID string,
 	return err
 }
 
-// AppendNodeFinished 实现 NodeEventSink；resultType/reason 为 Phase A 失败语义，Replay 仅当 result_type==success 时视节点完成；stepID 为空时用 nodeID，inputHash 供确定性 Replay（plan 3.3）
+// AppendNodeFinished 实现 NodeEventSink；resultType/reason 为 Phase A failed语义，Replay 仅当 result_type==success 时视节点完成；stepID 为空时用 nodeID，inputHash 供确定性 Replay（plan 3.3）
 func (s *nodeEventSinkImpl) AppendNodeFinished(ctx context.Context, jobID string, nodeID string, payloadResults []byte, durationMs int64, state string, attempt int, resultType agentexec.StepResultType, reason string, stepID string, inputHash string) error {
 	if s.store == nil {
 		return nil

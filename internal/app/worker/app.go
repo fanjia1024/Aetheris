@@ -80,24 +80,24 @@ func NewApp(cfg *config.Config) (*App, error) {
 	}
 	logger, err := log.NewLogger(logCfg)
 	if err != nil {
-		return nil, fmt.Errorf("初始化日志失败: %w", err)
+		return nil, fmt.Errorf("初始化日志failed: %w", err)
 	}
 
 	// 初始化存储
 	metadataStore, err := metadata.NewStore(cfg.Storage.Metadata)
 	if err != nil {
-		return nil, fmt.Errorf("初始化元数据存储失败: %w", err)
+		return nil, fmt.Errorf("初始化元数据存储failed: %w", err)
 	}
 
 	vectorStore, err := vector.NewStore(cfg.Storage.Vector)
 	if err != nil {
-		return nil, fmt.Errorf("初始化向量存储失败: %w", err)
+		return nil, fmt.Errorf("初始化向量存储failed: %w", err)
 	}
 
 	// 初始化 eino 引擎（ingest 任务通过 ExecuteWorkflow(ctx, "ingest_pipeline", payload) 执行）
 	engine, err := eino.NewEngine(cfg, logger)
 	if err != nil {
-		return nil, fmt.Errorf("初始化 eino 引擎失败: %w", err)
+		return nil, fmt.Errorf("初始化 eino 引擎failed: %w", err)
 	}
 
 	appObj := &App{
@@ -120,15 +120,15 @@ func NewApp(cfg *config.Config) (*App, error) {
 		}
 		pgEventStore, err := jobstore.NewPostgresStore(context.Background(), dsn, leaseDur)
 		if err != nil {
-			return nil, fmt.Errorf("初始化 JobStore 事件(postgres) 失败: %w", err)
+			return nil, fmt.Errorf("初始化 JobStore 事件(postgres) failed: %w", err)
 		}
 		pgJobStore, err := job.NewJobStorePg(context.Background(), dsn)
 		if err != nil {
-			return nil, fmt.Errorf("初始化 Job 元数据(postgres) 失败: %w", err)
+			return nil, fmt.Errorf("初始化 Job 元数据(postgres) failed: %w", err)
 		}
 		llmClientRaw, err := app.NewLLMClientFromConfig(cfg)
 		if err != nil {
-			return nil, fmt.Errorf("初始化 LLM 客户端失败: %w", err)
+			return nil, fmt.Errorf("初始化 LLM 客户端failed: %w", err)
 		}
 		// LLM 限流包装
 		var llmClient llmmod.Client = llmClientRaw
@@ -179,11 +179,11 @@ func NewApp(cfg *config.Config) (*App, error) {
 		if cfg.EffectStore.Type == "postgres" && cfg.EffectStore.DSN != "" {
 			effPoolConfig, errPool := pgxpool.ParseConfig(cfg.EffectStore.DSN)
 			if errPool != nil {
-				return nil, fmt.Errorf("解析 EffectStore DSN 失败: %w", errPool)
+				return nil, fmt.Errorf("解析 EffectStore DSN failed: %w", errPool)
 			}
 			effPool, errPool := pgxpool.NewWithConfig(context.Background(), effPoolConfig)
 			if errPool != nil {
-				return nil, fmt.Errorf("创建 EffectStore 连接池失败: %w", errPool)
+				return nil, fmt.Errorf("创建 EffectStore 连接池failed: %w", errPool)
 			}
 			effectStore = agentexec.NewEffectStorePg(effPool)
 		} else {
@@ -215,17 +215,17 @@ func NewApp(cfg *config.Config) (*App, error) {
 		if cfg.CheckpointStore.Type == "postgres" && cfg.CheckpointStore.DSN != "" {
 			cpPoolConfig, errPool := pgxpool.ParseConfig(cfg.CheckpointStore.DSN)
 			if errPool != nil {
-				return nil, fmt.Errorf("解析 CheckpointStore DSN 失败: %w", errPool)
+				return nil, fmt.Errorf("解析 CheckpointStore DSN failed: %w", errPool)
 			}
 			cpPool, errPool := pgxpool.NewWithConfig(context.Background(), cpPoolConfig)
 			if errPool != nil {
-				return nil, fmt.Errorf("创建 CheckpointStore 连接池失败: %w", errPool)
+				return nil, fmt.Errorf("创建 CheckpointStore 连接池failed: %w", errPool)
 			}
 			checkpointStore = runtime.NewCheckpointStorePg(cpPool)
 		}
 		agentStateStore, errState := runtime.NewAgentStateStorePg(context.Background(), dsn)
 		if errState != nil {
-			return nil, fmt.Errorf("初始化 AgentStateStore(postgres) 失败: %w", errState)
+			return nil, fmt.Errorf("初始化 AgentStateStore(postgres) failed: %w", errState)
 		}
 		dagRunner.SetCheckpointStores(checkpointStore, &jobStoreForRunnerAdapter{JobStore: pgJobStore})
 		dagRunner.SetPlanGeneratedSink(api.NewPlanGeneratedSink(pgEventStore))
@@ -405,7 +405,7 @@ func (a *App) Start() error {
 
 	// 启动工作队列消费者：收到入库任务时调用 engine.ExecuteWorkflow(ctx, "ingest_pipeline", payload)
 	if err := a.startWorkerQueue(); err != nil {
-		return fmt.Errorf("启动工作队列失败: %w", err)
+		return fmt.Errorf("启动工作队列failed: %w", err)
 	}
 
 	a.logger.Info("worker 应用启动成功")
@@ -448,7 +448,7 @@ func (a *App) triggerSnapshotsForHighEventJobs(eventThreshold, limit int) {
 
 	jobIDs, err := ss.ListJobsWithHighEventCount(ctx, eventThreshold, limit)
 	if err != nil {
-		a.logger.Warn("Snapshot 扫描失败", "error", err)
+		a.logger.Warn("Snapshot 扫描failed", "error", err)
 		return
 	}
 	if len(jobIDs) == 0 {
@@ -471,11 +471,11 @@ func (a *App) triggerSnapshotsForHighEventJobs(eventThreshold, limit int) {
 		}
 		snapshotBytes, err := replay.SerializeReplayContext(rc)
 		if err != nil {
-			a.logger.Warn("快照序列化失败", "job_id", jobID, "error", err)
+			a.logger.Warn("快照序列化failed", "job_id", jobID, "error", err)
 			continue
 		}
 		if err := ss.CreateSnapshot(ctx, jobID, version, snapshotBytes); err != nil {
-			a.logger.Warn("快照写入失败", "job_id", jobID, "error", err)
+			a.logger.Warn("快照写入failed", "job_id", jobID, "error", err)
 			continue
 		}
 		// 清理旧快照（保留最新一个）
@@ -515,7 +515,7 @@ func (a *App) runGC() {
 	defer cancel()
 
 	if err := jobstore.GC(ctx, a.jobEventStore, gcCfg); err != nil {
-		a.logger.Warn("Storage GC 执行失败", "error", err)
+		a.logger.Warn("Storage GC 执行failed", "error", err)
 	} else {
 		a.logger.Info("Storage GC 执行完成")
 	}
@@ -558,16 +558,16 @@ func (a *App) Shutdown(ctx context.Context) error {
 
 	// 3. 关闭存储
 	if err := a.metadataStore.Close(); err != nil {
-		a.logger.Error("关闭元数据存储失败", "error", err)
+		a.logger.Error("关闭元数据存储failed", "error", err)
 	}
 
 	if err := a.vectorStore.Close(); err != nil {
-		a.logger.Error("关闭向量存储失败", "error", err)
+		a.logger.Error("关闭向量存储failed", "error", err)
 	}
 
 	// 4. 关闭 eino 引擎
 	if err := a.engine.Shutdown(); err != nil {
-		a.logger.Error("关闭 eino 引擎失败", "error", err)
+		a.logger.Error("关闭 eino 引擎failed", "error", err)
 	}
 
 	a.logger.Info("worker 应用关闭成功")
@@ -582,11 +582,11 @@ func (a *App) startWorkerQueue() error {
 	dsn := a.config.JobStore.DSN
 	poolConfig, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		return fmt.Errorf("解析入库队列 DSN 失败: %w", err)
+		return fmt.Errorf("解析入库队列 DSN failed: %w", err)
 	}
 	pool, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
 	if err != nil {
-		return fmt.Errorf("创建入库队列连接池失败: %w", err)
+		return fmt.Errorf("创建入库队列连接池failed: %w", err)
 	}
 	queue := ingestqueue.NewIngestQueuePg(pool)
 	workerID := fmt.Sprintf("%s-%d", getHostname(), os.Getpid())
@@ -638,7 +638,7 @@ func (a *App) runIngestQueueLoop(queue ingestqueue.IngestQueue, workerID string,
 		ctx := context.Background()
 		taskID, payload, err := queue.ClaimOne(ctx, workerID)
 		if err != nil {
-			a.logger.Error("认领入库任务失败", "error", err)
+			a.logger.Error("认领入库任务failed", "error", err)
 			time.Sleep(pollInterval)
 			continue
 		}
@@ -653,7 +653,7 @@ func (a *App) runIngestQueueLoop(queue ingestqueue.IngestQueue, workerID string,
 		}
 		decoded, err := base64.StdEncoding.DecodeString(contentBase64)
 		if err != nil {
-			_ = queue.MarkFailed(ctx, taskID, "content_base64 解码失败: "+err.Error())
+			_ = queue.MarkFailed(ctx, taskID, "content_base64 解码failed: "+err.Error())
 			continue
 		}
 		params := map[string]interface{}{"content": decoded}
@@ -666,11 +666,11 @@ func (a *App) runIngestQueueLoop(queue ingestqueue.IngestQueue, workerID string,
 		result, err := a.engine.ExecuteWorkflow(ctx, "ingest_pipeline", params)
 		if err != nil {
 			_ = queue.MarkFailed(ctx, taskID, err.Error())
-			a.logger.Error("入库任务执行失败", "task_id", taskID, "error", err)
+			a.logger.Error("入库任务执行failed", "task_id", taskID, "error", err)
 			continue
 		}
 		if err := queue.MarkCompleted(ctx, taskID, result); err != nil {
-			a.logger.Error("标记入库任务完成失败", "task_id", taskID, "error", err)
+			a.logger.Error("标记入库任务完成failed", "task_id", taskID, "error", err)
 		}
 	}
 }

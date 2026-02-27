@@ -70,19 +70,19 @@ func (s *DocumentSplitter) Name() string {
 func (s *DocumentSplitter) Execute(ctx *common.PipelineContext, input interface{}) (interface{}, error) {
 	// 验证输入
 	if err := s.Validate(input); err != nil {
-		return nil, common.NewPipelineError(s.name, "输入验证失败", err)
+		return nil, common.NewPipelineError(s.name, "输入验证failed", err)
 	}
 
 	// 切片文档
 	doc, ok := input.(*common.Document)
 	if !ok {
-		return nil, common.NewPipelineError(s.name, "输入类型错误", fmt.Errorf("expected *common.Document, got %T", input))
+		return nil, common.NewPipelineError(s.name, "输入类型error", fmt.Errorf("expected *common.Document, got %T", input))
 	}
 
 	// 处理文档
 	splitDoc, err := s.ProcessDocument(doc)
 	if err != nil {
-		return nil, common.NewPipelineError(s.name, "切片文档失败", err)
+		return nil, common.NewPipelineError(s.name, "切片文档failed", err)
 	}
 
 	return splitDoc, nil
@@ -106,7 +106,7 @@ func (s *DocumentSplitter) ProcessDocument(doc *common.Document) (*common.Docume
 	// 执行切片
 	chunks, err := s.splitDocument(doc)
 	if err != nil {
-		return nil, common.NewPipelineError(s.name, "切片文档失败", err)
+		return nil, common.NewPipelineError(s.name, "切片文档failed", err)
 	}
 
 	// 更新文档

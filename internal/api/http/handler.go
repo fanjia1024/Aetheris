@@ -247,9 +247,9 @@ func (h *Handler) UploadDocument(ctx context.Context, c *app.RequestContext) {
 	})
 
 	if err != nil {
-		hlog.CtxErrorf(ctx, "上传文档失败: %v", err)
+		hlog.CtxErrorf(ctx, "上传文档failed: %v", err)
 		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
-			"error":   "上传文档失败",
+			"error":   "上传文档failed",
 			"details": err.Error(),
 		})
 		return
@@ -280,7 +280,7 @@ func (h *Handler) UploadDocumentAsync(ctx context.Context, c *app.RequestContext
 	opened, err := file.Open()
 	if err != nil {
 		c.JSON(consts.StatusInternalServerError, map[string]string{
-			"error": "打开上传文件失败",
+			"error": "打开上传文件failed",
 		})
 		return
 	}
@@ -288,7 +288,7 @@ func (h *Handler) UploadDocumentAsync(ctx context.Context, c *app.RequestContext
 	data, err := io.ReadAll(opened)
 	if err != nil {
 		c.JSON(consts.StatusInternalServerError, map[string]string{
-			"error": "读取上传文件失败",
+			"error": "读取上传文件failed",
 		})
 		return
 	}
@@ -303,9 +303,9 @@ func (h *Handler) UploadDocumentAsync(ctx context.Context, c *app.RequestContext
 	}
 	taskID, err := h.ingestQueue.Enqueue(ctx, payload)
 	if err != nil {
-		hlog.CtxErrorf(ctx, "入库任务入队失败: %v", err)
+		hlog.CtxErrorf(ctx, "入库任务入队failed: %v", err)
 		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
-			"error":   "入库任务入队失败",
+			"error":   "入库任务入队failed",
 			"details": err.Error(),
 		})
 		return
@@ -351,9 +351,9 @@ func (h *Handler) UploadStatus(ctx context.Context, c *app.RequestContext) {
 func (h *Handler) ListDocuments(ctx context.Context, c *app.RequestContext) {
 	documents, err := h.docService.ListDocuments(ctx)
 	if err != nil {
-		hlog.CtxErrorf(ctx, "获取文档列表失败: %v", err)
+		hlog.CtxErrorf(ctx, "获取文档列表failed: %v", err)
 		c.JSON(consts.StatusInternalServerError, map[string]string{
-			"error": "获取文档列表失败",
+			"error": "获取文档列表failed",
 		})
 		return
 	}
@@ -385,7 +385,7 @@ func (h *Handler) DeleteDocument(ctx context.Context, c *app.RequestContext) {
 
 	if err := h.docService.DeleteDocument(ctx, id); err != nil {
 		c.JSON(consts.StatusInternalServerError, map[string]string{
-			"error": "删除文档失败",
+			"error": "删除文档failed",
 		})
 		return
 	}
@@ -420,7 +420,7 @@ func (h *Handler) CreateCollection(ctx context.Context, c *app.RequestContext) {
 
 	if err := c.BindJSON(&request); err != nil {
 		c.JSON(consts.StatusBadRequest, map[string]string{
-			"error": "请求参数错误",
+			"error": "请求参数error",
 		})
 		return
 	}
@@ -457,7 +457,7 @@ func (h *Handler) Query(ctx context.Context, c *app.RequestContext) {
 
 	if err := c.BindJSON(&request); err != nil {
 		c.JSON(consts.StatusBadRequest, map[string]string{
-			"error": "请求参数错误",
+			"error": "请求参数error",
 		})
 		return
 	}
@@ -475,9 +475,9 @@ func (h *Handler) Query(ctx context.Context, c *app.RequestContext) {
 	})
 
 	if err != nil {
-		hlog.CtxErrorf(ctx, "查询失败: %v", err)
+		hlog.CtxErrorf(ctx, "查询failed: %v", err)
 		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
-			"error":   "查询失败",
+			"error":   "查询failed",
 			"details": err.Error(),
 		})
 		return
@@ -500,7 +500,7 @@ func (h *Handler) BatchQuery(ctx context.Context, c *app.RequestContext) {
 
 	if err := c.BindJSON(&request); err != nil {
 		c.JSON(consts.StatusBadRequest, map[string]string{
-			"error": "请求参数错误",
+			"error": "请求参数error",
 		})
 		return
 	}
@@ -596,7 +596,7 @@ func (h *Handler) SystemWorkers(ctx context.Context, c *app.RequestContext) {
 	ids, err := wl.ListActiveWorkerIDs(ctx)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "ListActiveWorkerIDs: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取 Worker 列表失败"})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取 Worker 列表failed"})
 		return
 	}
 	c.JSON(consts.StatusOK, map[string]interface{}{"workers": ids, "total": len(ids)})
@@ -670,9 +670,9 @@ func runADK(ctx context.Context, c *app.RequestContext, runner *adk.Runner, sess
 			break
 		}
 		if event.Err != nil {
-			hlog.CtxErrorf(ctx, "ADK Run 事件错误: %v", event.Err)
+			hlog.CtxErrorf(ctx, "ADK Run 事件error: %v", event.Err)
 			c.JSON(consts.StatusInternalServerError, map[string]interface{}{
-				"error":   "Agent 执行失败",
+				"error":   "Agent 执行failed",
 				"details": event.Err.Error(),
 			})
 			return
@@ -724,15 +724,15 @@ func (h *Handler) AgentResumeCheckpoint(ctx context.Context, c *app.RequestConte
 	var req AgentResumeCheckpointRequest
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(consts.StatusBadRequest, map[string]string{
-			"error": "请求参数错误，需要 checkpoint_id",
+			"error": "请求参数error，需要 checkpoint_id",
 		})
 		return
 	}
 	iter, err := h.adkRunner.Resume(ctx, req.CheckPointID)
 	if err != nil {
-		hlog.CtxErrorf(ctx, "ADK Resume 失败: %v", err)
+		hlog.CtxErrorf(ctx, "ADK Resume failed: %v", err)
 		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
-			"error":   "Resume 失败",
+			"error":   "Resume failed",
 			"details": err.Error(),
 		})
 		return
@@ -745,9 +745,9 @@ func (h *Handler) AgentResumeCheckpoint(ctx context.Context, c *app.RequestConte
 			break
 		}
 		if event.Err != nil {
-			hlog.CtxErrorf(ctx, "ADK Resume 事件错误: %v", event.Err)
+			hlog.CtxErrorf(ctx, "ADK Resume 事件error: %v", event.Err)
 			c.JSON(consts.StatusInternalServerError, map[string]interface{}{
-				"error":   "Agent 执行失败",
+				"error":   "Agent 执行failed",
 				"details": event.Err.Error(),
 			})
 			return
@@ -791,15 +791,15 @@ func (h *Handler) AgentStream(ctx context.Context, c *app.RequestContext) {
 	var req AgentRunRequest
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(consts.StatusBadRequest, map[string]string{
-			"error": "请求参数错误",
+			"error": "请求参数error",
 		})
 		return
 	}
 	sess, err := h.sessionManager.GetOrCreate(ctx, req.SessionID)
 	if err != nil {
-		hlog.CtxErrorf(ctx, "Session GetOrCreate 失败: %v", err)
+		hlog.CtxErrorf(ctx, "Session GetOrCreate failed: %v", err)
 		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
-			"error":   "获取或创建 Session 失败",
+			"error":   "获取或创建 Session failed",
 			"details": err.Error(),
 		})
 		return
@@ -818,7 +818,7 @@ func jsonString(v interface{}) string {
 func marshalJSON(ctx context.Context, v interface{}, scene string) ([]byte, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
-		hlog.CtxErrorf(ctx, "JSON 序列化失败 (%s): %v", scene, err)
+		hlog.CtxErrorf(ctx, "JSON 序列化failed (%s): %v", scene, err)
 		return nil, err
 	}
 	return b, nil
@@ -835,15 +835,15 @@ func (h *Handler) AgentRun(ctx context.Context, c *app.RequestContext) {
 	var req AgentRunRequest
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(consts.StatusBadRequest, map[string]string{
-			"error": "请求参数错误",
+			"error": "请求参数error",
 		})
 		return
 	}
 	sess, err := h.sessionManager.GetOrCreate(ctx, req.SessionID)
 	if err != nil {
-		hlog.CtxErrorf(ctx, "Session GetOrCreate 失败: %v", err)
+		hlog.CtxErrorf(ctx, "Session GetOrCreate failed: %v", err)
 		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
-			"error":   "获取或创建 Session 失败",
+			"error":   "获取或创建 Session failed",
 			"details": err.Error(),
 		})
 		return
@@ -860,15 +860,15 @@ func (h *Handler) AgentRun(ctx context.Context, c *app.RequestContext) {
 	}
 	result, err := h.agent.RunWithSession(ctx, sess, req.Query)
 	if err != nil {
-		hlog.CtxErrorf(ctx, "Agent Run 失败: %v", err)
+		hlog.CtxErrorf(ctx, "Agent Run failed: %v", err)
 		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
-			"error":   "Agent 执行失败",
+			"error":   "Agent 执行failed",
 			"details": err.Error(),
 		})
 		return
 	}
 	if err := h.sessionManager.Save(ctx, sess); err != nil {
-		hlog.CtxErrorf(ctx, "Session Save 失败: %v", err)
+		hlog.CtxErrorf(ctx, "Session Save failed: %v", err)
 	}
 	c.JSON(consts.StatusOK, map[string]interface{}{
 		"status":      "success",
@@ -897,15 +897,15 @@ func (h *Handler) CreateAgent(ctx context.Context, c *app.RequestContext) {
 	var req CreateAgentRequest
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(consts.StatusBadRequest, map[string]string{
-			"error": "请求参数错误",
+			"error": "请求参数error",
 		})
 		return
 	}
 	agent, err := h.agentCreator.Create(ctx, req.Name)
 	if err != nil {
-		hlog.CtxErrorf(ctx, "创建 Agent 失败: %v", err)
+		hlog.CtxErrorf(ctx, "创建 Agent failed: %v", err)
 		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
-			"error":   "创建 Agent 失败",
+			"error":   "创建 Agent failed",
 			"details": err.Error(),
 		})
 		return
@@ -933,7 +933,7 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 	var req AgentMessageRequest
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(consts.StatusBadRequest, map[string]string{
-			"error": "请求参数错误",
+			"error": "请求参数error",
 		})
 		return
 	}
@@ -979,13 +979,13 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 		_, _ = h.agentMessagingBus.Send(ctx, "", id, map[string]any{"message": req.Message}, &messaging.SendOptions{Kind: messaging.KindUser})
 	}
 	if h.jobStore != nil {
-		// 先创建 Job 得到稳定 jobID，再双写事件流，避免 Create 失败时留下孤立事件；多租户写入 TenantID
+		// 先创建 Job 得到稳定 jobID，再双写事件流，避免 Create failed时留下孤立事件；多租户写入 TenantID
 		j := &job.Job{AgentID: id, TenantID: tenantID, Goal: req.Message, Status: job.StatusPending, SessionID: agent.Session.ID, IdempotencyKey: idempotencyKey}
 		jobIDOut, errCreate := h.jobStore.Create(ctx, j)
 		if errCreate != nil {
-			hlog.CtxErrorf(ctx, "创建 Job 失败: %v", errCreate)
+			hlog.CtxErrorf(ctx, "创建 Job failed: %v", errCreate)
 			c.JSON(consts.StatusInternalServerError, map[string]string{
-				"error": "创建任务失败",
+				"error": "创建任务failed",
 			})
 			return
 		}
@@ -994,7 +994,7 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 			payload, errMarshal := marshalJSON(ctx, map[string]string{"agent_id": id, "goal": req.Message}, "job_created_payload")
 			if errMarshal != nil {
 				c.JSON(consts.StatusInternalServerError, map[string]string{
-					"error": "创建任务事件失败",
+					"error": "创建任务事件failed",
 				})
 				return
 			}
@@ -1002,14 +1002,14 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 				JobID: jobIDOut, Type: jobstore.JobCreated, Payload: payload,
 			})
 			if errAppend != nil {
-				hlog.CtxErrorf(ctx, "追加 JobCreated 事件失败（Job 已创建，可继续执行）: %v", errAppend)
+				hlog.CtxErrorf(ctx, "追加 JobCreated 事件failed（Job 已创建，可继续执行）: %v", errAppend)
 			} else if h.planAtJobCreation != nil {
 				// 1.0 Plan 事件化：Job 创建时即生成并持久化 TaskGraph，执行阶段只读
 				taskGraph, planErr := h.planAtJobCreation(ctx, id, req.Message)
 				if planErr != nil {
-					hlog.CtxErrorf(ctx, "Job 创建时 Plan 失败: %v", planErr)
+					hlog.CtxErrorf(ctx, "Job 创建时 Plan failed: %v", planErr)
 					c.JSON(consts.StatusInternalServerError, map[string]string{
-						"error": "规划失败，请重试",
+						"error": "规划failed，请重试",
 					})
 					return
 				}
@@ -1027,7 +1027,7 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 					}, "plan_generated_payload")
 					if errMarshal != nil {
 						c.JSON(consts.StatusInternalServerError, map[string]string{
-							"error": "计划事件序列化失败",
+							"error": "计划事件序列化failed",
 						})
 						return
 					}
@@ -1035,9 +1035,9 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 						JobID: jobIDOut, Type: jobstore.PlanGenerated, Payload: payloadPlan,
 					})
 					if errPlanAppend != nil {
-						hlog.CtxErrorf(ctx, "追加 PlanGenerated 事件失败: %v", errPlanAppend)
+						hlog.CtxErrorf(ctx, "追加 PlanGenerated 事件failed: %v", errPlanAppend)
 						c.JSON(consts.StatusInternalServerError, map[string]string{
-							"error": "写入计划事件失败",
+							"error": "写入计划事件failed",
 						})
 						return
 					}
@@ -1051,12 +1051,12 @@ func (h *Handler) AgentMessage(ctx context.Context, c *app.RequestContext) {
 						"plan_hash":          planHash,
 					}, "decision_snapshot_payload")
 					if errMarshal != nil {
-						hlog.CtxErrorf(ctx, "DecisionSnapshot 序列化失败: %v", errMarshal)
+						hlog.CtxErrorf(ctx, "DecisionSnapshot 序列化failed: %v", errMarshal)
 					} else {
 						if _, err := h.jobEventStore.Append(ctx, jobIDOut, verPlan, jobstore.JobEvent{
 							JobID: jobIDOut, Type: jobstore.DecisionSnapshot, Payload: dsPayload,
 						}); err != nil {
-							hlog.CtxErrorf(ctx, "追加 DecisionSnapshot 事件失败（不影响主流程）: %v", err)
+							hlog.CtxErrorf(ctx, "追加 DecisionSnapshot 事件failed（不影响主流程）: %v", err)
 						}
 					}
 				}
@@ -1172,8 +1172,8 @@ func (h *Handler) ListAgentJobs(ctx context.Context, c *app.RequestContext) {
 	tenantID := auth.GetTenantID(ctx)
 	list, err := h.jobStore.ListByAgent(ctx, id, tenantID)
 	if err != nil {
-		hlog.CtxErrorf(ctx, "列出 Job 失败: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "列出任务失败"})
+		hlog.CtxErrorf(ctx, "列出 Job failed: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "列出任务failed"})
 		return
 	}
 	statusFilter := c.Query("status")
@@ -1263,9 +1263,9 @@ func (h *Handler) ListAgents(ctx context.Context, c *app.RequestContext) {
 	}
 	list, err := h.agentManager.List(ctx)
 	if err != nil {
-		hlog.CtxErrorf(ctx, "列出 Agent 失败: %v", err)
+		hlog.CtxErrorf(ctx, "列出 Agent failed: %v", err)
 		c.JSON(consts.StatusInternalServerError, map[string]string{
-			"error": "列出 Agent 失败",
+			"error": "列出 Agent failed",
 		})
 		return
 	}
@@ -1333,8 +1333,8 @@ func (h *Handler) JobStop(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	if err := h.jobStore.RequestCancel(ctx, jobID); err != nil {
-		hlog.CtxErrorf(ctx, "RequestCancel 失败: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "取消失败"})
+		hlog.CtxErrorf(ctx, "RequestCancel failed: %v", err)
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "取消failed"})
 		return
 	}
 	c.JSON(consts.StatusOK, map[string]interface{}{
@@ -1385,7 +1385,7 @@ func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
 	events, ver, err := h.jobEventStore.ListEvents(ctx, jobID)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件失败"})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件failed"})
 		return
 	}
 	var waitPayload jobstore.JobWaitingPayload
@@ -1396,7 +1396,7 @@ func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
 		}
 	}
 	if waitPayload.CorrelationKey == "" {
-		c.JSON(consts.StatusBadRequest, map[string]string{"error": "未找到有效的 job_waiting（缺少 correlation_key）"})
+		c.JSON(consts.StatusBadRequest, map[string]string{"error": "job_waiting not found (missing correlation_key)"})
 		return
 	}
 	var req JobSignalRequest
@@ -1432,7 +1432,7 @@ func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
 		signalID, err = h.signalInbox.Append(ctx, jobID, req.CorrelationKey, payloadBytes)
 		if err != nil {
 			hlog.CtxErrorf(ctx, "SignalInbox.Append: %v", err)
-			c.JSON(consts.StatusInternalServerError, map[string]string{"error": "写入 signal 收件箱失败"})
+			c.JSON(consts.StatusInternalServerError, map[string]string{"error": "写入 signal 收件箱failed"})
 			return
 		}
 	}
@@ -1442,7 +1442,7 @@ func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
 		"correlation_key": req.CorrelationKey,
 	}, "job_wait_completed_payload")
 	if errMarshal != nil {
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "构建 wait_completed 事件失败"})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "构建 wait_completed 事件failed"})
 		return
 	}
 	_, err = h.jobEventStore.Append(ctx, jobID, ver, jobstore.JobEvent{
@@ -1464,7 +1464,7 @@ func (h *Handler) JobSignal(ctx context.Context, c *app.RequestContext) {
 			}
 		}
 		hlog.CtxErrorf(ctx, "Append WaitCompleted: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "写入事件失败"})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "写入事件failed"})
 		return
 	}
 	if err := h.jobStore.UpdateStatus(ctx, jobID, job.StatusPending); err != nil {
@@ -1527,7 +1527,7 @@ func (h *Handler) JobMessage(ctx context.Context, c *app.RequestContext) {
 	events, ver, err := h.jobEventStore.ListEvents(ctx, jobID)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件失败"})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件failed"})
 		return
 	}
 	_, err = h.jobEventStore.Append(ctx, jobID, ver, jobstore.JobEvent{
@@ -1535,7 +1535,7 @@ func (h *Handler) JobMessage(ctx context.Context, c *app.RequestContext) {
 	})
 	if err != nil {
 		hlog.CtxErrorf(ctx, "Append AgentMessage: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "写入消息失败"})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "写入消息failed"})
 		return
 	}
 	if h.agentMessagingBus != nil {
@@ -1567,7 +1567,7 @@ func (h *Handler) JobMessage(ctx context.Context, c *app.RequestContext) {
 				"correlation_key": waitPayload.CorrelationKey,
 			}, "job_message_wait_completed_payload")
 			if errMarshal != nil {
-				c.JSON(consts.StatusInternalServerError, map[string]string{"error": "构建 wait_completed 事件失败"})
+				c.JSON(consts.StatusInternalServerError, map[string]string{"error": "构建 wait_completed 事件failed"})
 				return
 			}
 			_, ver2, _ := h.jobEventStore.ListEvents(ctx, jobID)
@@ -1605,7 +1605,7 @@ func (h *Handler) GetJobReplay(ctx context.Context, c *app.RequestContext) {
 	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取 Replay 失败: " + err.Error()})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取 Replay failed: " + err.Error()})
 		return
 	}
 	timeline := make([]map[string]interface{}, 0, len(events))
@@ -1697,7 +1697,7 @@ func (h *Handler) GetJobEvents(ctx context.Context, c *app.RequestContext) {
 	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件失败"})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件failed"})
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(events))
@@ -1733,7 +1733,7 @@ func (h *Handler) GetJobVerify(ctx context.Context, c *app.RequestContext) {
 	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件失败"})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件failed"})
 		return
 	}
 	var replayBuilder replay.ReplayContextBuilder
@@ -1743,7 +1743,7 @@ func (h *Handler) GetJobVerify(ctx context.Context, c *app.RequestContext) {
 	result, err := verify.Compute(ctx, events, jobID, replayBuilder)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "Verify Compute: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "验证计算失败"})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "验证计算failed"})
 		return
 	}
 	c.JSON(consts.StatusOK, result)
@@ -1762,7 +1762,7 @@ func (h *Handler) GetJobTrace(ctx context.Context, c *app.RequestContext) {
 	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取时间线失败: " + err.Error()})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取时间线failed: " + err.Error()})
 		return
 	}
 	timeline := make([]map[string]interface{}, 0, len(events))
@@ -1837,7 +1837,7 @@ func (h *Handler) GetJobNode(ctx context.Context, c *app.RequestContext) {
 	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取节点详情失败"})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取节点详情failed"})
 		return
 	}
 	var nodeEvents []map[string]interface{}
@@ -1877,7 +1877,7 @@ func (h *Handler) GetJobCognitionTrace(ctx context.Context, c *app.RequestContex
 	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "ListEvents: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件失败"})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件failed"})
 		return
 	}
 	// reasoning_step_timeline: node_*, agent_thought_recorded, decision_made, tool_selected, tool_result_summarized
@@ -2007,7 +2007,7 @@ func (h *Handler) GetJobTracePage(ctx context.Context, c *app.RequestContext) {
 	}
 	events, _, err := h.jobEventStore.ListEvents(ctx, jobID)
 	if err != nil {
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件失败"})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取事件failed"})
 		return
 	}
 	c.Header("Content-Type", "text/html; charset=utf-8")
@@ -2260,13 +2260,13 @@ func (h *Handler) GetObservabilitySummary(ctx context.Context, c *app.RequestCon
 	pending, err := h.observabilityReader.CountPending(ctx, "")
 	if err != nil {
 		hlog.CtxErrorf(ctx, "CountPending: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取积压数失败"})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取积压数failed"})
 		return
 	}
 	stuck, err := h.observabilityReader.ListStuckRunningJobIDs(ctx, olderThan)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "ListStuckRunningJobIDs: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取卡住 Job 失败"})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取卡住 Job failed"})
 		return
 	}
 	metrics.QueueBacklog.WithLabelValues("default").Set(float64(pending))
@@ -2296,7 +2296,7 @@ func (h *Handler) GetObservabilityStuck(ctx context.Context, c *app.RequestConte
 	stuck, err := h.observabilityReader.ListStuckRunningJobIDs(ctx, olderThan)
 	if err != nil {
 		hlog.CtxErrorf(ctx, "ListStuckRunningJobIDs: %v", err)
-		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取卡住 Job 失败"})
+		c.JSON(consts.StatusInternalServerError, map[string]string{"error": "获取卡住 Job failed"})
 		return
 	}
 	c.JSON(consts.StatusOK, map[string]interface{}{
